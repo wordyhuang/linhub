@@ -31,3 +31,8 @@
 .vscode/
 .DS_Store
 Thumbs.db
+
+# ── 本地协作与记忆文件（不随仓库分发）──
+/AGENTS.md
+/memory.md
+/.workbuddy/
