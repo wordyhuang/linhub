@@ -31,3 +31,6 @@
 .vscode/
 .DS_Store
 Thumbs.db
+AGENTS.md
+memory.md
+/.workbuddy/
