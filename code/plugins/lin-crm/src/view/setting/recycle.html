@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>回收站 - 林客CRM</title>
+  <link rel="icon" type="image/svg+xml" href="/brand/favicon.svg">
+  <link rel="stylesheet" href="/static/vendor/element-plus/index.css">
+  <link rel="stylesheet" href="/static/vendor/workdesktop-ai/style.css">
+  <style>
+    html, body, #app { height: 100%; margin: 0; }
+    body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif; }
+    .crm-page { height: 100%; padding: 16px 20px 24px; box-sizing: border-box; }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+
+  <script type="text/x-template" id="crm-recycle-tpl">
+  <div class="crm-page">
+    <wd-tips type="box" style="display:flex;margin-bottom:12px">
+      回收站：软删数据快照由平台回收站服务统一托管，保留期满（默认 30 天）由平台自动清理。
+      恢复客户时若与现存客户同名撞单，将拦截并提示走客户合并；「彻底删除」不可逆，请谨慎操作。
+    </wd-tips>
+
+    <wd-panel :border="true" title="回收站">
+      <el-table :data="rows" size="small" border>
+        <el-table-column prop="source_table" label="来源表" width="190" />
+        <el-table-column prop="source_pk" label="来源ID" width="90" />
+        <el-table-column label="数据摘要" min-width="200">
+          <template #default="{ row }">{{ row.title || row.item_key || '-' }}</template>
+        </el-table-column>
+        <el-table-column prop="deleted_at" label="删除时间" width="170" />
+        <el-table-column label="到期时间" width="170">
+          <template #default="{ row }">{{ row.expires_at || '永久' }}</template>
+        </el-table-column>
+        <el-table-column label="操作" width="200" fixed="right">
+          <template #default="{ row }">
+            <el-button-group size="small">
+              <!-- 直接动作：ApiButton（恢复可逆，低风险） -->
+              <wd-api-button label="恢复" type="success" size="small" tips="恢复后数据回到原模块；同名撞单会拦截提示"
+                             api="/lin-crm/setting/recycle" :api-param="{ op: 'restore', token: row.token }"
+                             :head-refresh-datagrid="false" @api-success="load">恢复</wd-api-button>
+              <!-- 不可逆抹除：气泡二次确认 + 悬停强提示（规范 §0.9 L1 / §0.13） -->
+              <wd-popconfirm-button label="彻底删除" type="danger" size="small"
+                                    :title="'确认彻底删除该条数据？彻底删除后不可恢复！'"
+                                    tips="物理删除，不可恢复；一般请用「恢复」"
+                                    api="/lin-crm/setting/recycle" :api-param="{ op: 'purge', token: row.token }"
+                                    :head-refresh-datagrid="false" @api-success="load">彻底删除</wd-popconfirm-button>
+            </el-button-group>
+          </template>
+        </el-table-column>
+        <template #empty><el-empty :image-size="60" description="回收站为空" /></template>
+      </el-table>
+      <div style="margin-top:10px;text-align:right">
+        <el-pagination background layout="prev, pager, next" :total="total" :page-size="pageSize"
+                       :current-page="page" @current-change="go" />
+      </div>
+    </wd-panel>
+  </div>
+</script>
+
+  <script src="/static/vendor/vue/vue.global.prod.js"></script>
+  <script src="/static/vendor/element-plus/index.full.min.js"></script>
+  <script src="/static/vendor/icons/index.iife.min.js"></script>
+  <script src="/static/vendor/workdesktop-ai/index.umd.js"></script>
+  <script>
+    const WD = window.WorkDesktop;
+    const ElementPlus = window.ElementPlus;
+    const { WorkDesktop } = WD;
+    const { ref } = Vue;
+
+    const app = Vue.createApp({
+      template: '#crm-recycle-tpl',
+      setup() {
+        const rows = ref([]);
+        const total = ref(0);
+        const page = ref(1);
+        const pageSize = 20;
+
+        async function load() {
+          const res = await fetch('/lin-crm/setting/recycle', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ op: 'index', page, page_size: pageSize }) });
+          const body = await res.json();
+          if (body.code === 0) { rows.value = body.data.list || []; total.value = body.data.total || 0; }
+          else ElementPlus.ElMessage.error(body.message || '加载失败');
+        }
+        load();
+        function go(p) { page.value = p; load(); }
+        return { rows, total, page, pageSize, go, load };
+      }
+    });
+    for (const [name, comp] of Object.entries(window.ElementPlusIconsVue)) app.component(name, comp);
+    app.use(ElementPlus);
+    app.use(WorkDesktop);
+    app.mount('#app');
+  </script>
+</body>
+</html>

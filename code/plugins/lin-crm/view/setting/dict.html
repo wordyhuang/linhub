@@ -1,0 +1,41 @@
+{* 林客 · 字典管理（PG-SET-03；FR-TOOL-03） *}
+{include file="common/head" /}
+<div id="app">
+  <el-card shadow="never">
+    <el-form inline>
+      <el-select v-model="type" style="width:160px" @change="load">
+        <el-option label="客户来源" value="source"/><el-option label="线索来源" value="lead_source"/>
+        <el-option label="客户等级" value="level"/><el-option label="客户行业" value="industry"/>
+      </el-select>
+      <el-button v-permission="'crm:config:manage'" type="primary" @click="drawer = true">新增枚举</el-button>
+    </el-form>
+    <el-table :data="rows" border>
+      <el-table-column prop="dict_key" label="键" width="140"/>
+      <el-table-column prop="dict_value" label="显示名" min-width="140"/>
+      <el-table-column prop="sort" label="排序" width="80"/>
+      <el-table-column prop="status" label="状态" width="80"/>
+      <el-table-column label="操作" width="100">
+        <template #default="{row}"><el-button link type="danger" @click="del(row)">停删</el-button></template>
+      </el-table-column>
+    </el-table>
+  </el-card>
+  <el-drawer v-model="drawer" title="新增枚举" size="340px">
+    <el-form label-width="80px">
+      <el-form-item label="类型"><el-input v-model="form.dict_type"/></el-form-item>
+      <el-form-item label="键"><el-input v-model="form.dict_key"/></el-form-item>
+      <el-form-item label="显示名"><el-input v-model="form.dict_value"/></el-form-item>
+      <el-button type="primary" @click="save" style="width:100%">保存</el-button>
+    </el-form>
+  </el-drawer>
+</div>
+<script>
+crmPage(function () {
+  const V = Vue;
+  const state = V.reactive({ type: 'source', rows: [], drawer: false, form: { dict_type: 'source', dict_key: '', dict_value: '', sort: 0 } });
+  function load() { crmRequest('/crm/setting/dict', { dict_type: state.type }).then(function (res) { state.rows = res.data; }); }
+  function save() { state.form.dict_type = state.type; crmRequest('/crm/setting/dict', state.form).then(function () { state.drawer = false; load(); }); }
+  function del(row) { crmRequest('/crm/setting/dict', { op: 'delete', id: row.id }, 'post').then(function () { load(); }); }
+  load();
+  return Object.assign({}, V.toRefs(state), { load, save, del });
+});
+</script>

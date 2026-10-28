@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>审计日志 - 林客CRM</title>
+  <link rel="icon" type="image/svg+xml" href="/brand/favicon.svg">
+  <link rel="stylesheet" href="/static/vendor/element-plus/index.css">
+  <link rel="stylesheet" href="/static/vendor/workdesktop-ai/style.css">
+  <style>
+    html, body, #app { height: 100%; margin: 0; }
+    body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif; }
+    .crm-page { height: 100%; padding: 16px 20px 24px; box-sizing: border-box; }
+    .crm-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+
+  <script type="text/x-template" id="crm-audit-tpl">
+  <div class="crm-page">
+    <wd-tips type="box" style="display:flex;margin-bottom:12px">
+      审计日志覆盖五类行为（登录/导出/删除/转移/查看完整手机号）及合并、释放等关键动作，仅管理员可查，不可篡改。
+    </wd-tips>
+
+    <wd-panel :border="true" title="审计日志">
+      <div class="crm-toolbar">
+        <el-select v-model="action" placeholder="全部行为" size="small" clearable style="width:160px" @change="go(1)">
+          <el-option v-for="(t, k) in actionLabels" :key="k" :label="t" :value="k" />
+        </el-select>
+        <el-input-number v-model="actorId" :min="0" size="small" placeholder="操作人ID" style="width:140px" @change="go(1)" />
+        <el-button size="small" :icon="Search" @click="go(1)">查询</el-button>
+      </div>
+      <el-table :data="rows" size="small" border>
+        <el-table-column prop="id" label="ID" width="80" />
+        <el-table-column label="行为" width="140">
+          <template #default="{ row }">
+            <el-tag size="small">{{ actionLabels[row.action] || row.action }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="actor_id" label="操作人ID" width="100" />
+        <el-table-column prop="biz_type" label="对象类型" width="140" />
+        <el-table-column prop="biz_id" label="对象ID" width="90" />
+        <el-table-column prop="detail" label="详情" min-width="200" show-overflow-tooltip />
+        <el-table-column prop="ip" label="IP" width="140" />
+        <el-table-column prop="created_at" label="时间" width="170" />
+        <template #empty><el-empty :image-size="60" description="暂无审计记录" /></template>
+      </el-table>
+      <div style="margin-top:10px;text-align:right">
+        <el-pagination background layout="prev, pager, next" :total="total" :page-size="pageSize"
+                       :current-page="page" @current-change="go" />
+      </div>
+    </wd-panel>
+  </div>
+</script>
+
+  <script src="/static/vendor/vue/vue.global.prod.js"></script>
+  <script src="/static/vendor/element-plus/index.full.min.js"></script>
+  <script src="/static/vendor/icons/index.iife.min.js"></script>
+  <script src="/static/vendor/workdesktop-ai/index.umd.js"></script>
+  <script>
+    const WD = window.WorkDesktop;
+    const ElementPlus = window.ElementPlus;
+    const { WorkDesktop } = WD;
+    const { ref } = Vue;
+
+    const actionLabels = { login: '登录', export: '导出', delete: '删除', transfer: '转移', phone_view: '查看完整手机号', merge: '客户合并', release: '客户收回', import: '批量导入' };
+
+    const app = Vue.createApp({
+      template: '#crm-audit-tpl',
+      setup() {
+        const rows = ref([]);
+        const total = ref(0);
+        const page = ref(1);
+        const pageSize = 20;
+        const action = ref('');
+        const actorId = ref(0);
+        const Search = window.ElementPlusIconsVue.Search;
+
+        async function go(p) {
+          page.value = p;
+          const res = await fetch('/lin-crm/setting/audit', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: action.value, actor_id: actorId.value || '', page, page_size: pageSize }) });
+          const body = await res.json();
+          if (body.code === 0) { rows.value = body.data.list || []; total.value = body.data.total || 0; }
+          else ElementPlus.ElMessage.error(body.message || '加载失败');
+        }
+        go(1);
+        return { rows, total, page, pageSize, action, actorId, Search, actionLabels, go };
+      }
+    });
+    for (const [name, comp] of Object.entries(window.ElementPlusIconsVue)) app.component(name, comp);
+    app.use(ElementPlus);
+    app.use(WorkDesktop);
+    app.mount('#app');
+  </script>
+</body>
+</html>

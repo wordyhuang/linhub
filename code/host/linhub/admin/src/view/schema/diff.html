@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Schema 差异看板 - LinHub 林枢</title>
+<link rel="icon" type="image/svg+xml" href="/brand/favicon.svg">
+<link rel="stylesheet" href="/static/vendor/element-plus/index.css">
+<link rel="stylesheet" href="/static/vendor/workdesktop-ai/style.css">
+<style>
+  html, body, #app { height: 100%; margin: 0; }
+  .sc-page { height: 100%; }
+  body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif; }
+  .sc-body { padding: 4px 0 24px; }
+  .sc-toolbar { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; flex-wrap: wrap; }
+  .sc-mono { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
+  .sc-summary { display: flex; gap: 16px; margin: 8px 0 12px; flex-wrap: wrap; }
+  .sc-chip { display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px; border-radius: 14px; font-size: 12px; background: var(--wd-border-color, #f0f0f0); color: var(--wd-text-color, #1f2937); }
+  .sc-diff-row { margin-bottom: 16px; }
+  .sc-count { font-size: 13px; color: var(--wd-text-color-secondary, #6b7280); }
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<script type="text/x-template" id="sc-tpl">
+  <div class="sc-page">
+        <div class="sc-body">
+          <wd-panel :border="true">
+            <wd-tips type="box" style="margin-bottom:12px">
+              对比当前数据库结构与功能包备份内的 schema 发版快照，识别待新增 / 待删除 / 变更的表、列与索引。
+            </wd-tips>
+
+          <!-- 数据库不可用降级（G8.2） -->
+          <el-alert
+            v-if="state.diagnostic"
+            type="error" show-icon :closable="false"
+            title="数据库连接不可用，无法读取当前库结构："
+            style="margin-bottom:12px">
+            <div class="sc-mono" style="white-space:pre-wrap">
+              驱动: {{ state.diagnostic.driver }}
+              地址: {{ state.diagnostic.host }}
+              库名: {{ state.diagnostic.db }}
+              错误: {{ state.diagnostic.error }}
+            </div>
+          </el-alert>
+
+          <div v-loading="loading" element-loading-text="加载中...">
+          <div class="sc-toolbar">
+            <span style="font-size:13px;color:var(--wd-text-color-secondary, #6b7280)">功能包：</span>
+            <el-select v-model="pkg" placeholder="选择包以比对" size="small" style="width:220px" :disabled="!!state.diagnostic">
+              <el-option
+                v-for="p in state.packages" :key="p.name"
+                :label="(p.short || p.name) + ' · v' + (p.version || '-') + (p.snapshotCount > 0 ? '（含快照 ' + p.snapshotCount + '）' : '（无快照）')"
+                :value="p.name" />
+            </el-select>
+            <el-button type="primary" size="small" :disabled="!pkg || !!state.diagnostic" @click="apply">查看差异</el-button>
+            <span v-if="state.current" class="sc-chip">当前库 {{ state.current.tableCount }} 表</span>
+            <span v-if="state.target" class="sc-chip">目标快照 {{ state.target.tableCount }} 表 · v{{ state.target.version }}</span>
+          </div>
+
+          <!-- 无快照提示 -->
+          <el-empty
+            v-if="state.report && state.report.noSnapshot"
+            :description="state.report.message" :image-size="80" />
+
+          <!-- 差异清单 -->
+          <template v-if="state.report && !state.report.noSnapshot">
+            <div class="sc-summary">
+              <span class="sc-chip">基线表 {{ state.report.fromTableCount }} → 目标表 {{ state.report.toTableCount }}</span>
+            </div>
+
+            <div v-for="g in state.report.groups" :key="g.kind" class="sc-diff-row">
+              <h3 style="margin:0 0 6px;font-size:15px">
+                {{ g.title }}
+                <span style="font-weight:400;font-size:12px;color:var(--wd-text-color-secondary, #6b7280)">
+                  +{{ g.added.length }} / -{{ g.removed.length }} / ~{{ g.changed.length }}
+                </span>
+              </h3>
+
+              <wd-data-grid v-if="g.added.length + g.removed.length + g.changed.length > 0" :data-source="flat(g)" border stripe table-size="small" :with-index="false" :with-pager="false">
+                <el-table-column label="性质" width="90">
+                  <template #default="{ row }">
+                    <el-tag size="small" :type="row.tag === 'added' ? 'success' : (row.tag === 'removed' ? 'danger' : 'warning')" effect="light">
+                      {{ row.tag === 'added' ? '新增' : (row.tag === 'removed' ? '删除' : '变更') }}
+                    </el-tag>
+                  </template>
+                </el-table-column>
+                <el-table-column prop="table" label="表" min-width="150">
+                  <template #default="{ row }"><span class="sc-mono">{{ row.table }}</span></template>
+                </el-table-column>
+                <el-table-column prop="name" label="名称" min-width="150">
+                  <template #default="{ row }"><span class="sc-mono">{{ row.name }}</span></template>
+                </el-table-column>
+                <el-table-column prop="detail" label="详情" min-width="220" />
+              </wd-data-grid>
+              <p v-else class="sc-count">无差异</p>
+            </div>
+          </template>
+          </div>
+
+          <el-empty v-if="!state.diagnostic && !state.report && !loading" description="请选择一个功能包查看其发版结构与当前库的差异" :image-size="80" />
+          </wd-panel>
+        </div>
+  </div>
+</script>
+
+<script src="/static/vendor/vue/vue.global.prod.js"></script>
+<script src="/static/vendor/element-plus/index.full.min.js"></script>
+<script src="/static/vendor/icons/index.iife.min.js"></script>
+<script src="/static/vendor/workdesktop-ai/index.umd.js"></script>
+<script>
+  const WD = window.WorkDesktop;
+  const ElementPlus = window.ElementPlus;
+  const { WorkDesktop } = WD;
+  const { ref, reactive } = Vue;
+
+  const app = Vue.createApp({
+    template: '#sc-tpl',
+    setup() {
+      const pkg = ref('');
+      const loading = ref(false);
+      const state = reactive({ packages: [], current: null, diagnostic: null, target: null, report: null });
+
+      async function loadOptions() {
+        const res = await WD.request.get('/admin/schema/options');
+        if (!res.success) {
+          ElementPlus.ElMessage.error(res.message || '加载失败');
+          return;
+        }
+        state.packages = res.data.packages || [];
+        state.current = res.data.current || null;
+        state.diagnostic = res.data.diagnostic || null;
+      }
+
+      async function apply() {
+        if (!pkg.value) return;
+        loading.value = true;
+        try {
+          const res = await WD.request.get('/admin/schema/report', { params: { package: pkg.value } });
+          if (!res.success) {
+            ElementPlus.ElMessage.error(res.message || '加载失败');
+            return;
+          }
+          state.current = res.data.current || null;
+          state.diagnostic = res.data.diagnostic || null;
+          state.target = res.data.target || null;
+          state.report = res.data.report || null;
+        } finally {
+          loading.value = false;
+        }
+      }
+
+      function flat(g) {
+        const rows = [];
+        ((g.added || []).map(r => ({ tag: 'added', ...r })))
+          .concat((g.removed || []).map(r => ({ tag: 'removed', ...r })))
+          .concat((g.changed || []).map(r => ({ tag: 'changed', ...r })))
+          .forEach(r => rows.push(r));
+        return rows;
+      }
+
+      loadOptions();
+
+      return { pkg, loading, state, apply, flat };
+    }
+  });
+
+  for (const [name, comp] of Object.entries(window.ElementPlusIconsVue)) {
+    app.component(name, comp);
+  }
+  app.use(ElementPlus);
+  app.use(WorkDesktop);
+  app.mount('#app');
+</script>
+</body>
+</html>

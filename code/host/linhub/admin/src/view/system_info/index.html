@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>关于系统 - LinHub 林枢</title>
+  <link rel="icon" type="image/svg+xml" href="/brand/favicon.svg">
+  <link rel="stylesheet" href="/static/vendor/element-plus/index.css">
+  <link rel="stylesheet" href="/static/vendor/workdesktop-ai/style.css">
+  <style>
+    html, body, #app { height: 100%; margin: 0; }
+    body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif; }
+    .si-page { min-height: 100%; padding: 16px 20px 24px; box-sizing: border-box; }
+    .si-panels { display: flex; flex-direction: column; gap: 16px; }
+    .si-panel-title { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; }
+    .si-body { padding: 2px 0 0; }
+    .si-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+    .si-item {
+      background: var(--el-fill-color-light, #f5f7fa); border: 1px solid var(--el-border-color-lighter, #ebeef5);
+      border-radius: 8px; padding: 10px 14px;
+    }
+    .si-item .k { font-size: 12px; color: var(--el-text-color-secondary, #909399); }
+    .si-item .v { font-size: 14px; font-weight: 600; line-height: 1.5; color: var(--el-text-color-primary, #303133); margin-top: 4px; word-break: break-all; }
+    .si-ext { display: flex; flex-wrap: wrap; gap: 8px; }
+    .si-ext .ext-tag { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+    .si-bar-row { display: grid; grid-template-columns: 110px 1fr 90px; align-items: center; gap: 10px; font-size: 12px; margin-top: 8px; }
+    .si-bar-name { color: var(--el-text-color-secondary, #909399); }
+    .si-bar-track { height: 8px; background: var(--el-fill-color-light, #eef1f6); border-radius: 4px; overflow: hidden; }
+    .si-bar-fill { height: 100%; background: linear-gradient(90deg, #8cc5ff, #409eff); border-radius: 4px; }
+    .si-bar-num { text-align: right; color: var(--el-text-color-primary, #303133); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  </style>
+</head>
+
+<body>
+  <div id="app"></div>
+
+  <script type="text/x-template" id="si-tpl">
+    <div class="si-page" v-loading="loading" element-loading-text="加载中...">
+      <div class="si-panels">
+        <wd-tips type="box" style="margin-bottom:0">
+          只读展示当前平台运行环境与服务器概况，用于排查环境与版本问题。本页不承载任何写操作，敏感凭证（API Key/数据库密码等）不会在此展示。
+        </wd-tips>
+
+        <!-- 平台版本 -->
+        <wd-panel :border="true">
+          <template #title>
+            <span class="si-panel-title"><el-icon><Cpu /></el-icon>平台版本</span>
+          </template>
+          <div class="si-body">
+            <div class="si-grid">
+              <div class="si-item"><div class="k">平台版本号</div><div class="v">v{{ d.platform.version }}</div></div>
+            </div>
+          </div>
+        </wd-panel>
+
+        <!-- PHP 运行时 -->
+        <wd-panel :border="true">
+          <template #title>
+            <span class="si-panel-title"><el-icon><MagicStick /></el-icon>PHP 运行时</span>
+          </template>
+          <div class="si-body">
+            <div class="si-grid">
+              <div class="si-item"><div class="k">PHP 版本</div><div class="v">v{{ d.php.version }}</div></div>
+              <div class="si-item"><div class="k">运行方式（SAPI）</div><div class="v">{{ d.php.sapi }}</div></div>
+              <div class="si-item"><div class="k">时区</div><div class="v">{{ d.php.timezone }}</div></div>
+              <div class="si-item"><div class="k">内存上限</div><div class="v">{{ d.php.memory_limit }}</div></div>
+              <div class="si-item"><div class="k">上传文件上限</div><div class="v">{{ d.php.upload_max_filesize }}</div></div>
+              <div class="si-item"><div class="k">POST 上限</div><div class="v">{{ d.php.post_max_size }}</div></div>
+              <div class="si-item"><div class="k">最大执行时间</div><div class="v">{{ d.php.max_execution_time }} 秒</div></div>
+              <div class="si-item" v-if="d.php.loaded_config"><div class="k">php.ini 路径</div><div class="v" style="font-size:12px;font-weight:400">{{ d.php.loaded_config }}</div></div>
+            </div>
+          </div>
+        </wd-panel>
+
+        <!-- 服务器环境 -->
+        <wd-panel :border="true">
+          <template #title>
+            <span class="si-panel-title"><el-icon><Monitor /></el-icon>服务器环境</span>
+          </template>
+          <div class="si-body">
+            <div class="si-grid">
+              <div class="si-item"><div class="k">操作系统（PHP_OS）</div><div class="v">{{ d.server.os }}</div></div>
+              <div class="si-item"><div class="k">主机名</div><div class="v">{{ d.server.hostname }}</div></div>
+              <div class="si-item" v-if="d.server.software"><div class="k">Web 服务器软件</div><div class="v" style="font-size:12px;font-weight:400">{{ d.server.software }}</div></div>
+            </div>
+          </div>
+        </wd-panel>
+
+        <!-- 资源概况 -->
+        <wd-panel :border="true">
+          <template #title>
+            <span class="si-panel-title"><el-icon><DataAnalysis /></el-icon>资源概况</span>
+          </template>
+          <div class="si-body">
+            <div class="si-grid">
+              <div class="si-item"><div class="k">磁盘总量</div><div class="v">{{ bytes(d.system.disk_total) }}</div></div>
+              <div class="si-item"><div class="k">磁盘可用</div><div class="v">{{ bytes(d.system.disk_free) }}</div></div>
+              <div class="si-item"><div class="k">当前进程内存</div><div class="v">{{ bytes(d.system.memory_usage) }}</div></div>
+              <div class="si-item"><div class="k">峰值内存</div><div class="v">{{ bytes(d.system.memory_peak) }}</div></div>
+            </div>
+            <div v-if="d.system.disk_total > 0">
+              <div class="si-bar-row">
+                <span class="si-bar-name">磁盘占用</span>
+                <div class="si-bar-track"><div class="si-bar-fill" :style="{ width: diskUsedPct() + '%' }"></div></div>
+                <span class="si-bar-num">{{ diskUsedPct() }}%</span>
+              </div>
+            </div>
+          </div>
+        </wd-panel>
+
+        <!-- 数据库连接 -->
+        <wd-panel :border="true">
+          <template #title>
+            <span class="si-panel-title"><el-icon><Connection /></el-icon>数据库连接</span>
+          </template>
+          <div class="si-body">
+            <div class="si-grid">
+              <div class="si-item"><div class="k">驱动类型</div><div class="v">{{ d.database.driver }}</div></div>
+              <div class="si-item"><div class="k">主机地址</div><div class="v">{{ d.database.host }}</div></div>
+              <div class="si-item"><div class="k">端口</div><div class="v">{{ d.database.port }}</div></div>
+              <div class="si-item"><div class="k">数据库名</div><div class="v">{{ d.database.database }}</div></div>
+              <div class="si-item"><div class="k">字符集</div><div class="v">{{ d.database.charset }}</div></div>
+              <div class="si-item" v-if="d.database.version"><div class="k">数据库版本</div><div class="v">{{ d.database.version }}</div></div>
+            </div>
+          </div>
+        </wd-panel>
+
+        <!-- UAIS 信息 -->
+        <wd-panel :border="true">
+          <template #title>
+            <span class="si-panel-title"><el-icon><Key /></el-icon>UAIS 信息</span>
+          </template>
+          <div class="si-body">
+            <div class="si-grid">
+              <div class="si-item"><div class="k">服务地址</div><div class="v" style="font-size:12px;font-weight:400">{{ d.uais.base_url || '—' }}</div></div>
+              <div class="si-item">
+                <div class="k">连接状态</div>
+                <div class="v">{{ d.uais.status }}</div>
+              </div>
+              <div class="si-item">
+                <div class="k">App 凭证</div>
+                <div class="v">{{ (d.uais.app_key_configured && d.uais.app_secret_configured) ? '已配置' : (d.uais.app_key_configured || d.uais.app_secret_configured ? '部分配置' : '未配置') }}</div>
+              </div>
+              <div class="si-item"><div class="k">超管判定 tag</div><div class="v" style="font-size:12px;font-weight:400">{{ d.uais.admin_tag || '—' }}</div></div>
+            </div>
+            <div v-if="d.uais.error" style="margin-top:8px;">
+              <el-alert type="warning" :closable="false" show-icon :title="d.uais.error" />
+            </div>
+            <div style="margin-top:8px;">
+              <el-text type="info" size="small">此项仅展示 UAIS 统一身份认证服务接入情况，不展示任何 App Key / Secret / Token 明文。</el-text>
+            </div>
+          </div>
+        </wd-panel>
+
+        <!-- 关键扩展 -->
+        <wd-panel :border="true">
+          <template #title>
+            <span class="si-panel-title"><el-icon><Box /></el-icon>关键扩展检测</span>
+          </template>
+          <div class="si-body">
+            <div class="si-ext">
+              <el-tag
+                v-for="(on, name) in d.extensions"
+                :key="name"
+                :type="on ? 'success' : 'danger'"
+                effect="plain"
+                class="ext-tag"
+              >{{ name }}：{{ on ? '已加载' : '未加载' }}</el-tag>
+            </div>
+          </div>
+        </wd-panel>
+      </div>
+    </div>
+  </script>
+
+  <script src="/static/vendor/vue/vue.global.prod.js"></script>
+  <script src="/static/vendor/element-plus/index.full.min.js"></script>
+  <script src="/static/vendor/icons/index.iife.min.js"></script>
+  <script src="/static/vendor/workdesktop-ai/index.umd.js"></script>
+  <script>
+    const WD = window.WorkDesktop;
+    const ElementPlus = window.ElementPlus;
+    const { WorkDesktop } = WD;
+    const { ref, reactive } = Vue;
+
+    const app = Vue.createApp({
+      template: '#si-tpl',
+      setup() {
+        const loading = ref(false);
+        const d = reactive({
+          platform: { version: '' },
+          php: { version: '', sapi: '', timezone: '', memory_limit: '', upload_max_filesize: '', post_max_size: '', max_execution_time: '0', loaded_config: '' },
+          server: { os: '', hostname: '', software: '' },
+          system: { disk_total: 0, disk_free: 0, memory_usage: 0, memory_peak: 0 },
+          extensions: {},
+          database: { driver: '', host: '', port: '', database: '', charset: '', version: '' },
+          uais: { base_url: '', app_key_configured: false, app_secret_configured: false, admin_tag: '', status: '', error: '' },
+        });
+
+        async function load() {
+          loading.value = true;
+          try {
+            const res = await WD.request.get('/admin/system_info/info');
+            if (!res.success) {
+              ElementPlus.ElMessage.error(res.message || '加载失败');
+              return;
+            }
+            Object.assign(d, res.data);
+          } finally {
+            loading.value = false;
+          }
+        }
+
+        function bytes(n) {
+          n = Number(n) || 0;
+          if (n < 1024) return n + ' B';
+          if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+          if (n < 1024 * 1024 * 1024) return (n / 1024 / 1024).toFixed(1) + ' MB';
+          return (n / 1024 / 1024 / 1024).toFixed(2) + ' GB';
+        }
+        function diskUsedPct() {
+          const total = Number(d.system.disk_total) || 0;
+          const free = Number(d.system.disk_free) || 0;
+          if (total <= 0) return 0;
+          return Math.max(0, Math.min(100, Math.round((total - free) / total * 100)));
+        }
+
+        load();
+        return { loading, d, bytes, diskUsedPct };
+      }
+    });
+
+    for (const [name, comp] of Object.entries(window.ElementPlusIconsVue)) {
+      app.component(name, comp);
+    }
+    app.use(ElementPlus);
+    app.use(WorkDesktop);
+    app.mount('#app');
+  </script>
+</body>
+
+</html>

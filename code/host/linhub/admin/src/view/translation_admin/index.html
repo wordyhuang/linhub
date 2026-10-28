@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>翻译管理 - LinHub 林枢</title>
+  <link rel="icon" type="image/svg+xml" href="/brand/favicon.svg">
+  <link rel="stylesheet" href="/static/vendor/element-plus/index.css">
+  <link rel="stylesheet" href="/static/vendor/workdesktop-ai/style.css">
+  <style>
+    html, body, #app { height: 100%; margin: 0; }
+    body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif; }
+    .tr-page { height: 100%; padding: 16px 20px 24px; box-sizing: border-box; }
+    .tr-mono { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
+    .tr-filter { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; align-items: center; }
+    .tr-pager { display: flex; justify-content: flex-end; margin-top: 12px; }
+    .tr-value { word-break: break-all; }
+  </style>
+</head>
+
+<body>
+  <div id="app"></div>
+
+  <script type="text/x-template" id="tr-tpl">
+    <div class="tr-page">
+      <wd-panel :border="true">
+        <wd-tips type="box" style="margin-bottom:12px">
+          翻译服务（TR）超管视图：多语言词条按「命名空间 + key + 语言」存储，支持回退链与 {name} 占位符。
+          超管在此的修改记录 owner_pkg=host。
+        </wd-tips>
+
+        <el-alert type="warning" :closable="false" show-icon style="margin-bottom:12px"
+          title="功能包升级会重置该包翻译为包内种子，本页对该包的修改将丢失；host 命名空间不受影响。">
+        </el-alert>
+
+        <el-tabs v-model="tab">
+          <!-- 视图一：检索与编辑 -->
+          <el-tab-pane label="词条检索" name="list">
+            <form class="tr-filter" @submit.prevent="search">
+              <el-select v-model="filters.namespace" placeholder="命名空间" style="width:200px" clearable filterable>
+                <el-option v-for="ns in namespaces" :key="ns.namespace"
+                  :label="ns.namespace + '（' + ns.count + '）'" :value="ns.namespace" />
+              </el-select>
+              <el-select v-model="filters.lang" placeholder="语言" style="width:150px" clearable filterable>
+                <el-option v-for="lg in languages" :key="lg.lang"
+                  :label="lg.lang + '（' + lg.count + '）'" :value="lg.lang" />
+              </el-select>
+              <el-input v-model="filters.keyword" placeholder="key 关键字" style="width:220px" clearable @keyup.enter="search" />
+              <el-button native-type="submit" type="primary" :icon="Search" :loading="loading">检索</el-button>
+              <el-button :icon="RefreshLeft" @click="reset">重置</el-button>
+              <el-button :icon="Plus" @click="openCreate">新增词条</el-button>
+              <div style="flex:1"></div>
+              <el-tag type="info" effect="plain">总条目 {{ stats.total }}</el-tag>
+            </form>
+
+            <wd-data-grid :data-source="rows" border stripe :with-index="false" :with-pager="false" v-loading="loading">
+              <el-table-column prop="namespace" label="命名空间" min-width="140">
+                <template #default="{ row }"><span class="tr-mono">{{ row.namespace }}</span></template>
+              </el-table-column>
+              <el-table-column prop="key" label="key" min-width="200">
+                <template #default="{ row }"><span class="tr-mono">{{ row.key }}</span></template>
+              </el-table-column>
+              <el-table-column prop="lang" label="语言" width="110">
+                <template #default="{ row }"><el-tag size="small" effect="plain">{{ row.lang }}</el-tag></template>
+              </el-table-column>
+              <el-table-column label="译文" min-width="220">
+                <template #default="{ row }"><span class="tr-mono tr-value">{{ row.value }}</span></template>
+              </el-table-column>
+              <el-table-column label="公开" width="80">
+                <template #default="{ row }">
+                  <el-tag size="small" :type="row.is_public ? 'success' : 'info'">{{ row.is_public ? '公开' : '私有' }}</el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column prop="owner_pkg" label="托管方" width="120">
+                <template #default="{ row }"><span class="tr-mono">{{ row.owner_pkg || '—' }}</span></template>
+              </el-table-column>
+              <el-table-column prop="updated_at" label="更新时间" width="200" />
+              <el-table-column label="操作" width="150" fixed="right">
+                <template #default="{ row }">
+                  <el-button size="small" text type="primary" @click="openEdit(row)">修改</el-button>
+                  <el-button size="small" text type="danger" @click="remove(row)">删除</el-button>
+                </template>
+              </el-table-column>
+              <template #empty><el-empty description="暂无匹配的翻译词条" :image-size="80" /></template>
+            </wd-data-grid>
+
+            <div class="tr-pager">
+              <el-pagination
+                v-model:current-page="page" v-model:page-size="size"
+                :total="total" :page-sizes="[20, 50, 100]"
+                layout="total, sizes, prev, pager, next, jumper"
+                @current-change="load" @size-change="onSizeChange" />
+            </div>
+          </el-tab-pane>
+
+          <!-- 视图二：缺失对照 -->
+          <el-tab-pane label="缺失对照" name="missing">
+            <wd-tips type="box" style="margin-bottom:12px">
+              选择命名空间与基准/对照语言，列出「基准语言有、对照语言缺」的 key 清单，快速定位漏翻译。
+            </wd-tips>
+            <form class="tr-filter" @submit.prevent="loadMissing">
+              <el-select v-model="missForm.namespace" placeholder="命名空间" style="width:200px" filterable>
+                <el-option v-for="ns in namespaces" :key="ns.namespace"
+                  :label="ns.namespace + '（' + ns.count + '）'" :value="ns.namespace" />
+              </el-select>
+              <el-select v-model="missForm.base_lang" placeholder="基准语言" style="width:150px" filterable allow-create>
+                <el-option v-for="lg in languages" :key="lg.lang" :label="lg.lang" :value="lg.lang" />
+              </el-select>
+              <el-select v-model="missForm.compare_lang" placeholder="对照语言" style="width:150px" filterable allow-create>
+                <el-option v-for="lg in languages" :key="lg.lang" :label="lg.lang" :value="lg.lang" />
+              </el-select>
+              <el-button native-type="submit" type="primary" :icon="Search" :loading="missLoading">开始对照</el-button>
+              <div style="flex:1"></div>
+              <el-tag type="warning" effect="plain" v-if="missingLoaded">缺失 {{ missingList.length }} 条</el-tag>
+            </form>
+
+            <wd-data-grid :data-source="missingList" border stripe :with-index="true" :with-pager="false" v-loading="missLoading">
+              <el-table-column prop="key" label="缺失 key" min-width="260">
+                <template #default="{ row }"><span class="tr-mono">{{ row.key }}</span></template>
+              </el-table-column>
+              <el-table-column label="基准语言译文" min-width="260">
+                <template #default="{ row }"><span class="tr-mono tr-value">{{ row.value }}</span></template>
+              </el-table-column>
+              <el-table-column label="操作" width="120" fixed="right">
+                <template #default="{ row }">
+                  <el-button size="small" text type="primary" @click="fillMissing(row)">补译</el-button>
+                </template>
+              </el-table-column>
+              <template #empty><el-empty :description="missingLoaded ? '该语言已完整，无缺失词条' : '请选择条件后开始对照'" :image-size="80" /></template>
+            </wd-data-grid>
+          </el-tab-pane>
+        </el-tabs>
+      </wd-panel>
+
+      <!-- 编辑抽屉：新增 / 修改 -->
+      <el-drawer v-model="editVisible" :title="editForm.isNew ? '新增翻译词条' : '修改翻译词条'" size="46%">
+        <el-form label-width="90px">
+          <el-form-item label="命名空间">
+            <el-select v-model="editForm.namespace" placeholder="选择或输入命名空间" filterable allow-create
+              :disabled="!editForm.isNew" style="width:100%">
+              <el-option v-for="ns in namespaces" :key="ns.namespace" :label="ns.namespace" :value="ns.namespace" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="key">
+            <el-input v-model="editForm.key" :disabled="!editForm.isNew"
+              placeholder="点号命名，如 record.status.pending" />
+          </el-form-item>
+          <el-form-item label="语言">
+            <el-select v-model="editForm.lang" placeholder="BCP-47 简码，如 zh-CN" filterable allow-create
+              :disabled="!editForm.isNew" style="width:100%">
+              <el-option v-for="lg in languages" :key="lg.lang" :label="lg.lang" :value="lg.lang" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="译文">
+            <el-input v-model="editForm.value" type="textarea" :rows="4"
+              placeholder="支持 {name} 占位符，例如：共 {count} 条" />
+          </el-form-item>
+          <el-form-item label="公开性">
+            <el-switch v-model="editForm.isPublic" active-text="公开（他包可读）" inactive-text="私有" />
+          </el-form-item>
+        </el-form>
+        <div style="margin-top:16px;text-align:right">
+          <el-button @click="editVisible = false">取消</el-button>
+          <el-button type="primary" :loading="saving" @click="saveEdit">保存</el-button>
+        </div>
+      </el-drawer>
+    </div>
+  </script>
+
+  <script src="/static/vendor/vue/vue.global.prod.js"></script>
+  <script src="/static/vendor/element-plus/index.full.min.js"></script>
+  <script src="/static/vendor/icons/index.iife.min.js"></script>
+  <script src="/static/vendor/workdesktop-ai/index.umd.js"></script>
+  <script>
+    const WD = window.WorkDesktop;
+    const ElementPlus = window.ElementPlus;
+    const { WorkDesktop } = WD;
+    const { ref, reactive, computed } = Vue;
+    const { Plus, Search, RefreshLeft } = window.ElementPlusIconsVue || {};
+
+    const app = Vue.createApp({
+      template: '#tr-tpl',
+      setup() {
+        const tab = ref('list');
+        const loading = ref(false);
+        const rows = ref([]);
+        const total = ref(0);
+        const page = ref(1);
+        const size = ref(20);
+        const filters = reactive({ namespace: '', lang: '', keyword: '' });
+        const stats = reactive({ total: 0 });
+        const namespaces = ref([]);
+        const languages = ref([]);
+
+        // —— 编辑抽屉 ——
+        const editVisible = ref(false);
+        const saving = ref(false);
+        const editForm = reactive({
+          isNew: true, namespace: '', key: '', lang: '', value: '', isPublic: false
+        });
+
+        // —— 缺失对照 ——
+        const missLoading = ref(false);
+        const missingLoaded = ref(false);
+        const missingList = ref([]);
+        const missForm = reactive({ namespace: '', base_lang: 'zh-CN', compare_lang: 'en-US' });
+
+        function qs(obj) {
+          const p = new URLSearchParams();
+          for (const [k, v] of Object.entries(obj)) { if (v !== '' && v != null) p.append(k, v); }
+          const s = p.toString();
+          return s ? '?' + s : '';
+        }
+
+        async function load() {
+          loading.value = true;
+          try {
+            const res = await WD.request.get('/admin/translation_admin/rows' + qs({
+              ...filters, page: page.value, size: size.value
+            }));
+            if (!res.success) {
+              ElementPlus.ElMessage.error(res.message || '加载失败');
+              return;
+            }
+            rows.value = res.data.list || [];
+            total.value = res.data.total || 0;
+            Object.assign(stats, res.data.stats || { total: 0 });
+            namespaces.value = (res.data.stats && res.data.stats.namespaces) || [];
+            languages.value = (res.data.stats && res.data.stats.languages) || [];
+          } finally {
+            loading.value = false;
+          }
+        }
+
+        async function loadOptions() {
+          const res = await WD.request.get('/admin/translation_admin/options');
+          if (!res.success) return;
+          namespaces.value = res.data.namespaces || [];
+          languages.value = res.data.languages || [];
+          stats.total = res.data.total || 0;
+        }
+
+        function search() { page.value = 1; load(); }
+        function reset() {
+          filters.namespace = ''; filters.lang = ''; filters.keyword = '';
+          page.value = 1; load();
+        }
+        function onSizeChange() { page.value = 1; load(); }
+
+        function openCreate() {
+          Object.assign(editForm, {
+            isNew: true,
+            namespace: filters.namespace || '',
+            key: '', lang: filters.lang || '', value: '', isPublic: false
+          });
+          editVisible.value = true;
+        }
+
+        function openEdit(row) {
+          Object.assign(editForm, {
+            isNew: false, namespace: row.namespace, key: row.key, lang: row.lang,
+            value: row.value, isPublic: row.is_public === 1
+          });
+          editVisible.value = true;
+        }
+
+        async function saveEdit() {
+          if (!editForm.namespace || !editForm.key || !editForm.lang) {
+            ElementPlus.ElMessage.error('命名空间、key、语言均不能为空');
+            return;
+          }
+          saving.value = true;
+          try {
+            const res = await WD.request.post('/admin/translation_admin/save', {
+              namespace: editForm.namespace, key: editForm.key, lang: editForm.lang,
+              value: editForm.value, is_public: editForm.isPublic ? 1 : 0
+            });
+            ElementPlus.ElMessage[res.success ? 'success' : 'error'](
+              res.message || (res.success ? '已保存' : '保存失败'));
+            if (res.success) {
+              editVisible.value = false;
+              load(); loadOptions();
+            }
+          } finally {
+            saving.value = false;
+          }
+        }
+
+        async function remove(row) {
+          try {
+            await ElementPlus.ElMessageBox.confirm(
+              '确认删除词条 ' + row.namespace + ' / ' + row.key + ' / ' + row.lang + ' ？',
+              '删除确认', { type: 'warning' });
+          } catch (e) {
+            return;
+          }
+          const res = await WD.request.post('/admin/translation_admin/delete', {
+            namespace: row.namespace, key: row.key, lang: row.lang
+          });
+          ElementPlus.ElMessage[res.success ? 'success' : 'error'](
+            res.message || (res.success ? '已删除' : '删除失败'));
+          if (res.success) { load(); loadOptions(); }
+        }
+
+        async function loadMissing() {
+          if (!missForm.namespace) {
+            ElementPlus.ElMessage.error('请先选择命名空间');
+            return;
+          }
+          missLoading.value = true;
+          try {
+            const res = await WD.request.get('/admin/translation_admin/missing' + qs({
+              namespace: missForm.namespace,
+              base_lang: missForm.base_lang,
+              compare_lang: missForm.compare_lang
+            }));
+            if (!res.success) {
+              ElementPlus.ElMessage.error(res.message || '对照失败');
+              return;
+            }
+            missingList.value = res.data.list || [];
+            missingLoaded.value = true;
+          } finally {
+            missLoading.value = false;
+          }
+        }
+
+        /** 缺失行 → 打开编辑抽屉，预填对照语言与基准译文，便于快速补译。 */
+        function fillMissing(row) {
+          openCreate();
+          Object.assign(editForm, {
+            isNew: true, namespace: missForm.namespace, key: row.key,
+            lang: missForm.compare_lang, value: '', isPublic: false
+          });
+          editVisible.value = true;
+        }
+
+        loadOptions();
+        load();
+
+        return {
+          tab, loading, rows, total, page, size, filters, stats, namespaces, languages,
+          editVisible, saving, editForm,
+          missLoading, missingLoaded, missingList, missForm,
+          load, search, reset, onSizeChange, openCreate, openEdit, saveEdit, remove,
+          loadMissing, fillMissing, Plus, Search, RefreshLeft
+        };
+      }
+    });
+
+    for (const [name, comp] of Object.entries(window.ElementPlusIconsVue)) {
+      app.component(name, comp);
+    }
+    app.use(ElementPlus);
+    app.use(WorkDesktop);
+    app.mount('#app');
+  </script>
+</body>
+
+</html>

@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>服务治理 - LinHub 林枢</title>
+<link rel="icon" type="image/svg+xml" href="/brand/favicon.svg">
+  <link rel="stylesheet" href="/static/vendor/element-plus/index.css">
+  <link rel="stylesheet" href="/static/vendor/workdesktop-ai/style.css">
+  <style>
+
+    .sv-mono {
+      font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+      font-size: 12px;
+    }
+
+    .sv-chips {
+      display: flex;
+      gap: 12px;
+      margin: 8px 0 12px;
+      flex-wrap: wrap;
+    }
+
+    .sv-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 2px 10px;
+      border-radius: 14px;
+      font-size: 12px;
+      background: var(--wd-border-color, #f0f0f0);
+      color: var(--wd-text-color, #1f2937);
+    }
+  </style>
+</head>
+
+<body>
+  <div id="app"></div>
+
+  <script type="text/x-template" id="sv-tpl">
+
+    <!-- 数据库不可用降级 -->
+    <el-alert
+      v-if="state.diagnostic"
+      type="warning" show-icon :closable="false"
+      title="数据库镜像不可用，仅能展示内存服务清单（能力镜像缺失）："
+      style="margin-bottom:12px">
+      <div class="sv-mono" style="white-space:pre-wrap">
+        驱动: {{ state.diagnostic.driver }}
+        地址: {{ state.diagnostic.host }}
+        库名: {{ state.diagnostic.db }}
+        错误: {{ state.diagnostic.error }}
+      </div>
+    </el-alert>
+
+    <div v-loading="loading" element-loading-text="加载中...">
+      
+      <wd-panel>
+    <wd-tips type="box" style="margin-bottom:12px">
+      只读展示平台服务与能力画像。服务事实来源为 services.php 服务清单；能力画像与升级记录来自 lg_mgt_ 持久化镜像与 changelog；调用统计来自服务调用次数累计。
+      服务增删改请编辑 services/services.php 并提交 Git，本页不提供写接口。
+    </wd-tips>
+        <div class="sv-chips">
+        <span class="sv-chip">服务 {{ state.services.length }}</span>
+        <span class="sv-chip">调用记录 {{ state.calls.length }}</span>
+        <span class="sv-chip">能力 {{ state.capabilities.length }}</span>
+        <span class="sv-chip">升级记录 {{ state.changelog.length }}</span>
+      </div>
+    </wd-panel>
+      
+
+      <!-- 服务清单 -->
+      <wd-panel :border="true" title="服务清单">
+        <wd-data-grid v-if="state.services.length > 0" :data-source="state.services" border stripe table-size="small" :with-index="true" :with-pager="false">
+          <el-table-column prop="id" label="服务 ID" min-width="120">
+            <template #default="{ row }"><span class="sv-mono">{{ row.id }}</span></template>
+          </el-table-column>
+          <el-table-column prop="desc" label="说明 / 参数" min-width="260">
+            <template #default="{ row }">
+              <div v-if="row.desc">{{ row.desc }}</div>
+              <div v-if="row.params && row.params.length">
+                <div v-for="(p, i) in row.params" :key="i" style="color:#6b7280;font-size:12px;line-height:1.7">
+                  <span class="sv-mono">{{ p.name }}</span>{{ p.desc }}
+                </div>
+              </div>
+            </template>
+          </el-table-column>
+          <el-table-column prop="class" label="类" min-width="260">
+            <template #default="{ row }"><span class="sv-mono">{{ row.class }}</span></template>
+          </el-table-column>
+          <el-table-column prop="version" label="版本" width="90">
+            <template #default="{ row }">
+              <el-tag size="small" effect="plain">v{{ row.version }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="consumers" label="被依赖" min-width="160">
+            <template #default="{ row }">
+              <template v-if="row.consumers && row.consumers.length">
+                <el-tag
+                  v-for="(c, i) in row.consumers"
+                  :key="i"
+                  size="small"
+                  effect="plain"
+                  style="margin:0 6px 4px 0">
+                  {{ c.pkg }}<span v-if="c.constraint !== '*'">（{{ c.constraint }}）</span>
+                </el-tag>
+              </template>
+              <span v-else style="color:#9ca3af">-</span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="source" label="来源" width="90">
+            <template #default="{ row }">
+              <el-tag size="small" :type="row.source === 'host' ? 'success' : 'primary'" effect="light">{{ row.source }}</el-tag>
+            </template>
+          </el-table-column>
+        </wd-data-grid>
+      </wd-panel>
+
+      <!-- 调用统计 -->
+      <wd-panel :border="true" title="调用统计">
+        <wd-data-grid v-if="state.calls.length > 0" :data-source="state.calls" border stripe table-size="small" :with-index="true" :with-pager="false">
+          <el-table-column prop="callee" label="被调用方" min-width="170">
+            <template #default="{ row }">
+              <span class="sv-mono">{{ row.callee }}</span>
+              <el-tag v-if="row.owner" size="small" effect="plain" style="margin-left:6px">{{ row.owner }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="source" label="来源" width="90">
+            <template #default="{ row }">
+              <el-tag size="small" :type="row.source === 'host' ? 'success' : 'primary'" effect="light">{{ row.source }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="method" label="接口" min-width="180">
+            <template #default="{ row }"><span class="sv-mono">{{ row.method }}</span></template>
+          </el-table-column>
+          <el-table-column prop="caller" label="调用方" width="130">
+            <template #default="{ row }"><span class="sv-mono">{{ row.caller }}</span></template>
+          </el-table-column>
+          <el-table-column prop="count" label="调用次数" width="100" align="right">
+            <template #default="{ row }"><span class="sv-mono">{{ row.count }}</span></template>
+          </el-table-column>
+          <el-table-column prop="lastAt" label="最后调用时间" width="180">
+            <template #default="{ row }"><span class="sv-mono">{{ row.lastAt }}</span></template>
+          </el-table-column>
+          <el-table-column prop="lastUrl" label="最后调用 URL" min-width="220" show-overflow-tooltip>
+            <template #default="{ row }"><span class="sv-mono">{{ row.lastUrl }}</span></template>
+          </el-table-column>
+        </wd-data-grid>
+        <p v-else style="color:var(--wd-text-color-secondary,#6b7280);font-size:13px">暂无调用记录。功能包调用平台服务或包间服务后，这里会按接口累计次数。</p>
+      </wd-panel>
+
+      <!-- 能力清单 -->
+      <wd-panel :border="true" title="能力清单（lg_mgt_capability）">
+        <el-empty v-if="state.diagnostic" description="数据库镜像不可用，暂无能力数据" :image-size="60" />
+        <template v-else>
+          <wd-data-grid v-if="state.capabilities.length > 0" :data-source="state.capabilities" border stripe table-size="small" :with-index="true" :with-pager="false">
+            <el-table-column prop="pkgKey" label="所属包" min-width="140">
+              <template #default="{ row }"><span class="sv-mono">{{ row.pkgKey }}</span></template>
+            </el-table-column>
+            <el-table-column prop="capType" label="能力类型" min-width="130">
+              <template #default="{ row }"><span class="sv-mono">{{ row.capType }}</span></template>
+            </el-table-column>
+            <el-table-column prop="payload" label="画像摘要" min-width="240">
+              <template #default="{ row }">
+                <span class="sv-mono">{{ summarize(row.payload) }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="updatedAt" label="同步时间" width="180">
+              <template #default="{ row }"><span class="sv-mono">{{ row.updatedAt }}</span></template>
+            </el-table-column>
+          </wd-data-grid>
+          <p v-else style="color:var(--wd-text-color-secondary,#6b7280);font-size:13px">暂无能力数据，请先在宿主端触发一次服务同步。</p>
+        </template>
+      </wd-panel>
+
+      <!-- 升级记录 -->
+      <wd-panel :border="true" title="升级记录（services.php changelog）">
+        <wd-data-grid v-if="state.changelog.length > 0" :data-source="state.changelog" border stripe table-size="small" :with-index="true" :with-pager="false">
+          <el-table-column prop="key" label="服务版本" min-width="150">
+            <template #default="{ row }"><span class="sv-mono">{{ row.key }}</span></template>
+          </el-table-column>
+          <el-table-column prop="date" label="日期" width="120">
+            <template #default="{ row }"><span class="sv-mono">{{ row.date }}</span></template>
+          </el-table-column>
+          <el-table-column prop="note" label="说明" min-width="280" />
+        </wd-data-grid>
+      </wd-panel>
+    </div>
+</script>
+
+  <script src="/static/vendor/vue/vue.global.prod.js"></script>
+  <script src="/static/vendor/element-plus/index.full.min.js"></script>
+  <script src="/static/vendor/icons/index.iife.min.js"></script>
+  <script src="/static/vendor/workdesktop-ai/index.umd.js"></script>
+  <script>
+    const WD = window.WorkDesktop;
+    const ElementPlus = window.ElementPlus;
+    const { WorkDesktop } = WD;
+    const { ref, reactive } = Vue;
+
+    function summarize(payload) {
+      if (!payload || typeof payload !== 'object') return JSON.stringify(payload);
+      const keys = Object.keys(payload);
+      const label = keys.slice(0, 6).map(k => k + ': ' + JSON.stringify(payload[k])).join(' · ');
+      return keys.length > 6 ? label + ' …' : label;
+    }
+
+    const app = Vue.createApp({
+      template: '#sv-tpl',
+      setup() {
+        const loading = ref(false);
+        const state = reactive({ services: [], calls: [], capabilities: [], changelog: [], diagnostic: null });
+
+        async function load() {
+          loading.value = true;
+          try {
+            const res = await WD.request.get('/admin/services/overview');
+            if (!res.success) {
+              ElementPlus.ElMessage.error(res.message || '加载失败');
+              return;
+            }
+            state.services = res.data.services || [];
+            state.calls = res.data.calls || [];
+            state.capabilities = res.data.capabilities || [];
+            state.changelog = res.data.changelog || [];
+            state.diagnostic = res.data.diagnostic || null;
+          } finally {
+            loading.value = false;
+          }
+        }
+
+        load();
+
+        return { loading, state, summarize };
+      }
+    });
+
+    for (const [name, comp] of Object.entries(window.ElementPlusIconsVue)) {
+      app.component(name, comp);
+    }
+    app.use(ElementPlus);
+    app.use(WorkDesktop);
+    app.mount('#app');
+  </script>
+</body>
+
+</html>

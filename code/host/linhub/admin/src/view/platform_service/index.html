@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>平台服务总览 - LinHub 林枢</title>
+  <link rel="icon" type="image/svg+xml" href="/brand/favicon.svg">
+  <link rel="stylesheet" href="/static/vendor/element-plus/index.css">
+  <link rel="stylesheet" href="/static/vendor/workdesktop-ai/style.css">
+  <style>
+    html, body, #app { height: 100%; margin: 0; }
+    body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif; }
+    .ps-page { min-height: 100%; padding: 16px 20px 24px; box-sizing: border-box; }
+    .ps-panels { display: flex; flex-direction: column; gap: 16px; }
+    .ps-panel-title { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; }
+    .ps-ver { font-weight: normal; }
+    .ps-body { padding: 2px 0 0; }
+    .ps-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+    .ps-metric {
+      background: var(--el-fill-color-light, #f5f7fa); border: 1px solid var(--el-border-color-lighter, #ebeef5);
+      border-radius: 8px; padding: 10px 14px;
+    }
+    .ps-metric .v { font-size: 22px; font-weight: 600; line-height: 1.3; color: var(--el-text-color-primary, #303133); }
+    .ps-metric .l { font-size: 12px; color: var(--el-text-color-secondary, #909399); margin-top: 2px; }
+    .ps-chart { margin-top: 16px; }
+    .ps-chart-title { font-size: 13px; color: var(--el-text-color-secondary, #909399); margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
+    .ps-bars { display: flex; align-items: flex-end; gap: 10px; height: 96px; }
+    .ps-bar { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+    .ps-bar .b {
+      width: 100%; max-width: 36px; background: linear-gradient(180deg, #8cc5ff, #409eff);
+      border-radius: 3px 3px 0 0; min-height: 2px; transition: height .2s;
+    }
+    .ps-bar .n { font-size: 11px; color: var(--el-text-color-secondary, #909399); }
+    .ps-bar .d { font-size: 11px; color: var(--el-text-color-secondary, #909399); }
+    .ps-dist { display: flex; flex-direction: column; gap: 10px; margin-top: 6px; }
+    .ps-dist-row { display: grid; grid-template-columns: 140px 1fr 72px; align-items: center; gap: 10px; font-size: 12px; }
+    .ps-dist-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--el-text-color-primary, #303133); }
+    .ps-dist-bar { height: 8px; background: var(--el-fill-color-light, #eef1f6); border-radius: 4px; overflow: hidden; }
+    .ps-dist-fill { height: 100%; background: linear-gradient(90deg, #8cc5ff, #409eff); border-radius: 4px; transition: width .3s; }
+    .ps-dist-num { text-align: right; color: var(--el-text-color-secondary, #909399); }
+    .ps-login { display: flex; flex-wrap: wrap; gap: 8px 20px; align-items: center; }
+    .ps-login .row { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
+    .ps-login .row .k { color: var(--el-text-color-secondary, #909399); }
+    .ps-links { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; padding-top: 12px; border-top: 1px dashed var(--el-border-color-lighter, #e4e7ed); }
+    .ps-empty-tip { color: var(--el-text-color-secondary, #909399); font-size: 12px; }
+  </style>
+</head>
+
+<body>
+  <div id="app"></div>
+
+  <script type="text/x-template" id="ps-tpl">
+    <div class="ps-page" v-loading="loading" element-loading-text="加载中...">
+      <div class="ps-panels">
+        <!-- 各服务管理入口统一通过抽屉(iframe)打开 -->
+        <wd-drawer
+          v-model="drawerOpen"
+          :title="drawerTitle"
+          :url="drawerUrl"
+          mode="drawer"
+          direction="rtl"
+          size="1000px"
+          :reload-on-open="true"
+        ></wd-drawer>
+        <wd-tips type="box" style="margin-bottom:0">
+          只读汇总四个平台公共服务的运行与用量概况，一个服务一个统计面板。本页不承载写操作；各服务管理请通过面板底部快捷入口进入。
+        </wd-tips>
+
+        <!-- 附件托管 -->
+        <wd-panel :border="true">
+          <template #title>
+            <span class="ps-panel-title"><el-icon><Paperclip /></el-icon>附件托管<el-tag size="small" effect="plain" class="ps-ver">v{{ s.versions.attachment }}</el-tag></span>
+          </template>
+          <template #extra>
+            <el-tag size="small" effect="plain">{{ s.attachment.driver || 'local' }}</el-tag>
+          </template>
+          <div class="ps-body">
+            <div class="ps-metrics">
+              <div class="ps-metric"><div class="v">{{ s.attachment.total }}</div><div class="l">总数（含已删）</div></div>
+              <div class="ps-metric"><div class="v">{{ s.attachment.active }}</div><div class="l">有效附件</div></div>
+              <div class="ps-metric"><div class="v">{{ s.attachment.public }}</div><div class="l">公开附件</div></div>
+              <div class="ps-metric"><div class="v">{{ bytes(s.attachment.bytes) }}</div><div class="l">占用空间</div></div>
+            </div>
+            <div class="ps-chart">
+              <div class="ps-chart-title"><el-icon><TrendCharts /></el-icon>近 7 天新增附件</div>
+              <div class="ps-bars">
+                <div class="ps-bar" v-for="d in s.attachmentTrend" :key="d.date">
+                  <div class="b" :style="{ height: barH(d.total, s.attachmentTrend, 'total') + 'px' }"
+                       :title="d.date + '：新增 ' + d.total + ' 个 / ' + bytes(d.bytes)"></div>
+                  <div class="n">{{ d.total }}</div>
+                  <div class="d">{{ d.date.slice(5) }}</div>
+                </div>
+              </div>
+            </div>
+            <div class="ps-links">
+              <el-button size="small" text type="primary" @click="openInDrawer('/admin/attach_admin/files','文件管理器')">文件管理器</el-button>
+              <el-button size="small" text type="primary" @click="openInDrawer('/admin/attach_admin/fallback','默认图片')">默认图片</el-button>
+              <el-button size="small" text type="primary" @click="openInDrawer('/admin/attach_admin/storage','存储配置')">存储配置</el-button>
+              <el-button size="small" text type="primary" @click="openInDrawer('/admin/attach_admin/clean','清理记录')">清理记录</el-button>
+            </div>
+          </div>
+        </wd-panel>
+
+        <!-- 数据字典 -->
+        <wd-panel :border="true">
+          <template #title>
+            <span class="ps-panel-title"><el-icon><Collection /></el-icon>数据字典<el-tag size="small" effect="plain" class="ps-ver">v{{ s.versions.dictionary }}</el-tag></span>
+          </template>
+          <div class="ps-body">
+            <div class="ps-metrics">
+              <div class="ps-metric"><div class="v">{{ s.dictionary.total }}</div><div class="l">字典条目</div></div>
+              <div class="ps-metric"><div class="v">{{ s.dictionary.namespaces.length }}</div><div class="l">命名空间</div></div>
+            </div>
+            <div class="ps-chart" v-if="s.dictionary.namespaces.length">
+              <div class="ps-chart-title"><el-icon><Histogram /></el-icon>各命名空间条目分布</div>
+              <div class="ps-dist">
+                <div class="ps-dist-row" v-for="ns in s.dictionary.namespaces" :key="ns.namespace">
+                  <span class="ps-dist-name" :title="ns.namespace">{{ ns.namespace }}</span>
+                  <div class="ps-dist-bar">
+                    <div class="ps-dist-fill" :style="{ width: distPct(ns.count) + '%' }"></div>
+                  </div>
+                  <span class="ps-dist-num">{{ ns.count }}（{{ distPct(ns.count) }}%）</span>
+                </div>
+              </div>
+            </div>
+            <div class="ps-chart" v-else>
+              <span class="ps-empty-tip">暂无字典条目，功能包可通过字典服务写入。</span>
+            </div>
+            <div class="ps-links">
+              <el-button size="small" text type="primary" @click="openInDrawer('/admin/dict_admin/index','全局字典检索')">全局字典检索</el-button>
+            </div>
+          </div>
+        </wd-panel>
+
+        <!-- 登录状态 -->
+        <wd-panel :border="true">
+          <template #title>
+            <span class="ps-panel-title"><el-icon><UserFilled /></el-icon>登录状态<el-tag size="small" effect="plain" class="ps-ver">v{{ s.versions.loginState }}</el-tag></span>
+          </template>
+          <div class="ps-body">
+            <div class="ps-metrics">
+              <div class="ps-metric">
+                <div class="v">
+                  <el-tag size="small" :type="s.loginState.is_login ? 'success' : 'info'">
+                    {{ s.loginState.is_login ? '已登录' : '游客' }}
+                  </el-tag>
+                </div>
+                <div class="l">当前访问身份</div>
+              </div>
+            </div>
+            <div class="ps-chart" v-if="s.loginState.is_login">
+              <div class="ps-login">
+                <span class="row"><span class="k">用户</span>{{ s.loginState.display_name || s.loginState.user_id }}</span>
+                <span class="row"><span class="k">ID</span>{{ s.loginState.user_id }}</span>
+                <span class="row">
+                  <span class="k">角色</span>
+                  <el-tag v-for="r in s.loginState.roles" :key="r" size="small" style="margin-right:4px">{{ r }}</el-tag>
+                </span>
+                <span class="row" v-if="s.loginState.last_login_at"><span class="k">最后登录</span>{{ s.loginState.last_login_at }}</span>
+              </div>
+            </div>
+            <div class="ps-chart" v-else>
+              <span class="ps-empty-tip">当前为未登录（游客）访问，仅展示匿名快照。</span>
+            </div>
+            <div class="ps-links">
+              <el-button size="small" text type="primary" @click="openInDrawer('/admin/login_state_admin/index','登录状态')">登录态查看页</el-button>
+            </div>
+          </div>
+        </wd-panel>
+
+        <!-- 站内消息 -->
+        <wd-panel :border="true">
+          <template #title>
+            <span class="ps-panel-title"><el-icon><Bell /></el-icon>站内消息<el-tag size="small" effect="plain" class="ps-ver">v{{ s.versions.inbox }}</el-tag></span>
+          </template>
+          <div class="ps-body">
+            <div class="ps-metrics">
+              <div class="ps-metric"><div class="v">{{ s.inbox.message_total }}</div><div class="l">消息总量</div></div>
+              <div class="ps-metric"><div class="v">{{ s.inbox.recipient_total }}</div><div class="l">投递条数</div></div>
+              <div class="ps-metric"><div class="v" style="color:var(--el-color-danger,#f56c6c)">{{ s.inbox.unread_total }}</div><div class="l">未读</div></div>
+            </div>
+            <div class="ps-chart">
+              <div class="ps-chart-title"><el-icon><TrendCharts /></el-icon>近 7 天站内消息</div>
+              <div class="ps-bars">
+                <div class="ps-bar" v-for="d in s.inboxTrend" :key="d.date">
+                  <div class="b" :style="{ height: barH(d.total, s.inboxTrend, 'total') + 'px' }"
+                       :title="d.date + '：' + d.total + ' 条 / 投递 ' + d.recipients + ' 人'"></div>
+                  <div class="n">{{ d.total }}</div>
+                  <div class="d">{{ d.date.slice(5) }}</div>
+                </div>
+              </div>
+            </div>
+            <div class="ps-links">
+              <el-button size="small" text type="primary" @click="openInDrawer('/admin/message_admin/records','投递记录')">投递记录</el-button>
+              <el-button size="small" text type="primary" @click="openInDrawer('/admin/message_admin/announce','群发公告')">群发公告</el-button>
+            </div>
+          </div>
+        </wd-panel>
+      </div>
+    </div>
+  </script>
+
+  <script src="/static/vendor/vue/vue.global.prod.js"></script>
+  <script src="/static/vendor/element-plus/index.full.min.js"></script>
+  <script src="/static/vendor/icons/index.iife.min.js"></script>
+  <script src="/static/vendor/workdesktop-ai/index.umd.js"></script>
+  <script src="/static/linhub/home-link.js"></script>
+  <script>
+    const WD = window.WorkDesktop;
+    const ElementPlus = window.ElementPlus;
+    const { WorkDesktop } = WD;
+    const { ref, reactive } = Vue;
+
+    const app = Vue.createApp({
+      template: '#ps-tpl',
+      setup() {
+        const loading = ref(false);
+        // 抽屉(iframe)打开的当前目标
+        const drawerOpen = ref(false);
+        const drawerTitle = ref('');
+        const drawerUrl = ref('');
+        const s = reactive({
+          attachment: { total: 0, active: 0, public: 0, bytes: 0, driver: '-' },
+          dictionary: { total: 0, namespaces: [] },
+          inbox: { message_total: 0, recipient_total: 0, unread_total: 0 },
+          loginState: { is_login: false, user_id: '', display_name: '', last_login_at: '', roles: [] },
+          inboxTrend: [],
+          attachmentTrend: [],
+          versions: { attachment: '', dictionary: '', loginState: '', inbox: '' },
+        });
+
+        async function load() {
+          loading.value = true;
+          try {
+            const res = await WD.request.get('/admin/platform_service/stats');
+            if (!res.success) {
+              ElementPlus.ElMessage.error(res.message || '加载失败');
+              return;
+            }
+            Object.assign(s, res.data);
+          } finally {
+            loading.value = false;
+          }
+        }
+
+        function bytes(n) {
+          n = Number(n) || 0;
+          if (n < 1024) return n + ' B';
+          if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+          return (n / 1024 / 1024).toFixed(2) + ' MB';
+        }
+        function barH(v, arr, key) {
+          const max = Math.max(1, ...arr.map(d => Number(d[key]) || 0));
+          return Math.round((Number(v) || 0) / max * 70) + 2;
+        }
+        function distPct(c) {
+          const total = Number(s.dictionary.total) || 0;
+          if (total === 0) return 0;
+          return Math.round((Number(c) || 0) / total * 100);
+        }
+        // 所有管理入口统一通过抽屉(iframe)打开，而非新开 tab/整页跳转
+        function openInDrawer(url, title) {
+          drawerTitle.value = title || url;
+          drawerUrl.value = url;
+          drawerOpen.value = true;
+        }
+
+        load();
+        return { loading, s, bytes, barH, distPct, openInDrawer, drawerOpen, drawerTitle, drawerUrl };
+      }
+    });
+
+    for (const [name, comp] of Object.entries(window.ElementPlusIconsVue)) {
+      app.component(name, comp);
+    }
+    app.use(ElementPlus);
+    app.use(WorkDesktop);
+    app.mount('#app');
+  </script>
+</body>
+
+</html>

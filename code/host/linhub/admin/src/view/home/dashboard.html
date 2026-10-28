@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>工作台 - {:htmlspecialchars($siteName)}</title>
+<link rel="icon" type="image/svg+xml" href="/brand/favicon.svg">
+<link rel="stylesheet" href="/static/vendor/element-plus/index.css">
+<link rel="stylesheet" href="/static/vendor/workdesktop-ai/style.css">
+<style>
+  html, body, #app { height: 100%; margin: 0; }
+  .dash-page { height: 100%; } /* 让高度一路传到 WdStation（其 height:100% 需要确定高度的父级） */
+  body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif; }
+  .slots { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
+  .slot { width: 100%; }
+  .slot .render {
+    color: var(--wd-text-color-secondary, #6b7280); font-size: 12px; line-height: 1.6;
+    word-break: break-all; white-space: pre-wrap;
+  }
+  .dash-page .wd-station__content { padding: 0; }
+  .brand-mark { width: 30px; height: 30px; flex: none; display: block; }
+  /* 菜单内图片型 icon（如平台服务管理分组用林枢 logo）：与 el-icon 内 svg 同尺寸对齐 */
+  .menu-img-icon { width: 16px; height: 16px; flex: none; display: inline-block; vertical-align: middle; }
+  .brand-title { font-size: 16px; font-weight: 700; color: #0A3D6B; white-space: nowrap; letter-spacing: 1px; }
+  /* 多 iframe 缓存：每个 tab 一个独立 iframe，绝对定位叠放，v-show 切显隐，切 tab 不重载 */
+  .tab-frames { position: relative; width: 100%; height: 100%; }
+  .tab-iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: none; display: block; }
+  /* 底栏两个版本号统一靠右：弹性占位把内容推到右端，间距沿用 footer 的 gap */
+  .wd-station__footer-spacer { flex: 1 1 auto; }
+  .slot-page { padding: var(--wd-spacing-large, 16px); }
+  /* —— 通知中心（IM-7 ~ IM-13） —— */
+  /* 铃铛右缘不再额外加 margin：组件 header 自带 padding-right 16px（--wd-spacing-large） */
+  .nb-badge { margin-right: 0; }
+  .nb-bell { color: var(--wd-text-color-regular, #374151); }
+  .nb-popper.el-popper { padding: 0; }
+  .nb-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px 6px; }
+  .nb-title { font-size: 14px; font-weight: 600; color: #1f2937; }
+  .nb-tabs { padding: 0 10px; }
+  .nb-tabs .el-tabs__header { margin: 0 0 4px; }
+  .nb-list { max-height: 360px; overflow-y: auto; }
+  .nb-item { display: flex; align-items: flex-start; gap: 8px; padding: 10px 14px; cursor: pointer; border-top: 1px solid #f3f4f6; }
+  .nb-item:hover { background: #f8fafc; }
+  .nb-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--el-color-primary, #3b82f6); margin-top: 7px; flex: none; }
+  .nb-dot--none { background: transparent; }
+  .nb-content { flex: 1; min-width: 0; }
+  .nb-item-title { font-size: 13px; color: #9ca3af; line-height: 1.4; word-break: break-all; }
+  .nb-item.is-unread .nb-item-title { font-weight: 600; color: #111827; }
+  .nb-item-desc { margin-top: 3px; font-size: 12px; color: #6b7280; line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .nb-item.is-unread .nb-item-desc { color: #374151; }
+  .nb-meta { margin-top: 5px; display: flex; justify-content: space-between; gap: 8px; font-size: 11px; color: #9ca3af; }
+  .nb-link-ico { color: #c0c4cc; margin-top: 3px; flex: none; }
+  .nb-foot { display: flex; justify-content: center; padding: 8px 0; border-top: 1px solid #f3f4f6; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<script type="text/x-template" id="dash-tpl">
+  <div class="dash-page">
+    <wd-station
+      ref="stationRef"
+      :user-name="wd.user.name"
+      :menu-groups="menuGroups"
+      content-mode="tabs"
+      router-mode="html"
+      v-model:open-tabs="openTabs"
+      v-model:active-menu="activeMenu"
+      v-model:active-group="activeGroup"
+      @logout="onLogout">
+      <template #footer>
+        <span class="wd-station__footer-spacer"></span>
+        <span class="wd-station__footer-info">workdesktop-ai v{{ wdLibVersion }}</span>
+        <span class="wd-station__footer-copyright">{{ wd.platformVersion }}</span>
+      </template>
+      <template #logo="{ collapsed }">
+        <img class="brand-mark" :src="wd.site.logoUrl || '/brand/mark.svg'" :alt="wd.site.name">
+        <span v-if="!collapsed" class="brand-title">{{ wd.site.name }}</span>
+      </template>
+      <template #header-right>
+        <el-popover :width="380" placement="bottom-end" trigger="click" popper-class="nb-popper"
+                    @show="onPanelShow" @hide="onPanelHide">
+          <template #reference>
+            <el-badge :hidden="unread === 0" :value="unread" :max="99" class="nb-badge">
+              <el-button :icon="Bell" circle text class="nb-bell" title="站内通知"></el-button>
+            </el-badge>
+          </template>
+          <div class="nb-head">
+            <span class="nb-title">站内通知</span>
+            <el-button type="primary" link size="small" :disabled="unread === 0" @click="markAllRead">
+              全部已读
+            </el-button>
+          </div>
+          <el-tabs v-model="filter" class="nb-tabs" @tab-change="onFilterChange">
+            <el-tab-pane label="所有" name="all"></el-tab-pane>
+            <el-tab-pane label="未读" name="unread"></el-tab-pane>
+            <el-tab-pane label="已读" name="read"></el-tab-pane>
+          </el-tabs>
+          <div v-loading="loading" class="nb-list">
+            <template v-if="items.length">
+              <div v-for="it in items" :key="it.msg_key"
+                   class="nb-item" :class="{ 'is-unread': it.is_read === 0 }"
+                   @click="openItem(it)">
+                <span class="nb-dot" :class="{ 'nb-dot--none': it.is_read === 1 }"></span>
+                <div class="nb-content">
+                  <div class="nb-item-title">{{ it.title }}</div>
+                  <div v-if="it.content" class="nb-item-desc">{{ it.content }}</div>
+                  <div class="nb-meta">
+                    <span>{{ sourceLabel(it.source_pkg) }}</span>
+                    <span>{{ formatTime(it.created_at) }}</span>
+                  </div>
+                </div>
+                <el-icon v-if="it.link" class="nb-link-ico"><TopRight /></el-icon>
+              </div>
+            </template>
+            <el-empty v-else-if="!loading" description="暂无通知" :image-size="60"></el-empty>
+          </div>
+          <div class="nb-foot">
+            <el-pagination small layout="prev, pager, next" :total="total" :page-size="size"
+                           v-model:current-page="page" @current-change="loadItems" />
+          </div>
+        </el-popover>
+      </template>
+      <template #default>
+        <div class="tab-frames">
+          <iframe
+            v-for="f in frames"
+            :key="f.key"
+            :src="f.path"
+            v-show="f.key === activeMenu"
+            class="tab-iframe"
+            frameborder="0"></iframe>
+        </div>
+      </template>
+    </wd-station>
+  </div>
+</script>
+
+<script src="/static/vendor/vue/vue.global.prod.js"></script>
+<script src="/static/vendor/element-plus/index.full.min.js"></script>
+<script src="/static/vendor/icons/index.iife.min.js"></script>
+<script src="/static/vendor/workdesktop-ai/index.umd.js"></script>
+<script>
+  const { WorkDesktop, getGlobalConfig } = window.WorkDesktop;
+  const ElementPlus = window.ElementPlus;
+  const { ref, computed, onMounted, onBeforeUnmount } = Vue;
+  const Bell = window.ElementPlusIconsVue ? window.ElementPlusIconsVue.Bell : null;
+  const TopRight = window.ElementPlusIconsVue ? window.ElementPlusIconsVue.TopRight : null;
+  const wd = {:json_encode($wdState, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP)};
+  // workdesktop-ai 版本：以后端安装记录（data/platform-versions.json）为准，bundle 内常量兜底（上游 dist 烘焙的版本常量可能滞后）
+  const wdLibVersion = {:json_encode((string) $wdLibVersion, JSON_HEX_TAG | JSON_HEX_AMP)} || (getGlobalConfig() && getGlobalConfig().version) || '';
+
+  const app = Vue.createApp({
+    template: '#dash-tpl',
+    setup() {
+      const stationRef = ref(null);
+      const openTabs = ref([{ key: 'home', title: '首页', affix: true, icon: 'House' }]);
+      const activeMenu = ref('home');
+      const activeGroup = ref((wd.menuGroups && wd.menuGroups[0] && wd.menuGroups[0].key) || '');
+
+      // 菜单 icon 适配：以 / 开头的视为图片路径，转成 <img> 组件对象；其余保持原字符串（ElementPlus 图标名）
+      const imgIconComp = (src) => ({
+        render: () => Vue.h('img', { src, class: 'menu-img-icon', alt: '' }),
+      });
+      const adaptNode = (node) => {
+        const n = { ...node };
+        if (typeof n.icon === 'string' && n.icon.startsWith('/')) {
+          n.icon = imgIconComp(n.icon);
+        }
+        if (n.children) n.children = n.children.map(adaptNode);
+        return n;
+      };
+      // group 聚合：分导台下的一级菜单声明 group 时，group 值相同的节点聚合在同一个
+      // 标题分组下（标题行 disabled，仅作展示）；组内保留各节点自身——有子菜单的仍渲染为
+      // 可折叠子菜单，叶子仍直接可点。未声明 group 的一级菜单保持原样。group 仅对一级菜单生效。
+      const expandGroups = (menus) => {
+        const buckets = new Map();
+        for (const node of menus) {
+          if (!node.group) continue;
+          if (!buckets.has(node.group)) buckets.set(node.group, []);
+          buckets.get(node.group).push(node);
+        }
+        const out = [];
+        const merged = new Set();
+        for (const node of menus) {
+          if (node.group) {
+            if (merged.has(node.group)) continue;
+            merged.add(node.group);
+            out.push({ key: 'grp:' + node.group, title: node.group, path: '', icon: '', disabled: true });
+            out.push(...buckets.get(node.group).map(adaptNode));
+          } else {
+            out.push(adaptNode(node));
+          }
+        }
+        return out;
+      };
+      // 待办角标：轮询 /trade/todos/count（audit 待审核 + todo 待办），注入到「待办中心」菜单节点。
+      // UMD 侧 badge 为 0 或 undefined 时不渲染 el-badge，故计数为 0 时移除字段。
+      const todoCount = ref(0);
+      const TODO_PATH = 'trade/todos/index';
+      const injectBadge = (node) => {
+        const n = { ...node };
+        if (n.path && String(n.path).indexOf(TODO_PATH) >= 0) {
+          if (todoCount.value > 0) n.badge = todoCount.value;
+          else delete n.badge;
+        }
+        if (n.children) n.children = n.children.map(injectBadge);
+        return n;
+      };
+      const menuGroups = computed(() => (wd.menuGroups || []).map((g) => ({
+        ...g,
+        menus: expandGroups(g.menus || []).map(injectBadge),
+      })));
+
+      // 每个已打开 tab 对应一个独立 iframe（home 固定取角色首页路径）。
+      // iframe 只在 tab 首次打开时创建并加载，切 tab 仅 v-show 切显隐，src 不变即不重载，页面状态完整保留。
+      const frames = computed(() => openTabs.value.map((t) => ({
+        key: t.key,
+        path: t.key === 'home' ? (wd.roleHomePath || '') : (t.path || ''),
+      })));
+
+      // 按路径在菜单树中反查叶子节点，复刻 WdStation 内部的 _key 归一化（groupKey:path）
+      function findMenuByPath(path) {
+        for (const group of (wd.menuGroups || [])) {
+          const walk = (nodes) => {
+            for (const node of (nodes || [])) {
+              if (node.path === path) {
+                return { key: `${group.key}:${node.name || node.path || node.title}`, title: node.title, path: node.path, icon: node.icon, groupKey: group.key };
+              }
+              if (node.children && node.children.length) {
+                const hit = walk(node.children);
+                if (hit) return hit;
+              }
+            }
+            return null;
+          };
+          const found = walk(group.menus);
+          if (found) return found;
+        }
+        return null;
+      }
+
+      // 供内容区 iframe（角色首页）通过 top.openTab(path, title) 直接调用，
+      // 在本工作台打开对应 tab。反查菜单保证 tab key 与左侧菜单高亮、去重完全一致。
+      function openTabInStation(path, title) {
+        if (!path) return;
+        const menu = findMenuByPath(path);
+        // html 路由模式下 WdStation 不会随 tab 自动切换菜单组，这里先同步切到目标菜单所在组，
+        // 保证左侧菜单展开并高亮对应项
+        if (menu && menu.groupKey && activeGroup.value !== menu.groupKey) activeGroup.value = menu.groupKey;
+        const tab = menu || { key: `ext:${path}`, title: title || path, path };
+        stationRef.value && stationRef.value.openTab(tab);
+      }
+      // 暴露给顶层窗口，内页（iframe）直接 top.openTab 联动打开 tab
+      window.openTab = openTabInStation;
+
+      // tab 标题图标由 WdStation（content-mode="tabs"、tab-icon 默认开启）原生渲染：
+      // tab 对象带 icon 字段时组件即在 label 前渲染 .wd-station__tab-icon。
+      // 首页在 openTabs 初始项固定 icon:'House'，菜单 tab 的 icon 随 openTab 透传。
+
+      function onLogout() {
+        window.location.href = wd.user.logoutUrl;
+      }
+
+      // —— 通知中心（IM-7 ~ IM-13）：根路径 /inbox/* JSON 接口 ——
+      const unread = ref(0);
+      const items = ref([]);
+      const total = ref(0);
+      const filter = ref('all'); // IM-9：默认选中「所有」
+      const page = ref(1);
+      const size = ref(10);
+      const loading = ref(false);
+      const panelOpen = ref(false);
+      let pollTimer = null;
+
+      // 根级路由接受表单编码 POST；未登录返回 code=-401，静默处理
+      async function apiGet(url) {
+        const r = await fetch(url, { credentials: 'same-origin' });
+        return r.json();
+      }
+      async function apiPost(url, body) {
+        const r = await fetch(url, {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams(body || {}).toString(),
+        });
+        return r.json();
+      }
+
+      async function loadUnread() {
+        try {
+          const json = await apiGet('/inbox/unreadCount');
+          if (json.code === 0) unread.value = json.data.unread || 0;
+        } catch (e) { /* 静默：网络抖动不影响工作台 */ }
+      }
+
+      // 进销存待办计数（与菜单角标共用）：/trade/todos/count
+      async function loadTodoCount() {
+        try {
+          const json = await apiGet('/trade/todos/count');
+          if (json.code === 0) todoCount.value = (json.data.audit || 0) + (json.data.todo || 0);
+        } catch (e) { /* 静默 */ }
+      }
+
+      async function loadItems() {
+        loading.value = true;
+        try {
+          const q = new URLSearchParams({
+            filter: filter.value,
+            page: String(page.value),
+            size: String(size.value),
+          });
+          const json = await apiGet('/inbox/list?' + q.toString());
+          if (json.code === 0) {
+            items.value = json.data.items || [];
+            total.value = json.data.total || 0;
+          }
+        } catch (e) { /* 静默 */ } finally {
+          loading.value = false;
+        }
+      }
+
+      function onPanelShow() {
+        panelOpen.value = true;
+        page.value = 1;
+        loadItems();
+        loadUnread();
+      }
+      function onPanelHide() { panelOpen.value = false; }
+
+      function onFilterChange(name) {
+        filter.value = name;
+        page.value = 1;
+        loadItems();
+      }
+
+      // IM-10/13：先标记已读（幂等，失败不阻断），有链接再跳转业务页面
+      async function openItem(it) {
+        if (it.is_read === 0) {
+          it.is_read = 1;
+          if (unread.value > 0) unread.value -= 1;
+          apiPost('/inbox/read', { msg_key: it.msg_key }).then((json) => {
+            if (json.code === 0) unread.value = json.data.unread || 0;
+          }).catch(() => {});
+          if (filter.value === 'unread') loadItems();
+        }
+        if (it.link) {
+          // 宿主内路由（admin 页面）走 station tab；外链整页跳转
+          if (String(it.link).indexOf('/admin/') === 0) {
+            openTabInStation(it.link, it.title);
+          } else {
+            window.location.href = it.link;
+          }
+        }
+      }
+
+      // IM-12：当前用户全部未读置已读
+      async function markAllRead() {
+        try {
+          const json = await apiPost('/inbox/readAll', {});
+          if (json.code === 0) {
+            unread.value = 0;
+            ElementPlus.ElMessage.success(json.data.affected ? `已将 ${json.data.affected} 条通知置为已读` : '所有通知均已读');
+            loadItems();
+          } else {
+            ElementPlus.ElMessage.error(json.message || '操作失败');
+          }
+        } catch (e) {
+          ElementPlus.ElMessage.error('操作请求失败');
+        }
+      }
+
+      function formatTime(t) {
+        if (!t) return '';
+        const d = new Date(t);
+        if (isNaN(d.getTime())) return t;
+        const p = (n) => String(n).padStart(2, '0');
+        return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+      }
+      function sourceLabel(pkg) {
+        if (!pkg || pkg === 'platform') return '平台通知';
+        return pkg;
+      }
+
+      onMounted(() => {
+        loadUnread();
+        loadTodoCount();
+        pollTimer = setInterval(() => { loadUnread(); loadTodoCount(); }, 60000); // 红点/角标轻量轮询，60s
+      });
+      onBeforeUnmount(() => { if (pollTimer) clearInterval(pollTimer); });
+
+      return {
+        stationRef, wd, wdLibVersion, openTabs, activeMenu, activeGroup, frames, menuGroups, onLogout,
+        Bell, TopRight, unread, items, total, filter, page, size, loading,
+        onPanelShow, onPanelHide, onFilterChange, loadItems, openItem, markAllRead, formatTime, sourceLabel,
+      };
+    }
+  });
+
+  // 全局注册 ElementPlus 图标，供 WdStation 的 icon 名称字符串解析
+  for (const [name, comp] of Object.entries(window.ElementPlusIconsVue)) {
+    app.component(name, comp);
+  }
+
+  app.use(ElementPlus);
+  app.use(WorkDesktop);
+  app.mount('#app');
+</script>
+</body>
+</html>

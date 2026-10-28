@@ -1,0 +1,19 @@
+{
+    "name": "lin/lin-trade",
+    "description": "林销（进销存）功能包：管采购、库存、销售",
+    "type": "library",
+    "license": "Apache-2.0",
+    "autoload": {
+        "psr-4": {
+            "Lg\\Pack\\Trade\\": "src/"
+        }
+    },
+    "require": {
+        "php": ">=8.1"
+    },
+    "extra": {
+        "lin": {
+            "short": "lin-trade"
+        }
+    }
+}

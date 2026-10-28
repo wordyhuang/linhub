@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>全局设置 - {:htmlspecialchars($siteName)}</title>
+  <link rel="icon" type="image/svg+xml" href="/brand/favicon.svg">
+  <link rel="stylesheet" href="/static/vendor/element-plus/index.css">
+  <link rel="stylesheet" href="/static/vendor/workdesktop-ai/style.css">
+  <style>
+    html, body, #app { height: 100%; margin: 0; }
+    body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif; }
+    .st-page { height: 100%; padding: 16px 20px 24px; box-sizing: border-box; }
+    .st-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 14px; }
+    .st-card { border: 1px solid var(--el-border-color-light, #e4e7ed); border-radius: 8px; padding: 16px; background: var(--el-bg-color, #fff); }
+    .st-card h3 { margin: 0 0 14px; font-size: 15px; }
+    .st-hint { color: #909399; font-size: 12px; line-height: 1.7; }
+    .st-preview { display: flex; align-items: center; justify-content: center; width: 100%; height: 160px; border: 1px dashed var(--el-border-color, #dcdfe6); border-radius: 8px; background: var(--el-fill-color-lighter, #fafafa); overflow: hidden; }
+    .st-preview img { max-width: 100%; max-height: 100%; object-fit: contain; }
+    .st-actions { margin-top: 12px; display: flex; gap: 10px; flex-wrap: wrap; }
+    .st-foot { margin-top: 14px; }
+  </style>
+</head>
+
+<body>
+  <div id="app"></div>
+
+  <script type="text/x-template" id="st-tpl">
+    <div class="st-page" v-loading="loading" element-loading-text="加载中...">
+      <wd-panel :border="true">
+        <wd-tips type="box" style="margin-bottom:12px">
+          平台全局设置：站点名称、网络备案号（ICP）与站点 logo。保存后，登录页、工作台及浏览器标题等全站品牌信息将统一从这里的设置提取。
+        </wd-tips>
+
+        <div class="st-grid">
+          <!-- 站点信息 -->
+          <div class="st-card">
+            <h3>站点信息</h3>
+            <el-form label-width="90px" @submit.prevent>
+              <el-form-item label="站点名称" required>
+                <el-input v-model="form.site_name" placeholder="如：LinHub 林枢" maxlength="60" show-word-limit />
+                <div class="st-hint">用于登录页、工作台侧边栏与浏览器标题后缀等全站品牌展示。</div>
+              </el-form-item>
+              <el-form-item label="备案号">
+                <el-input v-model="form.icp" placeholder="如：京ICP备12345678号" maxlength="120" />
+                <div class="st-hint">
+                  有值时才显示在登录页底部，点击跳转
+                  <a :href="icpLink" target="_blank" rel="noopener" style="color:var(--el-color-primary,#3b82f6)">工信部备案管理系统</a>
+                  （beian.miit.gov.cn）。
+                </div>
+              </el-form-item>
+            </el-form>
+            <div class="st-foot">
+              <el-button type="primary" :icon="Check" :loading="saving" @click="saveInfo">保存站点信息</el-button>
+            </div>
+          </div>
+
+          <!-- 站点 logo -->
+          <div class="st-card">
+            <h3>站点 logo</h3>
+            <div class="st-preview">
+              <template v-if="previewUrl">
+                <img :src="previewUrl" alt="站点 logo 预览" />
+              </template>
+              <el-empty v-else description="使用内置 logo" :image-size="60" />
+            </div>
+            <div class="st-actions">
+              <el-upload
+                :show-file-list="false"
+                :http-request="uploadLogo"
+                accept="image/*"
+                :before-upload="beforeUpload">
+                <el-button type="primary" :icon="Upload" :loading="uploading">上传 / 更换 logo</el-button>
+              </el-upload>
+              <el-button :icon="RefreshLeft" :disabled="!logoConfigured" @click="resetLogo">还原内置 logo</el-button>
+            </div>
+            <div class="st-hint" style="margin-top:10px">
+              上传后即时生效：登录页大图与工作台小标均使用该图片；未上传时回退系统内置 logo。仅接受图片文件。
+            </div>
+          </div>
+        </div>
+      </wd-panel>
+    </div>
+  </script>
+
+  <script src="/static/vendor/vue/vue.global.prod.js"></script>
+  <script src="/static/vendor/element-plus/index.full.min.js"></script>
+  <script src="/static/vendor/icons/index.iife.min.js"></script>
+  <script src="/static/vendor/workdesktop-ai/index.umd.js"></script>
+  <script>
+    const WD = window.WorkDesktop;
+    const ElementPlus = window.ElementPlus;
+    const { WorkDesktop } = WD;
+    const { ref, reactive, computed } = Vue;
+    const { Check, Upload, RefreshLeft } = window.ElementPlusIconsVue || {};
+
+    const app = Vue.createApp({
+      template: '#st-tpl',
+      setup() {
+        const loading = ref(false);
+        const saving = ref(false);
+        const uploading = ref(false);
+        const icpLink = ref('https://beian.miit.gov.cn/');
+        const form = reactive({ site_name: '', icp: '' });
+        const state = reactive({ logo_token: '', logo_url: '' });
+        const nonce = ref(Date.now());
+        const previewUrl = computed(() =>
+          state.logo_url ? state.logo_url + (state.logo_url.indexOf('?') >= 0 ? '&' : '?') + 't=' + nonce.value : ''
+        );
+        const logoConfigured = computed(() => !!state.logo_token);
+
+        async function load() {
+          loading.value = true;
+          try {
+            const res = await WD.request.get('/admin/site_admin/state');
+            if (!res.success) {
+              ElementPlus.ElMessage.error(res.message || '加载失败');
+              return;
+            }
+            form.site_name = res.data.site_name || '';
+            form.icp = res.data.icp || '';
+            state.logo_token = res.data.logo_token || '';
+            state.logo_url = res.data.logo_url || '';
+            icpLink.value = res.data.icp_link || 'https://beian.miit.gov.cn/';
+          } finally {
+            loading.value = false;
+          }
+        }
+
+        function beforeUpload(file) {
+          if (!file.type.startsWith('image/')) {
+            ElementPlus.ElMessage.error('仅支持图片文件');
+            return false;
+          }
+          return true;
+        }
+
+        // multipart 上传：同源 fetch 自动携带会话 cookie
+        function uploadLogo(option) {
+          const fd = new FormData();
+          fd.append('file', option.file);
+          uploading.value = true;
+          fetch('/admin/site_admin/logoUpload', { method: 'POST', body: fd, credentials: 'same-origin' })
+            .then(r => r.json())
+            .then(json => {
+              if (json.code === 0) {
+                ElementPlus.ElMessage.success(json.message || '站点 logo 已更新');
+                nonce.value = Date.now();
+                load();
+              } else {
+                ElementPlus.ElMessage.error(json.message || '上传失败');
+              }
+            })
+            .catch(() => ElementPlus.ElMessage.error('上传请求失败'))
+            .finally(() => { uploading.value = false; });
+        }
+
+        async function resetLogo() {
+          try {
+            await ElementPlus.ElMessageBox.confirm('清除站点 logo 并恢复系统内置 logo？', '确认还原', {
+              confirmButtonText: '还原', cancelButtonText: '取消', type: 'warning'
+            });
+          } catch (e) { return; }
+          const res = await WD.request.post('/admin/site_admin/logoReset', {});
+          ElementPlus.ElMessage[res.success ? 'success' : 'error'](res.message || (res.success ? '已还原' : '还原失败'));
+          if (res.success) { nonce.value = Date.now(); load(); }
+        }
+
+        async function saveInfo() {
+          if (!form.site_name || !form.site_name.trim()) {
+            ElementPlus.ElMessage.error('站点名称不能为空');
+            return;
+          }
+          saving.value = true;
+          try {
+            const res = await WD.request.post('/admin/site_admin/save', {
+              site_name: form.site_name,
+              icp: form.icp,
+            });
+            ElementPlus.ElMessage[res.success ? 'success' : 'error'](res.message || (res.success ? '已保存' : '保存失败'));
+            if (res.success) load();
+          } finally {
+            saving.value = false;
+          }
+        }
+
+        load();
+        return { loading, saving, uploading, icpLink, form, state, previewUrl, logoConfigured,
+                 uploadLogo, beforeUpload, resetLogo, saveInfo };
+      }
+    });
+
+    for (const [name, comp] of Object.entries(window.ElementPlusIconsVue)) {
+      app.component(name, comp);
+    }
+    app.use(ElementPlus);
+    app.use(WorkDesktop);
+    app.mount('#app');
+  </script>
+</body>
+
+</html>

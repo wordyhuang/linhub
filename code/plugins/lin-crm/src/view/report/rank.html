@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>林客销售排行 - 林客CRM</title>
+  <link rel="icon" type="image/svg+xml" href="/brand/favicon.svg">
+  <link rel="stylesheet" href="/static/vendor/element-plus/index.css">
+  <link rel="stylesheet" href="/static/vendor/workdesktop-ai/style.css">
+  <style>
+    html, body, #app { height: 100%; margin: 0; }
+    body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif; }
+    .crm-page { height: 100%; padding: 16px 20px 24px; box-sizing: border-box; }
+    .crm-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+    .rank-row { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+    .rank-no { width: 26px; height: 26px; border-radius: 50%; background: #f5f7fa; color: #606266;
+               font-size: 12px; display: flex; align-items: center; justify-content: center; flex: none; }
+    .rank-row:nth-child(-n+3) .rank-no { background: #f56c6c; color: #fff; }
+    .rank-name { width: 84px; font-size: 12px; color: #606266; flex: none; }
+    .rank-bar-wrap { flex: 1; height: 18px; background: #f5f7fa; border-radius: 9px; overflow: hidden; }
+    .rank-bar { height: 100%; border-radius: 9px; background: linear-gradient(90deg, #409eff, #79bbff); min-width: 2px; }
+    .rank-row:nth-child(-n+3) .rank-bar { background: linear-gradient(90deg, #f56c6c, #fab6b6); }
+    .rank-val { width: 110px; text-align: right; font-size: 12px; color: #303133; font-weight: 600; flex: none; }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+
+  <script type="text/x-template" id="crm-rank-tpl">
+  <div class="crm-page">
+    <wd-tips type="box" style="display:flex;margin-bottom:12px">
+      排行提供四个口径：新增客户、商机金额、合同额、回款额；周期默认近 30 天，可切换 7/30/90 天。TOP 20 榜单。
+    </wd-tips>
+
+    <wd-panel :border="true" title="销售排行 TOP20">
+      <div class="crm-toolbar">
+        <el-select v-model="metric" size="small" style="width:150px" @change="load">
+          <el-option label="新增客户数" value="new_customer" />
+          <el-option label="商机金额" value="opportunity_amount" />
+          <el-option label="合同额" value="contract_amount" />
+          <el-option label="回款额" value="receivable_paid" />
+        </el-select>
+        <el-select v-model="days" size="small" style="width:110px" @change="load">
+          <el-option label="近 7 天" :value="7" />
+          <el-option label="近 30 天" :value="30" />
+          <el-option label="近 90 天" :value="90" />
+        </el-select>
+        <el-button size="small" :icon="Search" @click="load">刷新</el-button>
+      </div>
+      <!-- 榜单条形图（TOP10） -->
+      <div v-if="rows.length" style="margin-bottom:16px">
+        <div v-for="(row, i) in rows.slice(0, 10)" :key="i" class="rank-row">
+          <span class="rank-no">{{ i + 1 }}</span>
+          <span class="rank-name">负责人 #{{ row.owner_id }}</span>
+          <div class="rank-bar-wrap"><div class="rank-bar" :style="{ width: barPct(row.val) + '%' }"></div></div>
+          <span class="rank-val">{{ isAmount ? '¥ ' + fmtNum(row.val, 0) : row.val }}</span>
+        </div>
+      </div>
+      <el-table :data="rows" size="small" border>
+        <el-table-column label="名次" width="70" align="center">
+          <template #default="{ $index }">
+            <el-tag :type="$index < 3 ? 'danger' : 'info'" size="small">{{ $index + 1 }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="owner_id" label="负责人ID" width="120" />
+        <el-table-column :label="metricLabel" align="right">
+          <template #default="{ row }">{{ isAmount ? ('¥ ' + fmtNum(row.val, 2)) : row.val }}</template>
+        </el-table-column>
+        <template #empty><el-empty :image-size="60" description="周期内暂无数据" /></template>
+      </el-table>
+    </wd-panel>
+  </div>
+</script>
+
+  <script src="/static/vendor/vue/vue.global.prod.js"></script>
+  <script src="/static/vendor/element-plus/index.full.min.js"></script>
+  <script src="/static/vendor/icons/index.iife.min.js"></script>
+  <script src="/static/vendor/workdesktop-ai/index.umd.js"></script>
+  <script>
+    const WD = window.WorkDesktop;
+    const ElementPlus = window.ElementPlus;
+    const { WorkDesktop } = WD;
+    const { ref, computed } = Vue;
+
+    function fmtNum(v, dec) {
+      if (v === null || v === undefined || v === '') return '-';
+      const n = Number(v);
+      return isNaN(n) ? '-' : n.toLocaleString('zh-CN', { minimumFractionDigits: dec, maximumFractionDigits: dec });
+    }
+
+    const app = Vue.createApp({
+      template: '#crm-rank-tpl',
+      setup() {
+        const metric = ref('contract_amount');
+        const days = ref(30);
+        const rows = ref([]);
+        const Search = window.ElementPlusIconsVue.Search;
+        const metricLabel = computed(() => ({ new_customer: '新增客户数', opportunity_amount: '商机金额', contract_amount: '合同额', receivable_paid: '回款额' }[metric.value]));
+        const isAmount = computed(() => metric.value !== 'new_customer');
+        const maxVal = computed(() => Math.max(1, ...rows.value.map(r => Number(r.val || 0))));
+        const barPct = (v) => Math.min(100, Math.round(Number(v || 0) / maxVal.value * 100));
+
+        async function load() {
+          const res = await fetch('/lin-crm/report/rank', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ metric: metric.value, days: days.value }) });
+          const body = await res.json();
+          if (body.code === 0) rows.value = body.data.rows || [];
+          else { rows.value = []; ElementPlus.ElMessage.error(body.message || '加载失败'); }
+        }
+        load();
+        return { metric, days, rows, Search, metricLabel, isAmount, barPct, load, fmtNum };
+      }
+    });
+    for (const [name, comp] of Object.entries(window.ElementPlusIconsVue)) app.component(name, comp);
+    app.use(ElementPlus);
+    app.use(WorkDesktop);
+    app.mount('#app');
+  </script>
+</body>
+</html>

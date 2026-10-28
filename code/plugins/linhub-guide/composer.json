@@ -1,0 +1,12 @@
+{
+    "name": "lgg/demo",
+    "type": "project",
+    "autoload": {
+        "psr-4": {
+            "Lg\\Pack\\LinhubGuide\\": "src/"
+        }
+    },
+    "extra": {
+        "lgg": true
+    }
+}

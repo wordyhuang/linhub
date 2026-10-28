@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>打印模板设置 - 林销</title>
+  <link rel="icon" type="image/svg+xml" href="/brand/favicon.svg">
+  <link rel="stylesheet" href="/static/vendor/element-plus/index.css">
+  <link rel="stylesheet" href="/static/vendor/workdesktop-ai/style.css">
+  <style>
+    html,
+    body,
+    #app {
+      height: 100%;
+      margin: 0;
+    }
+
+    body {
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+
+    .trade-page {
+      height: 100%;
+      padding: 16px 20px 24px;
+      box-sizing: border-box;
+      display: flex;
+      gap: 16px;
+    }
+
+    .trade-side {
+      width: 360px;
+      flex-shrink: 0;
+      overflow: auto;
+    }
+
+    .trade-main {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* wd-panel 把 body 包在 content / content-inner 两层壳里，外壳不撑开时预览区会按内容高度收缩 */
+    .trade-main .wd-panel__content,
+    .trade-main .wd-panel__content-inner {
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .trade-main .wd-panel__body {
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* 左栏宽度有限，允许 wd-panel 的说明文字换行，避免被省略号截断 */
+    .trade-side .wd-panel__header-main {
+      flex-wrap: wrap;
+    }
+
+    .trade-side .wd-panel__description {
+      white-space: normal;
+      overflow: visible;
+      text-overflow: clip;
+    }
+
+    .tpl-item {
+      display: block;
+      padding: 10px 12px;
+      border: 1px solid #dcdfe6;
+      border-radius: 6px;
+      margin-bottom: 10px;
+      cursor: pointer;
+      transition: border-color .15s;
+    }
+
+    .tpl-item:hover {
+      border-color: #409eff;
+    }
+
+    .tpl-item.active {
+      border-color: #409eff;
+      background: #ecf5ff;
+    }
+
+    .tpl-item .tpl-name {
+      font-weight: 600;
+      color: #303133;
+    }
+
+    .tpl-item .tpl-desc {
+      font-size: 12px;
+      color: #909399;
+      margin-top: 2px;
+    }
+
+    .preview-wrap {
+      flex: 1;
+      min-height: 0;
+      overflow: auto;
+      background: #f5f7fa;
+      border-radius: 4px;
+      padding: 12px;
+      display: flex;
+      justify-content: center;
+    }
+
+    .preview-wrap.is-compact .preview-frame {
+      width: 420px;
+    }
+
+    .preview-frame {
+      width: 100%;
+      height: 100%;
+      border: none;
+      background: #fff;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, .08);
+      border-radius: 4px;
+    }
+
+    .trade-hint {
+      font-size: 12px;
+      color: #999;
+      line-height: 1.7;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="app"></div>
+
+  <script type="text/x-template" id="print-template-tpl">
+  <div class="trade-page">
+    <div class="trade-side">
+      <wd-tips type="box" style="display:flex;margin-bottom:12px">
+        设置本机打印单据使用的模板，并实时预览出单效果。模板保存在当前浏览器，不同电脑需分别设置；保存后新开的打印窗口才会应用。
+      </wd-tips>
+
+      <wd-panel title="打印模板" :border="true" style="margin-bottom:16px"
+                description="A4 标准版用于正式单据存档，58mm 小票版用于随货小票；切换后右侧预览即时刷新，需点「保存设置」才对本机打印生效。">
+        <div v-for="t in templates" :key="t.value" class="tpl-item" :class="{ active: tpl === t.value }"
+             @click="tpl = t.value">
+          <div class="tpl-name">
+            <el-radio :model-value="tpl" :value="t.value" @click.stop>{{ t.label }}</el-radio>
+          </div>
+          <div class="tpl-desc">{{ t.desc }}</div>
+        </div>
+        <div class="trade-hint" style="margin-top:8px">
+          切换模板后右侧预览即时刷新；打印窗口将按「打印模板设置」中选择的模板出单。
+        </div>
+      </wd-panel>
+
+      <wd-panel title="预览单据类型" :border="true" style="margin-bottom:16px"
+                description="只影响右侧预览的单据类型，不改变已保存的模板选择；预览使用内置样例数据，不会读写真实单据。">
+        <el-select v-model="docType" style="width:100%">
+          <el-option v-for="d in docTypes" :key="d.value" :label="d.label" :value="d.value" />
+        </el-select>
+        <div style="margin-top:12px;display:flex;gap:8px">
+          <el-button type="primary" :icon="Check" @click="save">保存设置</el-button>
+          <el-button :icon="Refresh" @click="reloadPreview">刷新预览</el-button>
+        </div>
+        <el-alert v-if="savedName" type="success" :closable="false" show-icon style="margin-top:12px">
+          当前生效模板：{{ savedName }}
+        </el-alert>
+      </wd-panel>
+
+      <wd-panel title="说明" :border="true">
+        <div class="trade-hint">
+          · 模板设置保存在本浏览器（localStorage），各终端需分别设置。<br>
+          · 服务端配置项 trade.print.template 为缺省兜底，本页面无法修改该只读配置。<br>
+          · 打印链接带 ?tpl= 参数时优先级最高，可临时指定模板。<br>
+          · 模板值非法时打印页自动降级为 A4 标准版并提示。
+        </div>
+      </wd-panel>
+    </div>
+
+    <div class="trade-main">
+      <wd-panel :border="true" title="实时预览"
+                description="左侧选择模板与单据类型后，此处按 A4 或小票版比例展示样例单据；实际出单效果以打印窗口为准。"
+                style="flex:1;display:flex;flex-direction:column;min-height:0">
+        <template #extra>
+          <el-tag size="small" type="info">{{ previewTypeName }} · {{ tplName }}</el-tag>
+        </template>
+        <div class="preview-wrap" :class="{ 'is-compact': tpl === 'compact' }">
+          <iframe class="preview-frame" :src="previewUrl" :key="previewKey" title="打印模板预览"></iframe>
+        </div>
+      </wd-panel>
+    </div>
+  </div>
+</script>
+
+  <script src="/static/vendor/vue/vue.global.prod.js"></script>
+  <script src="/static/vendor/element-plus/index.full.min.js"></script>
+  <script src="/static/vendor/icons/index.iife.min.js"></script>
+  <script src="/static/vendor/workdesktop-ai/index.umd.js"></script>
+  <script>
+    const WD = window.WorkDesktop;
+    const ElementPlus = window.ElementPlus;
+    const { WorkDesktop } = WD;
+    const Icons = window.ElementPlusIconsVue;
+    const { ref, computed, onMounted } = Vue;
+
+    // 与打印页 TEMPLATES / DOC_TYPES 保持一致
+    const TEMPLATES = [
+      { value: 'classic', label: 'A4 标准版', desc: '适合 A4 / 针式打印机，正式单据存档' },
+      { value: 'compact', label: '58mm 小票版', desc: '适合 58mm 热敏小票打印机，随货同行' }
+    ];
+    const DOC_TYPES = [
+      { value: 'purchase', label: '采购单' },
+      { value: 'sale', label: '销售单' },
+      { value: 'purchase_return', label: '采购退货单' },
+      { value: 'sale_return', label: '销售退货单' },
+      { value: 'stocktake', label: '库存盘点单' },
+      { value: 'transfer', label: '库存调拨单' },
+      { value: 'reconciliation', label: '对账单' }
+    ];
+    const STORAGE_KEY = 'trade.print.template';
+
+    const app = Vue.createApp({
+      template: '#print-template-tpl',
+      setup() {
+        const Check = Icons.Check;
+        const Refresh = Icons.Refresh;
+
+        const tpl = ref('classic');
+        const docType = ref('sale');
+        const previewKey = ref(0);
+        const savedName = ref('');
+
+        const templates = TEMPLATES;
+        const docTypes = DOC_TYPES;
+
+        const tplName = computed(() => {
+          const t = TEMPLATES.find(x => x.value === tpl.value);
+          return t ? t.label : 'A4 标准版';
+        });
+        const previewTypeName = computed(() => {
+          const d = DOC_TYPES.find(x => x.value === docType.value);
+          return d ? d.label : '';
+        });
+
+        // demo=1 使用打印页内置样例数据，不请求真实单据
+        const previewUrl = computed(() => {
+          return '/trade/print/index?type=' + docType.value + '&tpl=' + tpl.value + '&demo=1';
+        });
+
+        function reloadPreview() {
+          previewKey.value++;
+        }
+
+        function save() {
+          const t = TEMPLATES.find(x => x.value === tpl.value);
+          try {
+            localStorage.setItem(STORAGE_KEY, tpl.value);
+          } catch (e) {
+            ElementPlus.ElMessage.error('保存失败：浏览器 localStorage 不可用');
+            return;
+          }
+          savedName.value = t ? t.label : '';
+          ElementPlus.ElMessage.success('已保存，新开打印窗口将使用「' + savedName.value + '」');
+        }
+
+        onMounted(() => {
+          let saved = null;
+          try {
+            saved = localStorage.getItem(STORAGE_KEY);
+          } catch (e) { /* localStorage 不可用时按缺省 classic */ }
+          if (saved && TEMPLATES.some(x => x.value === saved)) {
+            tpl.value = saved;
+            const t = TEMPLATES.find(x => x.value === saved);
+            savedName.value = t ? t.label : '';
+          } else {
+            savedName.value = TEMPLATES[0].label;
+          }
+        });
+
+        return {
+          tpl, docType, previewKey, savedName, templates, docTypes,
+          tplName, previewTypeName, previewUrl, reloadPreview, save,
+          Check, Refresh
+        };
+      }
+    });
+
+    for (const [name, comp] of Object.entries(window.ElementPlusIconsVue)) {
+      app.component(name, comp);
+    }
+    app.use(ElementPlus);
+    app.use(WorkDesktop);
+    app.mount('#app');
+  </script>
+</body>
+
+</html>

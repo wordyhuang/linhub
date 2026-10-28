@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LLM 调试台 - LinHub 林枢</title>
+  <link rel="icon" type="image/svg+xml" href="/brand/favicon.svg">
+  <link rel="stylesheet" href="/static/vendor/element-plus/index.css">
+  <link rel="stylesheet" href="/static/vendor/workdesktop-ai/style.css">
+  <style>
+    html, body, #app { height: 100%; margin: 0; }
+    body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif; }
+    .md-page { height: 100%; padding: 16px 20px 24px; box-sizing: border-box; overflow: auto; }
+    .md-mono { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
+    .md-layout { display: grid; grid-template-columns: 400px 1fr; gap: 16px; }
+    .md-text-block { background: #0f172a; color: #e2e8f0; padding: 12px; border-radius: 6px; white-space: pre-wrap; word-break: break-all; min-height: 200px; max-height: 480px; overflow: auto; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; line-height: 1.6; }
+    .md-meta { font-size: 12px; color: #6b7280; margin-top: 8px; }
+    .md-tabs { margin-bottom: 12px; }
+  </style>
+</head>
+
+<body>
+  <div id="app"></div>
+
+  <script type="text/x-template" id="md-tpl">
+    <div class="md-page">
+      <wd-panel :border="true">
+        <wd-tips type="box" style="margin-bottom:12px">
+          LLM 网关调试台（T11）：用于超管快速验证 provider 连通性。所有调用 caller 固定为 <span class="md-mono">admin.debug</span>，会写入调用日志但与业务 caller 隔离。
+        </wd-tips>
+
+        <el-tabs v-model="mode" class="md-tabs">
+          <el-tab-pane label="Chat 对话" name="chat">
+            <div class="md-layout">
+              <div>
+                <el-form label-width="100px" size="default">
+                  <el-form-item label="模型">
+                    <el-select v-model="chatForm.model" placeholder="选择模型" style="width:100%">
+                      <el-option v-for="m in chatModels" :key="m.code" :label="m.code + '（' + m.provider + '）'" :value="m.code" />
+                    </el-select>
+                  </el-form-item>
+                  <el-form-item label="Temperature">
+                    <el-input-number v-model="chatForm.temperature" :min="0" :max="2" :step="0.1" :precision="2" style="width:100%" />
+                  </el-form-item>
+                  <el-form-item label="Max Tokens">
+                    <el-input-number v-model="chatForm.max_tokens" :min="1" :max="200000" :step="256" style="width:100%" />
+                  </el-form-item>
+                  <el-form-item label="System 提示">
+                    <el-input v-model="chatForm.system" type="textarea" :rows="3" placeholder="可选" />
+                  </el-form-item>
+                  <el-form-item label="用户输入">
+                    <el-input v-model="chatForm.prompt" type="textarea" :rows="6" placeholder="输入你的问题" />
+                  </el-form-item>
+                  <el-form-item>
+                    <el-button type="primary" :icon="Promotion" :loading="chatLoading" @click="doChat" style="width:100%">发送</el-button>
+                  </el-form-item>
+                </el-form>
+              </div>
+              <div>
+                <h4 style="margin:0 0 8px">响应</h4>
+                <div class="md-text-block">{{ chatResult || '// 响应将显示在这里' }}</div>
+                <div class="md-meta" v-if="chatMeta">
+                  <span v-if="chatMeta.cost_ms">耗时: <span class="md-mono">{{ chatMeta.cost_ms }} ms</span></span>
+                  <span v-if="chatMeta.total_tokens" style="margin-left:12px">tokens: <span class="md-mono">{{ chatMeta.total_tokens }}</span></span>
+                </div>
+              </div>
+            </div>
+          </el-tab-pane>
+
+          <el-tab-pane label="Embedding 向量" name="embed">
+            <div class="md-layout">
+              <div>
+                <el-form label-width="100px">
+                  <el-form-item label="模型">
+                    <el-select v-model="embedForm.model" placeholder="选择 embedding 模型" style="width:100%">
+                      <el-option v-for="m in embedModels" :key="m.code" :label="m.code + '（' + m.provider + '）'" :value="m.code" />
+                    </el-select>
+                  </el-form-item>
+                  <el-form-item label="输入文本">
+                    <el-input v-model="embedForm.input" type="textarea" :rows="8" placeholder="每行一段文本，将被批量向量化" />
+                  </el-form-item>
+                  <el-form-item>
+                    <el-button type="primary" :icon="Promotion" :loading="embedLoading" @click="doEmbed" style="width:100%">生成向量</el-button>
+                  </el-form-item>
+                </el-form>
+              </div>
+              <div>
+                <h4 style="margin:0 0 8px">响应</h4>
+                <div class="md-text-block">{{ embedResult || '// 向量 JSON 将显示在这里' }}</div>
+                <div class="md-meta" v-if="embedMeta">
+                  <span v-if="embedMeta.dim">维度: <span class="md-mono">{{ embedMeta.dim }}</span></span>
+                  <span v-if="embedMeta.count" style="margin-left:12px">条数: <span class="md-mono">{{ embedMeta.count }}</span></span>
+                  <span v-if="embedMeta.cost_ms" style="margin-left:12px">耗时: <span class="md-mono">{{ embedMeta.cost_ms }} ms</span></span>
+                </div>
+              </div>
+            </div>
+          </el-tab-pane>
+        </el-tabs>
+      </wd-panel>
+    </div>
+  </script>
+
+  <script src="/static/vendor/vue/vue.global.prod.js"></script>
+  <script src="/static/vendor/element-plus/index.full.min.js"></script>
+  <script src="/static/vendor/icons/index.iife.min.js"></script>
+  <script src="/static/vendor/workdesktop-ai/index.umd.js"></script>
+  <script>
+    const WD = window.WorkDesktop;
+    const ElementPlus = window.ElementPlus;
+    const { WorkDesktop } = WD;
+    const { ref, reactive } = Vue;
+    const { Promotion } = window.ElementPlusIconsVue || {};
+
+    const app = Vue.createApp({
+      template: '#md-tpl',
+      setup() {
+        const mode = ref('chat');
+        const chatModels = ref([]);
+        const embedModels = ref([]);
+
+        const chatForm = reactive({ model: '', prompt: '', system: '', temperature: 0.7, max_tokens: 1024 });
+        const chatResult = ref('');
+        const chatMeta = ref(null);
+        const chatLoading = ref(false);
+
+        const embedForm = reactive({ model: '', input: '' });
+        const embedResult = ref('');
+        const embedMeta = ref(null);
+        const embedLoading = ref(false);
+
+        async function loadModels() {
+          try {
+            const res = await WD.request.get('/admin/llm_debug_admin/models');
+            if (!res.success) {
+              ElementPlus.ElMessage.error(res.message || '加载模型失败');
+              return;
+            }
+            const list = res.data || [];
+            chatModels.value = list.filter(m => m.capability === 'chat' || m.capability === 'chat_stream');
+            embedModels.value = list.filter(m => m.capability === 'embedding');
+            if (chatModels.value.length && !chatForm.model) chatForm.model = chatModels.value[0].code;
+            if (embedModels.value.length && !embedForm.model) embedForm.model = embedModels.value[0].code;
+          } catch (e) {
+            ElementPlus.ElMessage.error('加载模型列表失败');
+          }
+        }
+
+        async function doChat() {
+          if (!chatForm.model || !chatForm.prompt) {
+            ElementPlus.ElMessage.warning('请选择模型并输入内容');
+            return;
+          }
+          chatLoading.value = true;
+          chatResult.value = '';
+          chatMeta.value = null;
+          try {
+            const res = await WD.request.post('/admin/llm_debug_admin/chat', { ...chatForm });
+            if (!res.success) {
+              chatResult.value = '// ERROR: ' + (res.message || '未知错误');
+              return;
+            }
+            chatResult.value = res.data.content || '(空响应)';
+            chatMeta.value = {
+              cost_ms: res.data.cost_ms,
+              total_tokens: res.data.total_tokens
+            };
+          } catch (e) {
+            chatResult.value = '// EXCEPTION: ' + (e.message || e);
+          } finally {
+            chatLoading.value = false;
+          }
+        }
+
+        async function doEmbed() {
+          if (!embedForm.model || !embedForm.input.trim()) {
+            ElementPlus.ElMessage.warning('请选择模型并输入文本');
+            return;
+          }
+          embedLoading.value = true;
+          embedResult.value = '';
+          embedMeta.value = null;
+          try {
+            const res = await WD.request.post('/admin/llm_debug_admin/embed', { ...embedForm });
+            if (!res.success) {
+              embedResult.value = '// ERROR: ' + (res.message || '未知错误');
+              return;
+            }
+            const vectors = res.data.vectors || [];
+            embedMeta.value = {
+              count: vectors.length,
+              dim: vectors[0] ? vectors[0].length : 0,
+              cost_ms: res.data.cost_ms
+            };
+            embedResult.value = JSON.stringify(vectors, null, 2);
+          } catch (e) {
+            embedResult.value = '// EXCEPTION: ' + (e.message || e);
+          } finally {
+            embedLoading.value = false;
+          }
+        }
+
+        loadModels();
+
+        return {
+          mode, chatModels, embedModels, chatForm, chatResult, chatMeta, chatLoading,
+          embedForm, embedResult, embedMeta, embedLoading,
+          doChat, doEmbed, Promotion
+        };
+      }
+    });
+
+    for (const [name, comp] of Object.entries(window.ElementPlusIconsVue)) {
+      app.component(name, comp);
+    }
+    app.use(ElementPlus);
+    app.use(WorkDesktop);
+    app.mount('#app');
+  </script>
+</body>
+
+</html>

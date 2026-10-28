@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>库存管理 - 林销</title>
+  <link rel="icon" type="image/svg+xml" href="/brand/favicon.svg">
+  <link rel="stylesheet" href="/static/vendor/element-plus/index.css">
+  <link rel="stylesheet" href="/static/vendor/workdesktop-ai/style.css">
+  <style>
+    html,
+    body,
+    #app {
+      height: 100%;
+      margin: 0;
+    }
+
+    body {
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+
+    .trade-page {
+      height: 100%;
+      padding: 16px 20px 24px;
+      box-sizing: border-box;
+    }
+
+    .trade-stats {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 14px;
+      margin-bottom: 16px;
+    }
+
+    .trade-stat {
+      flex: 1;
+      min-width: 150px;
+    }
+
+    .trade-stat .num {
+      font-size: 24px;
+      font-weight: 700;
+      color: #409eff;
+    }
+
+    .trade-toolbar {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      margin-bottom: 14px;
+      gap: 12px;
+      width: 100%;
+    }
+
+    /* 工具栏插槽默认按内容收缩，撑满后才不会让左右两组按钮挤在一起 */
+    .wd-datagrid__toolbar-left {
+      flex: 1 1 auto;
+      min-width: 0;
+    }
+
+    .trade-low {
+      color: #f56c6c;
+      font-weight: 600;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="app"></div>
+
+  <script type="text/x-template" id="inventory-tpl">
+  <div class="trade-page">
+    <wd-tips type="box" style="display:flex;margin-bottom:12px">
+      库存管理展示各仓库的实时库存与金额概览，可切换低库存预警视图，并按商品查看库存流水。
+      库存数量由采购入库、销售出库、退货、盘点、调拨等业务单据驱动，本页不直接修改库存。
+    </wd-tips>
+
+    <wd-panel :border="true" title="库存概览" style="margin-bottom:16px"
+              description="统计范围为全部仓库的在库商品；库存金额按参考进价估算，仅作经营参考，不作为财务口径。">
+      <div class="trade-stats" style="margin-bottom:0">
+        <el-card v-for="s in stats" :key="s.label" shadow="never" class="trade-stat">
+          <div>
+            <div class="trade-stat num">{{ fmtNum(s.value, s.dec) }}</div>
+            <div style="font-size:12px;color:#999;margin-top:4px">{{ s.label }}</div>
+          </div>
+        </el-card>
+      </div>
+    </wd-panel>
+
+    <wd-panel :border="true" title="库存明细"
+              description="低于安全库存的行会标红并提示预警；点击行内「流水」可查看该商品的库存流水，来源单据列可追溯到对应业务单号。">
+      <wd-data-grid ref="grid" api="/trade/inventory/rows" api-method="get" :active="true" filter="trade-inventory" :with-index="false" :tools="{ refresh: true }">
+        <template #toolbar>
+          <div class="trade-toolbar">
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+              <el-input-number v-model="productId" :min="1" :precision="0" controls-position="right"
+                               placeholder="商品ID" style="width:150px" />
+              <el-button size="small" type="primary" :icon="viewLogsIcon" @click="showLogs">查看流水</el-button>
+            </div>
+            <el-button-group>
+              <el-button size="small" :type="curFilter === '' ? 'primary' : 'default'" @click="switchFilter('')">全部库存</el-button>
+              <el-button size="small" :type="curFilter === 'low' ? 'warning' : 'default'" @click="switchFilter('low')">低库存预警</el-button>
+            </el-button-group>
+          </div>
+        </template>
+
+        <el-table-column label="商品" min-width="160" show-overflow-tooltip>
+          <template #default="{ row }">{{ pname(row) }}</template>
+        </el-table-column>
+        <el-table-column label="编号" min-width="120">
+          <template #default="{ row }">{{ pno(row) }}</template>
+        </el-table-column>
+        <el-table-column label="仓库" min-width="120">
+          <template #default="{ row }">{{ wname(row) }}</template>
+        </el-table-column>
+        <el-table-column label="库存数量" width="110" align="right">
+          <template #default="{ row }">
+            <span :class="isLow(row) ? 'trade-low' : ''">{{ fmtNum(row.quantity, 0) }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="安全库存" width="110" align="right">
+          <template #default="{ row }">{{ fmtNum(safety(row), 0) }}</template>
+        </el-table-column>
+        <el-table-column label="状态" width="100">
+          <template #default="{ row }">
+            <el-tag size="small" :type="isLow(row) ? 'danger' : 'success'" effect="light">
+              {{ isLow(row) ? '预警' : '正常' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="100" align="center">
+          <template #default="{ row }">
+            <el-button size="small" link type="primary" @click="showRowLogs(row)">流水</el-button>
+          </template>
+        </el-table-column>
+        <template #empty><el-empty :image-size="80" description="暂无库存" /></template>
+      </wd-data-grid>
+    </wd-panel>
+
+    <el-dialog v-model="logVisible" title="库存流水" width="780px">
+      <el-table :data="logs" border stripe size="default" max-height="420">
+        <el-table-column prop="created_at" label="时间" min-width="160" />
+        <el-table-column label="类型" width="120">
+          <template #default="{ row }">{{ logTypeName(row.change_type) }}</template>
+        </el-table-column>
+        <el-table-column label="来源单据" min-width="170" show-overflow-tooltip>
+          <template #default="{ row }">{{ refLabel(row) }}</template>
+        </el-table-column>
+        <el-table-column label="变动数量" width="100" align="right">
+          <template #default="{ row }">
+            <span :style="Number(row.change_qty) >= 0 ? positiveCls : negativeCls">
+              {{ signed(row.change_qty) }}
+            </span>
+          </template>
+        </el-table-column>
+        <el-table-column label="变动前" width="90" align="right">
+          <template #default="{ row }">{{ fmtNum(row.before_qty, 0) }}</template>
+        </el-table-column>
+        <el-table-column label="变动后" width="90" align="right">
+          <template #default="{ row }">{{ fmtNum(row.after_qty, 0) }}</template>
+        </el-table-column>
+        <el-table-column label="仓库" min-width="110" show-overflow-tooltip>
+          <template #default="{ row }">{{ row.warehouse_name || '-' }}</template>
+        </el-table-column>
+        <template #empty><el-empty :image-size="70" description="无流水" /></template>
+      </el-table>
+    </el-dialog>
+  </div>
+</script>
+
+  <script src="/static/vendor/vue/vue.global.prod.js"></script>
+  <script src="/static/vendor/element-plus/index.full.min.js"></script>
+  <script src="/static/vendor/icons/index.iife.min.js"></script>
+  <script src="/static/vendor/workdesktop-ai/index.umd.js"></script>
+  <script>
+    const WD = window.WorkDesktop;
+    const ElementPlus = window.ElementPlus;
+    // 数字/金额格式化：千分位 + 指定小数位，空值显示 '-'
+    function fmtNum(v, dec) {
+      if (v === null || v === undefined || v === '') return '-';
+      const n = Number(v);
+      if (isNaN(n)) return '-';
+      return n.toLocaleString('zh-CN', { minimumFractionDigits: dec, maximumFractionDigits: dec });
+    }
+    const { WorkDesktop } = WD;
+    const Icons = window.ElementPlusIconsVue;
+    const { ref, onMounted } = Vue;
+
+    const TYPE_NAME = {
+      initial: '期初入库', purchase_in: '采购入库', sale_out: '销售出库',
+      sale_return: '销售退货入库', purchase_return: '采购退货出库',
+      return_in: '客户退货入库', return_out: '采购退货出库',
+      stocktake: '盘点调整', transfer_in: '调拨入库', transfer_out: '调拨出库',
+      reconcile_adjust: '库存校准'
+    };
+
+    // 来源单据类型：按 change_type 映射 ref_no 对应的单据类型（initial/reconcile_adjust 无单据）
+    const REF_TYPE = {
+      purchase_in: '采购订单', sale_out: '销售单', sale_return: '销售退货单',
+      purchase_return: '采购退货单', stocktake: '盘点单', transfer_in: '调拨单', transfer_out: '调拨单',
+      return_in: '销售单', return_out: '采购订单'
+    };
+
+    const app = Vue.createApp({
+      template: '#inventory-tpl',
+      setup() {
+        const viewLogsIcon = Icons.Tickets;
+        const positiveCls = { color: '#67c23a' };
+        const negativeCls = { color: '#f56c6c' };
+
+        const grid = ref(null);
+        const curFilter = ref('');
+        const productId = ref(null);
+        const logVisible = ref(false);
+        const logs = ref([]);
+
+        const stats = ref([
+          { label: '商品总数', value: 0, dec: 0 },
+          { label: '在库商品', value: 0, dec: 0 },
+          { label: '库存总量', value: 0, dec: 0 },
+          { label: '库存金额', value: 0, dec: 2 },
+          { label: '预警商品', value: 0, dec: 0 }
+        ]);
+
+        function pname(row) {
+          return (row.product && row.product.name) || row.product_name || '-';
+        }
+        function pno(row) {
+          return (row.product && row.product.product_no) || row.product_no || '-';
+        }
+        function safety(row) {
+          return (row.product && row.product.safety_stock) || row.safety_stock || 0;
+        }
+        function wname(row) {
+          return (row.warehouse && row.warehouse.name) || row.warehouse_id || '-';
+        }
+        function isLow(row) {
+          return Number(row.quantity) < Number(safety(row));
+        }
+        function signed(v) {
+          const n = Number(v) || 0;
+          return (n > 0 ? '+' : '') + n;
+        }
+        function logTypeName(t) {
+          return TYPE_NAME[t] || t;
+        }
+        function refLabel(row) {
+          const t = REF_TYPE[row.change_type];
+          if (!t || !row.ref_no) return '-';
+          return t + ' ' + row.ref_no;
+        }
+
+        function switchFilter(f) {
+          if (curFilter.value === f) return;
+          curFilter.value = f;
+          grid.value && grid.value.search({ filter: f });
+        }
+
+        function qs(obj) {
+          const p = new URLSearchParams();
+          for (const [k, v] of Object.entries(obj)) { if (v !== '' && v != null) p.append(k, v); }
+          const s = p.toString();
+          return s ? '?' + s : '';
+        }
+
+        async function loadLogs(id) {
+          const res = await WD.request.get('/trade/inventory/logs' + qs({ product_id: id }));
+          if (!res.success) { ElementPlus.ElMessage.error(res.message || '加载失败'); return; }
+          logs.value = res.data || [];
+          logVisible.value = true;
+        }
+
+        async function showLogs() {
+          if (!productId.value) { ElementPlus.ElMessage.warning('请输入商品ID'); return; }
+          await loadLogs(productId.value);
+        }
+
+        async function showRowLogs(row) {
+          const id = row.product_id || (row.product && row.product.id);
+          if (!id) { ElementPlus.ElMessage.warning('该行缺少商品信息'); return; }
+          productId.value = id;
+          await loadLogs(id);
+        }
+
+        async function loadStats() {
+          const res = await WD.request.get('/trade/report/overview');
+          if (!res.success) return;
+          const o = res.data.overview || {};
+          stats.value = [
+            { label: '商品总数', value: o.product_count || 0, dec: 0 },
+            { label: '在库商品', value: o.stock_products || 0, dec: 0 },
+            { label: '库存总量', value: o.total_qty || 0, dec: 0 },
+            { label: '库存金额', value: o.stock_amount || 0, dec: 2 },
+            { label: '预警商品', value: o.low_stock_count || 0, dec: 0 }
+          ];
+        }
+
+        onMounted(() => { loadStats(); });
+
+        return {
+          grid, curFilter, productId, logVisible, logs, stats,
+          switchFilter, showLogs, showRowLogs, pname, pno, safety, wname, isLow, signed,
+          logTypeName, refLabel,
+          positiveCls, negativeCls, viewLogsIcon, fmtNum
+        };
+      }
+    });
+
+    for (const [name, comp] of Object.entries(window.ElementPlusIconsVue)) {
+      app.component(name, comp);
+    }
+    app.use(ElementPlus);
+    app.use(WorkDesktop);
+    app.mount('#app');
+  </script>
+</body>
+
+</html>

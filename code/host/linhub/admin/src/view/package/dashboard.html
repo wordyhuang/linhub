@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>功能包看板 - LinHub 林枢</title>
+  <link rel="icon" type="image/svg+xml" href="/brand/favicon.svg">
+  <link rel="stylesheet" href="/static/vendor/element-plus/index.css">
+  <link rel="stylesheet" href="/static/vendor/workdesktop-ai/style.css">
+  <style>
+    html,
+    body,
+    #app {
+      height: 100%;
+      margin: 0;
+    }
+
+    body {
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+
+    .dash-page {
+      height: 100%;
+      padding: 16px 20px 24px;
+      box-sizing: border-box;
+      overflow: auto;
+    }
+
+    .overall-head {
+      margin: 2px 0 12px;
+    }
+
+    .overall-head .t {
+      font-size: 15px;
+      font-weight: 600;
+    }
+
+    .overall-head .d {
+      margin-top: 2px;
+      font-size: 12px;
+      color: var(--wd-text-color-secondary, #6b7280);
+    }
+
+    .stat-group-title {
+      margin: 6px 0 10px;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--wd-text-color-secondary, #6b7280);
+    }
+
+    .stat-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+
+    .stat-card {
+      border: 1px solid var(--el-border-color-light, #e4e7ed);
+      border-radius: 8px;
+      padding: 14px 16px;
+      background: var(--el-fill-color-blank, #fff);
+    }
+
+    .stat-value {
+      font-size: 24px;
+      font-weight: 700;
+      line-height: 1.3;
+    }
+
+    .stat-label {
+      margin-top: 2px;
+      font-size: 12px;
+      color: var(--wd-text-color-secondary, #6b7280);
+    }
+
+    .stat-card.is-accent .stat-value {
+      color: var(--el-color-primary, #409eff);
+    }
+
+    .stat-card.is-warn .stat-value {
+      color: var(--el-color-warning, #e6a23c);
+    }
+
+    .sub {
+      font-size: 12px;
+      color: var(--wd-text-color-secondary, #6b7280);
+    }
+
+    .num {
+      font-variant-numeric: tabular-nums;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="app"></div>
+
+  <script type="text/x-template" id="dash-tpl">
+  <div class="dash-page" v-loading="loading">
+        <!-- 总体统计（直接统计块，无面板包裹） -->
+        <div class="overall-head">
+          <div class="t">总体统计</div>
+          <div class="d">功能包安装概况与接入点合计。宿主平台版本：v{{ hostVersion || '—' }}</div>
+        </div>
+
+          <div class="stat-group-title">安装概况</div>
+          <div class="stat-grid">
+            <div class="stat-card is-accent">
+              <div class="stat-value num">{{ stats.overall.installed }}</div>
+              <div class="stat-label">已安装功能包</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-value num">{{ stats.overall.enabled }}</div>
+              <div class="stat-label">启用中</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-value num">{{ stats.overall.disabled }}</div>
+              <div class="stat-label">已禁用</div>
+            </div>
+            <div class="stat-card" :class="stats.overall.upgradable ? 'is-warn' : ''">
+              <div class="stat-value num">{{ stats.overall.upgradable }}</div>
+              <div class="stat-label">可升级</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-value num">{{ stats.overall.backups }}</div>
+              <div class="stat-label">备份数量</div>
+            </div>
+          </div>
+
+          <div class="stat-group-title">接入点合计（按注册表实际登记）</div>
+          <div class="stat-grid">
+            <div class="stat-card">
+              <div class="stat-value num">{{ stats.overall.permissions }}</div>
+              <div class="stat-label">权限点</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-value num">{{ stats.overall.menus }}</div>
+              <div class="stat-label">菜单项<span v-if="stats.overall.menusValid !== stats.overall.menus" class="sub">（有效 {{ stats.overall.menusValid }}）</span></div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-value num">{{ stats.overall.slots }}</div>
+              <div class="stat-label">工作台插槽</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-value num">{{ stats.overall.tables }}</div>
+              <div class="stat-label">数据表（声明）</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-value num">{{ stats.overall.migrations }}</div>
+              <div class="stat-label">迁移脚本</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-value num">{{ stats.overall.dependencies }}</div>
+              <div class="stat-label">依赖声明</div>
+            </div>
+          </div>
+
+        <!-- 明细：已安装功能包 -->
+        <wd-panel :border="true" title="已安装功能包明细">
+            <template #description>
+              逐包统计：接入点数量、备份与版本态势。接入点以注册表（registry.json）实际登记为准。
+            </template>
+
+          <wd-data-grid :data-source="stats.packages" border stripe :with-index="false" :with-pager="false">
+            <template #toolbar>
+              <el-button @click="loadData">
+                <el-icon><Refresh /></el-icon>
+                <span style="margin-left:4px">刷新</span>
+              </el-button>
+            </template>
+            <el-table-column label="包名 / 短名" min-width="180">
+              <template #default="{ row }">
+                <div>{{ row.title }}</div>
+                <div class="sub">{{ row.name }} · {{ row.short }}</div>
+              </template>
+            </el-table-column>
+            <el-table-column label="版本" width="130">
+              <template #default="{ row }">
+                <div>v{{ row.version || '—' }}</div>
+                <div v-if="row.upgrade_version" class="sub" style="color:var(--el-color-warning,#e6a23c)">可升级 v{{ row.upgrade_version }}</div>
+              </template>
+            </el-table-column>
+            <el-table-column label="状态" width="80" align="center">
+              <template #default="{ row }">
+                <el-tag :type="row.state === 'enabled' ? 'success' : 'info'" size="small">
+                  {{ row.state === 'enabled' ? '启用' : '禁用' }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="接入" width="80" align="center">
+              <template #default="{ row }">
+                <el-tag size="small" type="info">{{ row.access || 'admin' }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="installed_at" label="安装时间" width="170" :formatter="fmtDate" />
+            <el-table-column label="权限点" width="80" align="center" prop="permissions" />
+            <el-table-column label="菜单" width="80" align="center">
+              <template #default="{ row }">
+                <span class="num">{{ row.menus }}</span>
+                <span v-if="row.menus_valid !== row.menus" class="sub">（有效 {{ row.menus_valid }}）</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="工作台插槽" width="100" align="center" prop="slots" />
+            <el-table-column label="数据表" width="80" align="center" prop="tables" />
+            <el-table-column label="迁移脚本" width="90" align="center" prop="migrations" />
+            <el-table-column label="服务（提供/依赖/订阅）" width="160" align="center">
+              <template #default="{ row }">
+                <span class="num">{{ row.provides }} / {{ row.requires }} / {{ row.subscribes }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="依赖" width="70" align="center" prop="dependencies" />
+            <el-table-column label="备份 / 可回退" width="120" align="center">
+              <template #default="{ row }">
+                <span class="num">{{ row.backups }} / {{ row.rollback }}</span>
+              </template>
+            </el-table-column>
+            <template #empty>
+              <el-empty description="尚未安装任何功能包" :image-size="80" />
+            </template>
+          </wd-data-grid>
+        </wd-panel>
+
+        <!-- 明细：暂存区功能包 -->
+        <wd-panel :border="true" title="暂存区功能包明细">
+            <template #description>
+              暂存目录（lgg-pkg-短名）内的功能包：完整性与审核状态统计。待审核 {{ stats.stagingOverall.pending }} · 已驳回 {{ stats.stagingOverall.rejected }} · 可升级 {{ stats.stagingOverall.upgradable }}
+            </template>
+
+          <wd-data-grid :data-source="stats.staging" border stripe :with-index="false" :with-pager="false">
+            <el-table-column label="目录 / 短名" min-width="180">
+              <template #default="{ row }">
+                <div>{{ row.title }}</div>
+                <div class="sub">{{ row.dir }} · {{ row.short }}</div>
+              </template>
+            </el-table-column>
+            <el-table-column prop="version" label="暂存版本" width="100">
+              <template #default="{ row }">v{{ row.version || '—' }}</template>
+            </el-table-column>
+            <el-table-column label="完整性" width="90" align="center">
+              <template #default="{ row }">
+                <el-tooltip v-if="!row.valid" :content="(row.problems || []).join('；') || '结构校验未通过'" placement="top">
+                  <el-tag size="small" type="danger">异常</el-tag>
+                </el-tooltip>
+                <el-tag v-else size="small" type="success">通过</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="审核状态" width="110" align="center">
+              <template #default="{ row }">
+                <el-tag :type="reviewTagType(row.review_status)" size="small">{{ reviewText(row.review_status) }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="审核人 / 时间" width="200">
+              <template #default="{ row }">
+                <span v-if="row.reviewer">{{ row.reviewer }}</span>
+                <span v-else class="sub">—</span>
+                <div v-if="row.reviewed_at" class="sub">{{ fmtIso(row.reviewed_at) }}</div>
+              </template>
+            </el-table-column>
+            <el-table-column label="安装关系" width="150">
+              <template #default="{ row }">
+                <el-tag v-if="row.installed" size="small" :type="row.upgrade_version ? 'warning' : 'info'">
+                  {{ row.upgrade_version ? '可升级（当前 v' + row.installed_version + '）' : '同版本已安装' }}
+                </el-tag>
+                <el-tag v-else size="small" type="success">未安装</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="description" label="说明" min-width="160">
+              <template #default="{ row }">
+                <div class="sub">{{ row.description || '—' }}</div>
+              </template>
+            </el-table-column>
+            <template #empty>
+              <el-empty description="暂存目录为空，没有可安装的功能包" :image-size="80" />
+            </template>
+          </wd-data-grid>
+        </wd-panel>
+  </div>
+  </script>
+
+  <script src="/static/vendor/vue/vue.global.prod.js"></script>
+  <script src="/static/vendor/element-plus/index.full.min.js"></script>
+  <script src="/static/vendor/icons/index.iife.min.js"></script>
+  <script src="/static/vendor/workdesktop-ai/index.umd.js"></script>
+  <script>
+    const WD = window.WorkDesktop;
+    const ElementPlus = window.ElementPlus;
+    const { WorkDesktop } = WD;
+    const { ref, reactive } = Vue;
+
+    const app = Vue.createApp({
+      template: '#dash-tpl',
+      setup() {
+        const hostVersion = ref('');
+        const loading = ref(false);
+        const stats = ref({
+          overall: {},
+          packages: [],
+          staging: [],
+          stagingOverall: {},
+        });
+
+        // 把 ISO 8601（如 2026-10-22T13:45:32+08:00）格式化为 YYYY-MM-DD HH:mm:ss
+        function fmtIso(v) {
+          if (!v) return '—';
+          const d = new Date(String(v));
+          if (isNaN(d.getTime())) return String(v);
+          const p = (n) => String(n).padStart(2, '0');
+          return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ` +
+            `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+        }
+        // el-table formatter：入参为行对象
+        function fmtDate(row) {
+          return fmtIso(row.installed_at);
+        }
+        function reviewText(s) {
+          return { pending: '待审核', approved: '已通过', rejected: '已驳回', changed: '内容已变更' }[s] || '待审核';
+        }
+        function reviewTagType(s) {
+          return { pending: 'warning', approved: 'success', rejected: 'danger', changed: 'info' }[s] || 'warning';
+        }
+
+        async function loadData() {
+          loading.value = true;
+          try {
+            const res = await WD.request.get('/admin/package/dashboardStats');
+            if (!res.success) {
+              ElementPlus.ElMessage.error(res.message || '加载失败');
+              return;
+            }
+            hostVersion.value = res.data.hostVersion || '';
+            stats.value = Object.assign({
+              overall: {}, packages: [], staging: [], stagingOverall: {},
+            }, res.data.stats || {});
+          } catch (e) {
+            ElementPlus.ElMessage.error((e && e.message) ? e.message : '加载失败');
+          } finally {
+            loading.value = false;
+          }
+        }
+
+        loadData();
+
+        return {
+          hostVersion, loading, stats,
+          fmtIso, fmtDate, reviewText, reviewTagType, loadData,
+        };
+      }
+    });
+
+    for (const [name, comp] of Object.entries(window.ElementPlusIconsVue)) {
+      app.component(name, comp);
+    }
+
+    app.use(ElementPlus);
+    app.use(WorkDesktop);
+    app.mount('#app');
+  </script>
+</body>
+
+</html>

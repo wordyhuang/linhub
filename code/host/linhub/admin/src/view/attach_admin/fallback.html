@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>默认图片设置 - LinHub 林枢</title>
+  <link rel="icon" type="image/svg+xml" href="/brand/favicon.svg">
+  <link rel="stylesheet" href="/static/vendor/element-plus/index.css">
+  <link rel="stylesheet" href="/static/vendor/workdesktop-ai/style.css">
+  <style>
+    html, body, #app { height: 100%; margin: 0; }
+    body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif; }
+    .fb-page { height: 100%; padding: 16px 20px 24px; box-sizing: border-box; }
+    .fb-mono { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
+    .fb-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 14px; }
+    .fb-card { border: 1px solid var(--el-border-color-light, #e4e7ed); border-radius: 8px; padding: 16px; background: var(--el-bg-color, #fff); }
+    .fb-card h3 { margin: 0 0 14px; font-size: 15px; }
+    .fb-preview { display: flex; align-items: center; justify-content: center; width: 100%; height: 220px; border: 1px dashed var(--el-border-color, #dcdfe6); border-radius: 8px; background: var(--el-fill-color-lighter, #fafafa); overflow: hidden; }
+    .fb-preview img { max-width: 100%; max-height: 100%; object-fit: contain; }
+    .fb-actions { margin-top: 12px; display: flex; gap: 10px; flex-wrap: wrap; }
+  </style>
+</head>
+
+<body>
+  <div id="app"></div>
+
+  <script type="text/x-template" id="fb-tpl">
+    <div class="fb-page" v-loading="loading" element-loading-text="加载中...">
+      <wd-panel :border="true">
+        <wd-tips type="box" style="margin-bottom:12px">
+          附件托管服务（AT-9）默认图片设置：当请求的图片附件不存在、已过期或为私有且无权限时，下载入口会返回此兜底图。同时可在此调整托管默认参数（默认公开性、默认有效期、缺图兜底开关）。
+        </wd-tips>
+
+        <div class="fb-grid">
+          <!-- 默认图片 -->
+          <div class="fb-card">
+            <h3>缺图兜底默认图</h3>
+            <div class="fb-preview">
+              <template v-if="state.preview_token">
+                <img :src="previewUrl" alt="默认图片预览" />
+              </template>
+              <el-empty v-else description="当前使用内置默认图" :image-size="70" />
+            </div>
+            <p style="margin:10px 0 0;font-size:12px;color:var(--el-text-color-secondary,#909399)">
+              当前来源：
+              <el-tag size="small" :type="state.fallback_configured ? 'success' : 'info'" effect="plain">
+                {{ state.fallback_configured ? '已托管自定义图片' : '内置默认图' }}
+              </el-tag>
+              <span v-if="state.fallback_mime" class="fb-mono" style="margin-left:8px">{{ state.fallback_mime }}</span>
+            </p>
+            <div class="fb-actions">
+              <el-upload
+                :show-file-list="false"
+                :http-request="uploadFile"
+                accept="image/*"
+                :before-upload="beforeUpload">
+                <el-button type="primary" :icon="Upload" :loading="uploading">上传 / 更换默认图</el-button>
+              </el-upload>
+              <el-button :icon="RefreshLeft" :disabled="!state.fallback_configured" @click="resetImage">还原内置图</el-button>
+            </div>
+            <p style="margin:10px 0 0;font-size:12px;color:var(--el-text-color-secondary,#909399)">
+              仅接受图片文件，大小与类型受 .env 中 ATTACH_MAX_SIZE / ATTACH_ALLOW_TYPES 约束。
+            </p>
+          </div>
+
+          <!-- 托管参数 -->
+          <div class="fb-card">
+            <h3>托管默认参数</h3>
+            <el-form label-width="150px">
+              <el-form-item label="缺图兜底开关">
+                <el-switch v-model="form.fallback_enabled" />
+                <div style="color:#909399;font-size:12px">关闭后，缺图请求将返回 404 而非默认图</div>
+              </el-form-item>
+              <el-form-item label="新附件默认公开">
+                <el-switch v-model="form.default_public" />
+                <div style="color:#909399;font-size:12px">调用方未显式指定 is_public 时的默认值；公开附件免鉴权访问</div>
+              </el-form-item>
+              <el-form-item label="默认有效期（天）">
+                <el-input-number v-model="form.default_expire_days" :min="0" :max="3650" />
+                <div style="color:#909399;font-size:12px">0 表示永不过期；调用方可按需覆盖</div>
+              </el-form-item>
+            </el-form>
+            <div style="margin-top:8px">
+              <el-button type="primary" :icon="Check" :loading="saving" @click="saveSettings">保存参数</el-button>
+            </div>
+          </div>
+        </div>
+      </wd-panel>
+    </div>
+  </script>
+
+  <script src="/static/vendor/vue/vue.global.prod.js"></script>
+  <script src="/static/vendor/element-plus/index.full.min.js"></script>
+  <script src="/static/vendor/icons/index.iife.min.js"></script>
+  <script src="/static/vendor/workdesktop-ai/index.umd.js"></script>
+  <script>
+    const WD = window.WorkDesktop;
+    const ElementPlus = window.ElementPlus;
+    const { WorkDesktop } = WD;
+    const { ref, reactive, computed } = Vue;
+
+    const app = Vue.createApp({
+      template: '#fb-tpl',
+      setup() {
+        const loading = ref(false);
+        const uploading = ref(false);
+        const saving = ref(false);
+        const state = reactive({
+          fallback_configured: false,
+          fallback_mime: '',
+          preview_token: '',
+          default_public: false,
+          default_expire_days: 0,
+          fallback_enabled: true
+        });
+        const form = reactive({ default_public: false, default_expire_days: 0, fallback_enabled: true });
+        const nonce = ref(Date.now());
+        const previewUrl = computed(() =>
+          state.preview_token ? '/attachment/download?token=' + encodeURIComponent(state.preview_token) + '&t=' + nonce.value : ''
+        );
+
+        async function load() {
+          loading.value = true;
+          try {
+            const res = await WD.request.get('/admin/attach_admin/fallbackState');
+            if (!res.success) {
+              ElementPlus.ElMessage.error(res.message || '加载失败');
+              return;
+            }
+            Object.assign(state, res.data);
+            form.default_public = !!state.default_public;
+            form.default_expire_days = Number(state.default_expire_days) || 0;
+            form.fallback_enabled = !!state.fallback_enabled;
+          } finally {
+            loading.value = false;
+          }
+        }
+
+        function beforeUpload(file) {
+          if (!file.type.startsWith('image/')) {
+            ElementPlus.ElMessage.error('仅支持图片文件');
+            return false;
+          }
+          return true;
+        }
+
+        // multipart 上传：同源 fetch 自动携带会话 cookie
+        function uploadFile(option) {
+          const fd = new FormData();
+          fd.append('file', option.file);
+          uploading.value = true;
+          fetch('/admin/attach_admin/fallbackUpload', { method: 'POST', body: fd, credentials: 'same-origin' })
+            .then(r => r.json())
+            .then(json => {
+              if (json.code === 0) {
+                ElementPlus.ElMessage.success(json.message || '默认图片已更新');
+                nonce.value = Date.now();
+                load();
+              } else {
+                ElementPlus.ElMessage.error(json.message || '上传失败');
+              }
+            })
+            .catch(() => ElementPlus.ElMessage.error('上传请求失败'))
+            .finally(() => { uploading.value = false; });
+        }
+
+        async function resetImage() {
+          try {
+            await ElementPlus.ElMessageBox.confirm('还原为系统内置默认图？当前自定义图片将被解除引用。', '确认还原', {
+              confirmButtonText: '还原', cancelButtonText: '取消', type: 'warning'
+            });
+          } catch (e) { return; }
+          const res = await WD.request.post('/admin/attach_admin/fallbackReset', {});
+          ElementPlus.ElMessage[res.success ? 'success' : 'error'](res.message || (res.success ? '已还原' : '还原失败'));
+          if (res.success) { nonce.value = Date.now(); load(); }
+        }
+
+        async function saveSettings() {
+          saving.value = true;
+          try {
+            const res = await WD.request.post('/admin/attach_admin/settingsSave', {
+              default_public: form.default_public ? '1' : '0',
+              default_expire_days: form.default_expire_days,
+              fallback_enabled: form.fallback_enabled ? '1' : '0'
+            });
+            ElementPlus.ElMessage[res.success ? 'success' : 'error'](res.message || (res.success ? '已保存' : '保存失败'));
+            if (res.success) load();
+          } finally {
+            saving.value = false;
+          }
+        }
+
+        load();
+        return { loading, uploading, saving, state, form, previewUrl, uploadFile, beforeUpload, resetImage, saveSettings };
+      }
+    });
+
+    for (const [name, comp] of Object.entries(window.ElementPlusIconsVue)) {
+      app.component(name, comp);
+    }
+    app.use(ElementPlus);
+    app.use(WorkDesktop);
+    app.mount('#app');
+  </script>
+</body>
+
+</html>

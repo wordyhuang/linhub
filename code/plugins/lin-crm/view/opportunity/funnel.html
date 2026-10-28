@@ -1,0 +1,34 @@
+{* 林客 · 商机漏斗看板（PG-OPP-02；关联 FR-OPP-02/04/05） *}
+{include file="common/head" /}
+<div id="app">
+  <el-card shadow="never">
+    <template #header>销售漏斗（加权预测口径：阶段赢率 × 预计金额）</template>
+    <el-row :gutter="16">
+      <el-col :span="16">
+        <div v-for="f in funnel" :key="f.stage" class="funnel-row">
+          <div class="funnel-label">{{ f.stage }}（{{ f.count }} 个）</div>
+          <div class="funnel-bar" :style="{ width: barWidth(f.amount) }">{{ f.amount }} 元</div>
+        </div>
+      </el-col>
+      <el-col :span="8">
+        <el-statistic title="加权预测金额（元）" :value="forecast"/>
+        <el-divider/>
+        <el-button @click="goStagnant">查看停滞商机</el-button>
+      </el-col>
+    </el-row>
+  </el-card>
+</div>
+<script>
+crmPage(function () {
+  const V = Vue;
+  const state = V.reactive({ funnel: [], forecast: 0, maxAmount: 1 });
+  crmRequest('/crm/opportunity/funnel').then(function (res) {
+    state.funnel = res.data.funnel;
+    state.forecast = res.data.forecast_total;
+    state.maxAmount = Math.max.apply(null, state.funnel.map(function (f) { return f.amount; }).concat([1]));
+  });
+  function barWidth(amount) { return Math.max(8, Math.round(amount / state.maxAmount * 100)) + '%'; }
+  function goStagnant() { location.href = '/crm/opportunity/stagnant'; }
+  return Object.assign({}, V.toRefs(state), { barWidth, goStagnant });
+});
+</script>

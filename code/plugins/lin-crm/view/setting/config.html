@@ -1,0 +1,34 @@
+{* 林客 · 提醒规则配置（PG-SET-01；FR-MSG-02：三类提醒阈值与开关租户级可配） *}
+{include file="common/head" /}
+<div id="app">
+  <el-card shadow="never">
+    <template #header>提醒规则（保存即时生效于三类定时任务）</template>
+    <el-form label-width="180px" style="max-width:560px">
+      <el-form-item label="线索超期提醒（天）"><el-input-number v-model="c['lead.followup_overdue_days']" :min="1"/></el-form-item>
+      <el-form-item label="商机停滞预警（天）"><el-input-number v-model="c['opportunity.stagnant_days']" :min="1"/></el-form-item>
+      <el-form-item label="回款提醒档位"><el-input v-model="c['receivable.remind_offsets']" placeholder="T-3,T-1,D+1"/></el-form-item>
+      <el-form-item label="合同审批开关"><el-switch v-model="c['contract.require_audit']"/></el-form-item>
+      <el-form-item label="手机号脱敏"><el-switch v-model="c['phone.mask_enabled']"/></el-form-item>
+      <el-button type="primary" @click="save">保存</el-button>
+    </el-form>
+  </el-card>
+</div>
+<script>
+crmPage(function () {
+  const V = Vue;
+  const state = V.reactive({ c: { 'lead.followup_overdue_days': 7, 'opportunity.stagnant_days': 14,
+    'receivable.remind_offsets': 'T-3,T-1,D+1', 'contract.require_audit': true, 'phone.mask_enabled': true } });
+  crmRequest('/crm/setting/config').then(function (res) {
+    const o = res.data.overrides || {};
+    Object.keys(o).forEach(function (k) {
+      state.c[k] = o[k] === 'true' ? true : (o[k] === 'false' ? false : o[k]);
+    });
+  });
+  function save() {
+    const patch = {};
+    Object.keys(state.c).forEach(function (k) { patch[k] = state.c[k]; });
+    crmRequest('/crm/setting/config', { patch: patch }).then(function () { ElementPlus.ElMessage.success('已保存'); });
+  }
+  return Object.assign({}, V.toRefs(state), { save });
+});
+</script>

@@ -1,0 +1,16 @@
+{
+    "name": "linhub/admin",
+    "description": "LinHub 平台中后台应用（命名空间 app\\admin，作为独立 Composer 包管理）",
+    "type": "library",
+    "require": {
+        "php": ">=8.0.0",
+        "topthink/framework": "^8.0",
+        "linhub/host": "*",
+        "linhub/capability": "*"
+    },
+    "autoload": {
+        "psr-4": {
+            "app\\admin\\": "src/"
+        }
+    }
+}

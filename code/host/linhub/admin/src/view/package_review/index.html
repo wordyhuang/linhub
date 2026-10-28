@@ -1,0 +1,625 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>功能包审核 - LinHub 林枢</title>
+  <link rel="icon" type="image/svg+xml" href="/brand/favicon.svg">
+  <link rel="stylesheet" href="/static/vendor/element-plus/index.css">
+  <link rel="stylesheet" href="/static/vendor/workdesktop-ai/style.css">
+  <style>
+    html,
+    body,
+    #app {
+      height: 100%;
+      margin: 0;
+    }
+
+    .review-page {
+      height: 100%;
+      padding: 16px 20px 24px;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+
+    .sql-box {
+      margin: 6px 0 0;
+      padding: 10px 12px;
+      background: #1e293b;
+      color: #e2e8f0;
+      border-radius: 6px;
+      font-family: Consolas, Monaco, "Courier New", monospace;
+      font-size: 12px;
+      line-height: 1.6;
+      white-space: pre-wrap;
+      word-break: break-all;
+      max-height: 280px;
+      overflow: auto;
+    }
+
+    .json-box {
+      margin: 6px 0 0;
+      padding: 8px 12px;
+      background: #f6f8fa;
+      border: 1px solid var(--wd-border-color, #e5e7eb);
+      border-radius: 6px;
+      font-family: Consolas, Monaco, "Courier New", monospace;
+      font-size: 12px;
+      line-height: 1.6;
+      white-space: pre-wrap;
+      word-break: break-all;
+      max-height: 240px;
+      overflow: auto;
+    }
+
+    .detail-section {
+      margin-top: 18px;
+    }
+
+    .detail-section > .section-head {
+      font-size: 14px;
+      font-weight: 600;
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .muted {
+      color: var(--wd-text-color-secondary, #6b7280);
+      font-size: 12px;
+    }
+
+    .drawer-footer {
+      text-align: right;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="app"></div>
+
+  <script type="text/x-template" id="review-tpl">
+    <div class="review-page">
+      <wd-panel :border="true" title="功能包接入审核">
+        <template #description>
+          超管专属：审核暂存区中各功能包申请接入的权限、菜单、工作台、界面替换、数据表与迁移脚本；只有审核通过且包内容未变更，功能包方可安装或升级接入。
+        </template>
+
+        <div style="margin-bottom:12px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+          <el-radio-group v-model="filter" size="small" @change="loadRows">
+            <el-radio-button label="all">全部（{{ rows.length }}）</el-radio-button>
+            <el-radio-button label="pending">待审核（{{ countStatus('pending') }}）</el-radio-button>
+            <el-radio-button label="approved">已通过（{{ countStatus('approved') }}）</el-radio-button>
+            <el-radio-button label="rejected">已驳回（{{ countStatus('rejected') }}）</el-radio-button>
+            <el-radio-button label="changed">内容已变更（{{ countStatus('changed') }}）</el-radio-button>
+          </el-radio-group>
+          <el-button size="small" :loading="loading" @click="loadRows">
+            <el-icon><Refresh /></el-icon>
+            <span style="margin-left:4px">刷新</span>
+          </el-button>
+          <el-button
+            size="small" type="success" plain
+            :disabled="!batchTargets.length || busy"
+            @click="openBatchDecide('approved')">批量通过（{{ batchTargets.length }}）</el-button>
+          <el-button
+            size="small" type="danger" plain
+            :disabled="!batchTargets.length || busy"
+            @click="openBatchDecide('rejected')">批量驳回</el-button>
+          <span v-if="batchTargets.length" class="muted">已选 {{ batchTargets.length }} 个待审功能包</span>
+        </div>
+
+        <el-table :data="filteredRows" v-loading="loading" border stripe row-key="dir" @selection-change="onSelectionChange">
+          <el-table-column type="selection" width="44" :selectable="canSelect" />
+          <el-table-column label="功能包" width="180">
+            <template #default="{ row }">
+              <div style="font-weight:600">{{ row.title }}</div>
+              <div class="muted">{{ row.short }} · 目录 {{ row.dir }}</div>
+            </template>
+          </el-table-column>
+          <el-table-column label="申请类型" width="160" align="center">
+            <template #default="{ row }">
+              <el-tag :type="row.kind === 'upgrade' ? 'warning' : 'primary'" size="small">
+                {{ row.kind === 'upgrade' ? '升级' : '新装' }}
+              </el-tag>
+              <div v-if="row.kind === 'upgrade'" class="muted" style="margin-top:2px">
+                v{{ row.installed_version }} → v{{ row.version }}
+              </div>
+            </template>
+          </el-table-column>
+          <el-table-column prop="version" label="版本" width="90" align="center" />
+          <el-table-column label="完整性" width="100" align="center">
+            <template #default="{ row }">
+              <el-tag :type="row.valid ? 'success' : 'danger'" size="small">
+                {{ row.valid ? '校验通过' : '校验失败' }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="审核状态" align="center">
+            <template #default="{ row }">
+              <el-tag :type="statusTag(row.review_status)" size="small">
+                {{ statusText(row.review_status) }}
+              </el-tag>
+              <div v-if="row.reviewer" class="muted" style="margin-top:2px">
+                {{ row.reviewer }} · {{ fmtDateTime(row.reviewed_at) }}
+              </div>
+            </template>
+          </el-table-column>
+          <el-table-column prop="description" label="说明" min-width="160">
+            <template #default="{ row }">
+              <div class="muted" style="white-space:normal">{{ row.description || '—' }}</div>
+              <ul v-if="!row.valid" style="margin:6px 0 0;padding-left:18px;font-size:12px;color:#f56c6c">
+                <li v-for="(m, i) in row.problems" :key="i">{{ m }}</li>
+              </ul>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="100" align="center" fixed="right">
+            <template #default="{ row }">
+              <el-button size="small" type="primary" @click="openDetail(row)">审核</el-button>
+            </template>
+          </el-table-column>
+          <template #empty>
+            <el-empty description="暂存目录中没有待审核的功能包" :image-size="80" />
+          </template>
+        </el-table>
+      </wd-panel>
+
+      <!-- 审核详情抽屉 -->
+      <el-drawer
+        v-model="detailOpen"
+        :title="'接入申请详情 · ' + (detail ? detail.title : '')"
+        size="80%"
+        append-to-body>
+        <div v-loading="detailLoading" style="padding:0 20px 16px">
+          <template v-if="detail">
+            <el-alert
+              :title="statusAlertTitle(detail)"
+              :type="detail.reviewStatus === 'approved' ? 'success' : (detail.reviewStatus === 'rejected' ? 'error' : 'warning')"
+              :closable="false"
+              show-icon
+              style="margin-bottom:4px">
+              <template v-if="detail.review && detail.review.comment" #default>
+                审核意见：{{ detail.review.comment }}
+                <span class="muted">（{{ detail.review.reviewer }} · {{ fmtDateTime(detail.review.reviewed_at) }}）</span>
+              </template>
+            </el-alert>
+            <el-alert
+              v-if="!detail.valid"
+              type="error" :closable="false" show-icon
+              style="margin-top:10px"
+              title="完整性校验未通过，该包不能审核通过，请先修正以下问题：">
+              <ul style="margin:6px 0 0;padding-left:18px">
+                <li v-for="(m, i) in detail.problems" :key="i">{{ m }}</li>
+              </ul>
+            </el-alert>
+
+            <!-- 基本信息 -->
+            <div class="detail-section">
+              <div class="section-head">
+                <el-icon><InfoFilled /></el-icon>基本信息
+              </div>
+              <el-descriptions :column="2" border size="small">
+                <el-descriptions-item label="包名">{{ detail.manifest.name || '—' }}</el-descriptions-item>
+                <el-descriptions-item label="短名">{{ detail.short }}</el-descriptions-item>
+                <el-descriptions-item label="标题">{{ detail.manifest.title || '—' }}</el-descriptions-item>
+                <el-descriptions-item label="版本">v{{ detail.version }}</el-descriptions-item>
+                <el-descriptions-item label="类型">{{ detail.manifest.type || '—' }}</el-descriptions-item>
+                <el-descriptions-item label="访问域">{{ detail.manifest.access || 'admin' }}</el-descriptions-item>
+                <el-descriptions-item label="申请类型" :span="2">
+                  <el-tag :type="detail.kind === 'upgrade' ? 'warning' : 'primary'" size="small">
+                    {{ detail.kind === 'upgrade' ? '升级接入' : '新安装接入' }}
+                  </el-tag>
+                  <span v-if="detail.kind === 'upgrade'" class="muted" style="margin-left:8px">
+                    已安装 v{{ detail.installed_version }}，本次升级到 v{{ detail.version }}
+                  </span>
+                </el-descriptions-item>
+                <el-descriptions-item label="说明" :span="2">{{ detail.manifest.description || '—' }}</el-descriptions-item>
+                <el-descriptions-item label="依赖包" :span="2">
+                  <span v-if="!detail.manifest.dependencies.length" class="muted">无</span>
+                  <el-tag v-for="(d, i) in detail.manifest.dependencies" :key="i" size="small" type="info" style="margin-right:6px">{{ d }}</el-tag>
+                </el-descriptions-item>
+                <el-descriptions-item label="平台要求" :span="2">
+                  <span v-if="!objectKeys(detail.manifest.platform).length" class="muted">无</span>
+                  <span v-else class="json-box" style="display:inline-block">{{ jsonOf(detail.manifest.platform) }}</span>
+                </el-descriptions-item>
+                <el-descriptions-item label="提供服务" :span="2">
+                  <span v-if="!detail.manifest.provides.length" class="muted">无</span>
+                  <div v-else>
+                    <div v-for="(p, i) in detail.manifest.provides" :key="i" class="muted" style="font-family:Consolas,monospace">{{ p }}</div>
+                  </div>
+                </el-descriptions-item>
+                <el-descriptions-item label="依赖服务" :span="2">
+                  <span v-if="!detail.manifest.requires.length" class="muted">无</span>
+                  <el-tag v-for="(r, i) in detail.manifest.requires" :key="i" size="small" type="info" style="margin-right:6px">{{ r }}</el-tag>
+                </el-descriptions-item>
+                <el-descriptions-item label="内容指纹" :span="2">
+                  <span class="muted" style="font-family:Consolas,monospace">{{ detail.fingerprint }}</span>
+                </el-descriptions-item>
+              </el-descriptions>
+            </div>
+
+            <!-- 申请权限 -->
+            <div class="detail-section">
+              <div class="section-head">
+                <el-icon><Key /></el-icon>申请权限（{{ detail.permissions.length }}）
+              </div>
+              <el-table :data="detail.permissions" border size="small">
+                <el-table-column prop="code" label="权限编码" width="200" />
+                <el-table-column prop="title" label="名称" width="130" />
+                <el-table-column prop="group" label="分组" width="100" />
+                <el-table-column prop="description" label="说明" min-width="180">
+                  <template #default="{ row }">{{ row.description || '—' }}</template>
+                </el-table-column>
+                <template #empty><span class="muted">未申请权限</span></template>
+              </el-table>
+            </div>
+
+            <!-- 申请菜单 -->
+            <div class="detail-section">
+              <div class="section-head">
+                <el-icon><Menu /></el-icon>申请菜单（{{ detail.menus.length }}）
+              </div>
+              <el-table :data="detail.menus" border size="small">
+                <el-table-column prop="id" label="菜单 ID" min-width="180" />
+                <el-table-column prop="title" label="标题" width="130" />
+                <el-table-column prop="parent" label="父级" min-width="150">
+                  <template #default="{ row }">{{ row.parent || '—' }}</template>
+                </el-table-column>
+                <el-table-column prop="route" label="路由" min-width="160">
+                  <template #default="{ row }">{{ row.route || '—' }}</template>
+                </el-table-column>
+                <el-table-column prop="order" label="排序" width="70" align="center" />
+                <template #empty><span class="muted">未申请菜单</span></template>
+              </el-table>
+            </div>
+
+            <!-- 工作台卡片 -->
+            <div class="detail-section">
+              <div class="section-head">
+                <el-icon><Grid /></el-icon>申请工作台卡片
+              </div>
+              <p v-if="!detail.workspace || !objectKeys(detail.workspace).length" class="muted">未申请工作台接入</p>
+              <pre v-else class="json-box">{{ jsonOf(detail.workspace) }}</pre>
+            </div>
+
+            <!-- 界面替换 -->
+            <div class="detail-section">
+              <div class="section-head">
+                <el-icon><CopyDocument /></el-icon>申请界面替换
+              </div>
+              <p v-if="!detail.uiReplace || !objectKeys(detail.uiReplace).length" class="muted">未申请界面替换</p>
+              <pre v-else class="json-box">{{ jsonOf(detail.uiReplace) }}</pre>
+            </div>
+
+            <!-- 数据表 -->
+            <div class="detail-section">
+              <div class="section-head">
+                <el-icon><Coin /></el-icon>申请数据表（{{ detail.tables.length }}）
+              </div>
+              <el-table v-if="detail.tables.length" :data="detail.tables" border size="small">
+                <el-table-column prop="table" label="表名（含前缀）" min-width="220" />
+                <el-table-column prop="type" label="类型" width="140">
+                  <template #default="{ row }">
+                    <el-tag size="small" :type="row.type === 'create' ? 'success' : 'warning'">
+                      {{ row.type || '未声明' }}
+                    </el-tag>
+                  </template>
+                </el-table-column>
+              </el-table>
+              <p v-else class="muted">未声明数据表</p>
+            </div>
+
+            <!-- 迁移脚本 -->
+            <div class="detail-section">
+              <div class="section-head">
+                <el-icon><Document /></el-icon>迁移脚本（安装/升级时执行，重点审核）
+              </div>
+              <p v-if="!detail.migrations.length" class="muted">无迁移脚本</p>
+              <el-collapse v-else>
+                <el-collapse-item
+                  v-for="m in detail.migrations"
+                  :key="m.version"
+                  :name="m.version">
+                  <template #title>
+                    <span style="font-weight:600">版本 {{ m.version }}</span>
+                    <span class="muted" style="margin-left:10px">{{ m.files.length }} 个脚本</span>
+                  </template>
+                  <div v-for="f in m.files" :key="f.name" style="margin-bottom:12px">
+                    <div style="font-weight:600;font-size:13px">{{ f.name }}</div>
+                    <pre class="sql-box">{{ f.sql || '-- 空脚本 --' }}</pre>
+                  </div>
+                </el-collapse-item>
+              </el-collapse>
+            </div>
+
+            <!-- 审核历史 -->
+            <div class="detail-section" v-if="detail.review && detail.review.history && detail.review.history.length">
+              <div class="section-head">
+                <el-icon><Clock /></el-icon>审核历史
+              </div>
+              <el-timeline>
+                <el-timeline-item
+                  v-for="(h, i) in detail.review.history"
+                  :key="i"
+                  :type="h.status === 'approved' ? 'success' : 'danger'"
+                  :timestamp="(h.status === 'approved' ? '通过' : '驳回') + ' · ' + h.reviewer + ' · ' + fmtDateTime(h.reviewed_at)">
+                  {{ h.comment || '（未填写意见）' }}
+                </el-timeline-item>
+              </el-timeline>
+            </div>
+          </template>
+        </div>
+
+        <template #footer>
+          <div class="drawer-footer" v-if="detail">
+            <el-button @click="detailOpen = false">关闭</el-button>
+            <el-button
+              type="danger" plain
+              :disabled="!detail.valid || busy"
+              @click="openDecide('rejected')">驳回</el-button>
+            <el-button
+              type="success"
+              :disabled="!detail.valid || busy"
+              :loading="busy"
+              @click="openDecide('approved')">审核通过</el-button>
+          </div>
+        </template>
+      </el-drawer>
+
+      <!-- 通过/驳回意见（单包与批量共用） -->
+      <el-dialog
+        v-model="decideOpen"
+        :title="(decideBatch ? '批量' : '') + (decideStatus === 'approved' ? '审核通过' : '审核驳回')"
+        width="480px"
+        append-to-body>
+        <el-alert
+          v-if="decideStatus === 'approved'"
+          type="success" :closable="false" show-icon
+          style="margin-bottom:12px"
+          title="通过后该版本即可在功能安装页执行安装/升级；若此后包内容发生变化，审核结论自动失效，需重新审核。" />
+        <el-alert
+          v-else
+          type="error" :closable="false" show-icon
+          style="margin-bottom:12px"
+          title="驳回后该版本不可安装/升级接入，请在意见中说明原因，便于包开发者整改后重新提交。" />
+        <div v-if="decideBatch" class="muted" style="margin:-4px 0 12px">
+          将对选中的 {{ batchTargets.length }} 个功能包逐包记录{{ decideStatus === 'approved' ? '通过' : '驳回' }}结论；完整性校验未通过的包将被跳过并在结果中说明原因。
+        </div>
+        <el-input
+          v-model="decideComment"
+          type="textarea"
+          :rows="4"
+          :placeholder="decideStatus === 'approved' ? '审核意见（可选）' : '请填写驳回原因（必填）'" />
+        <template #footer>
+          <el-button @click="decideOpen = false">取消</el-button>
+          <el-button
+            :type="decideStatus === 'approved' ? 'success' : 'danger'"
+            :loading="busy"
+            @click="doDecide">
+            确认{{ decideStatus === 'approved' ? '通过' : '驳回' }}
+          </el-button>
+        </template>
+      </el-dialog>
+    </div>
+  </script>
+
+  <script src="/static/vendor/vue/vue.global.prod.js"></script>
+  <script src="/static/vendor/element-plus/index.full.min.js"></script>
+  <script src="/static/vendor/icons/index.iife.min.js"></script>
+  <script src="/static/vendor/workdesktop-ai/index.umd.js"></script>
+  <script>
+    const WD = window.WorkDesktop;
+    const ElementPlus = window.ElementPlus;
+    const { WorkDesktop } = WD;
+    const { ref, computed } = Vue;
+
+    const app = Vue.createApp({
+      template: '#review-tpl',
+      setup() {
+        const rows = ref([]);
+        const loading = ref(false);
+        const busy = ref(false);
+        const filter = ref('all');
+
+        const detailOpen = ref(false);
+        const detailLoading = ref(false);
+        const detail = ref(null);
+        let currentTarget = '';
+
+        const decideOpen = ref(false);
+        const decideStatus = ref('approved');
+        const decideComment = ref('');
+        const decideBatch = ref(false);
+        const batchTargets = ref([]);
+
+        const filteredRows = computed(() => {
+          if (filter.value === 'all') return rows.value;
+          return rows.value.filter(r => r.review_status === filter.value);
+        });
+
+        function countStatus(s) {
+          return rows.value.filter(r => r.review_status === s).length;
+        }
+
+        function statusText(s) {
+          return { pending: '待审核', approved: '已通过', rejected: '已驳回', changed: '内容已变更' }[s] || s;
+        }
+
+        function statusTag(s) {
+          return { pending: 'warning', approved: 'success', rejected: 'danger', changed: 'info' }[s] || '';
+        }
+
+        function statusAlertTitle(d) {
+          const base = '当前状态：' + statusText(d.reviewStatus);
+          if (d.reviewStatus === 'changed') {
+            return base + '（审核通过后包内容已被修改，原结论失效，需重新审核）';
+          }
+          if (d.reviewStatus === 'pending') return base + '（尚未审核，通过后才能安装/升级接入）';
+          if (d.reviewStatus === 'rejected') return base + '（该版本不可接入）';
+          return base + '（可执行安装/升级接入；内容若再变更将自动失效）';
+        }
+
+        // ISO 8601 → YYYY-MM-DD HH:mm:ss
+        function fmtDateTime(v) {
+          if (!v) return '';
+          const d = new Date(String(v));
+          if (isNaN(d.getTime())) return String(v);
+          const p = (n) => String(n).padStart(2, '0');
+          return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ` +
+            `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+        }
+
+        function objectKeys(o) {
+          return o && typeof o === 'object' ? Object.keys(o) : [];
+        }
+
+        function jsonOf(o) {
+          try {
+            return JSON.stringify(o, null, 2);
+          } catch (e) {
+            return String(o);
+          }
+        }
+
+        async function loadRows() {
+          loading.value = true;
+          try {
+            const res = await WD.request.get('/admin/package_review/rows');
+            if (!res.success) {
+              ElementPlus.ElMessage.error(res.message || '加载失败');
+              return;
+            }
+            rows.value = res.data.list || [];
+          } finally {
+            loading.value = false;
+          }
+        }
+
+        async function openDetail(row) {
+          detailOpen.value = true;
+          detail.value = null;
+          currentTarget = row.dir;
+          detailLoading.value = true;
+          try {
+            const res = await WD.request.get('/admin/package_review/detail', { target: row.dir });
+            if (!res.success) {
+              ElementPlus.ElMessage.error(res.message || '详情加载失败');
+              detailOpen.value = false;
+              return;
+            }
+            detail.value = res.data;
+          } finally {
+            detailLoading.value = false;
+          }
+        }
+
+        function openDecide(status) {
+          decideBatch.value = false;
+          decideStatus.value = status;
+          decideComment.value = status === 'rejected' ? '' : (detail.value?.review?.comment || '');
+          decideOpen.value = true;
+        }
+
+        // 仅待审/内容已变更的行可勾选批量审核（已通过/已驳回的行无需重复审核）
+        function canSelect(row) {
+          return row.review_status === 'pending' || row.review_status === 'changed';
+        }
+
+        function onSelectionChange(sel) {
+          batchTargets.value = (sel || []).map(r => r.dir);
+        }
+
+        function openBatchDecide(status) {
+          if (!batchTargets.value.length) return;
+          decideBatch.value = true;
+          decideStatus.value = status;
+          decideComment.value = '';
+          decideOpen.value = true;
+        }
+
+        async function doDecide() {
+          const comment = decideComment.value.trim();
+          if (decideStatus.value === 'rejected' && !comment) {
+            ElementPlus.ElMessage.warning('驳回时必须填写驳回原因');
+            return;
+          }
+          busy.value = true;
+          try {
+            if (decideBatch.value) {
+              const res = await WD.request.post(
+                '/admin/package_review/' + (decideStatus.value === 'approved' ? 'batchApprove' : 'batchReject'),
+                { targets: batchTargets.value, comment: comment }
+              );
+              ElementPlus.ElMessage[res.success ? 'success' : 'error'](
+                res.message || (res.success ? '操作成功' : '操作失败')
+              );
+              if (res.success) {
+                decideOpen.value = false;
+                const fails = ((res.data && res.data.results) || []).filter(r => !r.ok);
+                if (fails.length) {
+                  ElementPlus.ElMessageBox.alert(
+                    fails.map(r => '· ' + (r.title || r.target) + '：' + r.message).join('<br>'),
+                    '部分功能包未能完成审核',
+                    { dangerouslyUseHTMLString: true, type: 'warning', confirmButtonText: '知道了' }
+                  );
+                }
+                await loadRows();
+              }
+              return;
+            }
+            const action = decideStatus.value === 'approved' ? 'approve' : 'reject';
+            const res = await WD.request.post('/admin/package_review/' + action, {
+              target: currentTarget,
+              comment: comment,
+            });
+            ElementPlus.ElMessage[res.success ? 'success' : 'error'](
+              res.message || (res.success ? '操作成功' : '操作失败')
+            );
+            if (res.success) {
+              decideOpen.value = false;
+              await loadRows();
+              // 刷新抽屉详情
+              if (detailOpen.value) {
+                detailLoading.value = true;
+                try {
+                  const r2 = await WD.request.get('/admin/package_review/detail', { target: currentTarget });
+                  if (r2.success) detail.value = r2.data;
+                } finally {
+                  detailLoading.value = false;
+                }
+              }
+            }
+          } finally {
+            busy.value = false;
+          }
+        }
+
+        loadRows();
+
+        return {
+          rows, loading, busy, filter, filteredRows,
+          detailOpen, detailLoading, detail,
+          decideOpen, decideStatus, decideComment, decideBatch, batchTargets,
+          countStatus, statusText, statusTag, statusAlertTitle,
+          fmtDateTime, objectKeys, jsonOf,
+          loadRows, openDetail, openDecide, doDecide,
+          canSelect, onSelectionChange, openBatchDecide,
+        };
+      }
+    });
+
+    for (const [name, comp] of Object.entries(window.ElementPlusIconsVue)) {
+      app.component(name, comp);
+    }
+
+    app.use(ElementPlus);
+    app.use(WorkDesktop);
+    app.mount('#app');
+  </script>
+</body>
+
+</html>

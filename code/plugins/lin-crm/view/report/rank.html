@@ -1,0 +1,33 @@
+{* 林客 · 销售排行（PG-RPT-02；FR-RPT-03 四口径） *}
+{include file="common/head" /}
+<div id="app">
+  <el-card shadow="never">
+    <el-form inline>
+      <el-select v-model="metric" style="width:160px" @change="load">
+        <el-option label="新增客户数" value="new_customer"/>
+        <el-option label="商机金额" value="opportunity_amount"/>
+        <el-option label="合同额" value="contract_amount"/>
+        <el-option label="回款额" value="receivable_paid"/>
+      </el-select>
+      <el-select v-model="days" style="width:120px" @change="load">
+        <el-option :value="7" label="近 7 天"/><el-option :value="30" label="近 30 天"/><el-option :value="90" label="近 90 天"/>
+      </el-select>
+      <el-button v-permission="'crm:report:export'" @click="exportReport">导出 Excel</el-button>
+    </el-form>
+    <el-table :data="rows" border>
+      <el-table-column type="index" label="名次" width="80"/>
+      <el-table-column prop="owner_id" label="负责人 id" width="120"/>
+      <el-table-column prop="val" label="数值" align="right"/>
+    </el-table>
+  </el-card>
+</div>
+<script>
+crmPage(function () {
+  const V = Vue;
+  const state = V.reactive({ metric: 'contract_amount', days: 30, rows: [] });
+  function load() { crmRequest('/crm/report/rank', { metric: state.metric, days: state.days }).then(function (res) { state.rows = res.data.rows; }); }
+  function exportReport() { crmRequest('/crm/report/export', { metric: state.metric }).then(function () { ElementPlus.ElMessage.success('导出任务已受理'); }); }
+  load();
+  return Object.assign({}, V.toRefs(state), { load, exportReport });
+});
+</script>

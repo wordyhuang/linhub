@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>价格体系 - 林销</title>
+  <link rel="icon" type="image/svg+xml" href="/brand/favicon.svg">
+  <link rel="stylesheet" href="/static/vendor/element-plus/index.css">
+  <link rel="stylesheet" href="/static/vendor/workdesktop-ai/style.css">
+  <style>
+    .trade-page { padding: 16px 20px 24px; box-sizing: border-box; }
+    .trade-section { margin-bottom: 20px; }
+    .trade-section h3 { font-size: 15px; margin: 0 0 10px; color: #333; }
+    .price-preview { font-size: 13px; color: #666; padding: 8px 0; }
+    .price-preview b { color: #e6a23c; font-size: 15px; }
+    .tag-min { margin-left: 6px; }
+  </style>
+</head>
+
+<body>
+  <div id="app"></div>
+
+  <script type="text/x-template" id="price-tpl">
+    <div class="trade-page">
+      <wd-tips type="box" style="display:flex;margin-bottom:12px">
+        价格体系用于维护商品的等级价、最低售价与促销价，并可按商品与客户实时解析建议售价。
+        建议先维护规则再做解析验证；低于最低售价的成交需要走审批，审批通过后方可按该价格开单。
+      </wd-tips>
+
+      <div class="trade-section">
+        <wd-panel :border="true" title="价格解析预览"
+                  description="取价优先级：手工改价 &gt; 促销价 &gt; 最近成交价 &gt; 等级价 &gt; 参考售价。选择客户可带入该客户的等级；命中最低售价限制时会标记「需审批」。">
+          <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
+            <el-select v-model="previewPid" placeholder="选择商品" size="small" style="width:200px" filterable>
+              <el-option v-for="p in products" :key="p.id" :label="p.name" :value="p.id" />
+            </el-select>
+            <el-select v-model="previewCid" placeholder="选择客户（可选）" size="small" style="width:200px" filterable clearable>
+              <el-option v-for="c in customers" :key="c.id" :label="c.name" :value="c.id" />
+            </el-select>
+            <el-button size="small" type="primary" :icon="Search" :loading="resolving" @click="doResolve">解析价格</el-button>
+          </div>
+          <div v-if="resolved" class="price-preview">
+            建议售价：<b>{{ resolved.price }}</b>
+            <el-tag v-if="resolved.promo && resolved.promo.price" size="small" type="warning" class="tag-min">促销</el-tag>
+            <el-tag v-if="resolved.source" size="small" class="tag-min">{{ resolved.source }}</el-tag>
+            最低售价：{{ resolved.min_price ?? '未设' }}
+            <el-tag v-if="resolved.need_approval" size="small" type="danger" class="tag-min">需审批</el-tag>
+          </div>
+        </wd-panel>
+      </div>
+
+      <div class="trade-section">
+        <wd-panel :border="true" title="价格规则维护"
+                  description="同一商品同一等级只保留一条规则，保存即覆盖。促销价需同时填写起止日期才生效，过期后自动回落到等级价或参考售价。">
+          <el-table :data="rules" border stripe size="small">
+            <el-table-column label="商品" min-width="140">
+              <template #default="{ row }">
+                <el-select v-model="row.product_id" size="small" filterable placeholder="选择商品" style="width:100%">
+                  <el-option v-for="p in products" :key="p.id" :label="p.name" :value="p.id" />
+                </el-select>
+              </template>
+            </el-table-column>
+            <el-table-column label="等级" width="110">
+              <template #default="{ row }">
+                <el-select v-model="row.level_code" size="small" style="width:100%">
+                  <!-- 等级域与 resources/config/trade.php 的 trade.price.levels 保持一致 -->
+                  <el-option label="默认" value="default" />
+                  <el-option label="批发价" value="wholesale" />
+                  <el-option label="VIP价" value="vip" />
+                </el-select>
+              </template>
+            </el-table-column>
+            <el-table-column label="等级价" width="120">
+              <template #default="{ row }">
+                <el-input-number v-model="row.level_price" :min="0" :precision="2" size="small" controls-position="right" style="width:100%" />
+              </template>
+            </el-table-column>
+            <el-table-column label="最低售价" width="120">
+              <template #default="{ row }">
+                <el-input-number v-model="row.min_price" :min="0" :precision="2" size="small" controls-position="right" style="width:100%" />
+              </template>
+            </el-table-column>
+            <el-table-column label="促销价" width="120">
+              <template #default="{ row }">
+                <el-input v-model="row.promo_price" placeholder="促销价(可选)" size="small" />
+              </template>
+            </el-table-column>
+            <el-table-column label="促销起止" min-width="220">
+              <template #default="{ row }">
+                <el-date-picker v-model="row.promo_start" type="date" value-format="YYYY-MM-DD" placeholder="开始" size="small" style="width:100px" />
+                <el-date-picker v-model="row.promo_end" type="date" value-format="YYYY-MM-DD" placeholder="结束" size="small" style="width:100px;margin-left:6px" />
+              </template>
+            </el-table-column>
+            <el-table-column width="90" fixed="right">
+              <template #default="{ row }">
+                <el-button size="small" type="primary" link :loading="savingId === row.id || (savingId === 'new' && !row.id)" @click="saveRule(row)">保存</el-button>
+              </template>
+            </el-table-column>
+            <template #empty><el-empty :image-size="70" description="暂无价格规则" /></template>
+          </el-table>
+          <div style="margin-top:12px">
+            <el-button size="small" type="primary" :icon="Plus" @click="addRule">新增规则</el-button>
+            <el-button size="small" :icon="Refresh" :loading="loading" @click="loadAll">刷新</el-button>
+          </div>
+        </wd-panel>
+      </div>
+
+      <div class="trade-section">
+        <wd-panel :border="true" title="低于最低售价审批"
+                  description="销售开单价格低于最低售价时生成审批单，通过后该价格可用于开单，驳回则需重新定价；仅待审批状态可操作。">
+          <el-table :data="approvals" border stripe size="small">
+            <el-table-column prop="id" label="ID" width="70" />
+            <el-table-column label="商品" min-width="140">
+              <template #default="{ row }">
+                {{ (products.find(p => p.id === row.product_id) || {}).name || ('#' + row.product_id) }}
+              </template>
+            </el-table-column>
+            <el-table-column prop="applied_price" label="申请价" width="100" align="right" />
+            <el-table-column prop="min_price" label="最低售价" width="100" align="right" />
+            <el-table-column prop="status" label="状态" width="90">
+              <template #default="{ row }"><el-tag size="small">{{ row.status_label || row.status }}</el-tag></template>
+            </el-table-column>
+            <el-table-column prop="created_at" label="申请时间" min-width="150" />
+            <el-table-column width="170" fixed="right" v-if="approvals.some(a => a.status === 'pending')">
+              <template #default="{ row }">
+                <template v-if="row.status === 'pending'">
+                  <el-button size="small" type="success" link @click="approve(row.id, 'approve')">通过</el-button>
+                  <el-button size="small" type="danger" link @click="approve(row.id, 'reject')">驳回</el-button>
+                </template>
+              </template>
+            </el-table-column>
+            <template #empty><el-empty :image-size="70" description="暂无待审批价格" /></template>
+          </el-table>
+        </wd-panel>
+      </div>
+    </div>
+  </script>
+
+  <script src="/static/vendor/vue/vue.global.prod.js"></script>
+  <script src="/static/vendor/element-plus/index.full.min.js"></script>
+  <script src="/static/vendor/icons/index.iife.min.js"></script>
+  <script src="/static/vendor/workdesktop-ai/index.umd.js"></script>
+  <script>
+    const WD = window.WorkDesktop;
+    const ElementPlus = window.ElementPlus;
+    const { WorkDesktop } = WD;
+    const Icons = window.ElementPlusIconsVue;
+    const { ref, reactive, onMounted } = Vue;
+
+    const app = Vue.createApp({
+      template: '#price-tpl',
+      setup() {
+        const Refresh = Icons.Refresh;
+        const Plus = Icons.Plus;
+        const Search = Icons.Search;
+
+        const loading = ref(false);
+        const rules = ref([]);
+        const products = ref([]);
+        const approvals = ref([]);
+        const customers = ref([]);
+        const savingId = ref(null);
+
+        const previewPid = ref('');
+        const previewCid = ref('');
+        const resolving = ref(false);
+        const resolved = ref(null);
+
+        // 商品/客户下拉的 id 是字符串，价格规则与审批单里的外键是数字；
+        // 统一转成字符串，避免下拉框匹配不到选项而直接显示原始 ID。
+        const toKey = (v) => (v === null || v === undefined || v === '') ? null : String(v);
+
+        function qs(obj) {
+          const p = new URLSearchParams();
+          for (const [k, v] of Object.entries(obj)) { if (v !== '' && v != null) p.append(k, v); }
+          const s = p.toString();
+          return s ? '?' + s : '';
+        }
+
+        async function loadAll() {
+          loading.value = true;
+          try {
+            const res = await WD.request.get('/trade/product/priceRules');
+            if (res.success) {
+              products.value = res.data.products || [];
+              rules.value = (res.data.rules || []).map(function (r) {
+                const cr = Object.assign({}, r);
+                cr.product_id = toKey(cr.product_id);
+                if (cr.promo_price === null || cr.promo_price === undefined) cr.promo_price = '';
+                if (!cr.promo_start) cr.promo_start = null;
+                if (!cr.promo_end) cr.promo_end = null;
+                if (cr.min_price === null || cr.min_price === undefined) cr.min_price = 0;
+                return cr;
+              });
+              approvals.value = (res.data.approvals || []).map(function (a) {
+                return Object.assign({}, a, { product_id: toKey(a.product_id) });
+              });
+            } else {
+              ElementPlus.ElMessage.error(res.message || '加载失败');
+            }
+          } finally {
+            loading.value = false;
+          }
+        }
+
+        function newRule() {
+          return { product_id: '', level_code: 'default', level_price: 0, min_price: 0, promo_price: '', promo_start: null, promo_end: null };
+        }
+
+        function addRule() {
+          rules.value.push(newRule());
+        }
+
+        async function saveRule(row) {
+          savingId.value = row.id || 'new';
+          try {
+            const fd = new FormData();
+            fd.append('product_id', row.product_id);
+            fd.append('level_code', row.level_code);
+            fd.append('level_price', row.level_price);
+            fd.append('min_price', row.min_price);
+            if (row.promo_price !== '' && row.promo_price != null) {
+              fd.append('promo_price', row.promo_price);
+              fd.append('promo_start', row.promo_start || '');
+              fd.append('promo_end', row.promo_end || '');
+            }
+            const res = await WD.request.post('/trade/product/priceSet', fd);
+            if (res.success) {
+              ElementPlus.ElMessage.success(res.message || '已保存');
+              loadAll();
+            } else {
+              ElementPlus.ElMessage.error(res.message || '保存失败');
+            }
+          } finally {
+            savingId.value = null;
+          }
+        }
+
+        async function doResolve() {
+          if (!previewPid.value) { ElementPlus.ElMessage.warning('请选择商品'); return; }
+          resolving.value = true;
+          try {
+            const fd = new FormData();
+            fd.append('product_id', previewPid.value);
+            if (previewCid.value) fd.append('customer_id', previewCid.value);
+            const res = await WD.request.post('/trade/product/priceResolve', fd);
+            if (res.success) resolved.value = res.data;
+            else ElementPlus.ElMessage.error(res.message || '解析失败');
+          } finally {
+            resolving.value = false;
+          }
+        }
+
+        async function approve(id, action) {
+          const fd = new FormData();
+          fd.append('approval_id', id);
+          fd.append('action', action);
+          const res = await WD.request.post('/trade/product/priceApprove', fd);
+          if (res.success) { ElementPlus.ElMessage.success(res.message); loadAll(); }
+          else ElementPlus.ElMessage.error(res.message);
+        }
+
+        // 客户下拉：供价格解析时带入客户等级
+        async function loadCustomers() {
+          try {
+            const res = await WD.request.get('/trade/sale/customers');
+            customers.value = (res && res.data) || [];
+          } catch (e) { customers.value = []; }
+        }
+
+        onMounted(function () {
+          loadCustomers();
+          loadAll();
+        });
+
+        return {
+          Refresh, Plus, Search, loading, rules, products, approvals, customers, savingId,
+          previewPid, previewCid, resolving, resolved,
+          addRule, saveRule, doResolve, approve, loadAll
+        };
+      }
+    });
+
+    for (const [name, comp] of Object.entries(window.ElementPlusIconsVue)) {
+      app.component(name, comp);
+    }
+    app.use(ElementPlus);
+    app.use(WorkDesktop);
+    app.mount('#app');
+  </script>
+</body>
+
+</html>

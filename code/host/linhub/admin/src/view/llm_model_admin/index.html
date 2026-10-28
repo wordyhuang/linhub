@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LLM 模型实例 - LinHub 林枢</title>
+  <link rel="icon" type="image/svg+xml" href="/brand/favicon.svg">
+  <link rel="stylesheet" href="/static/vendor/element-plus/index.css">
+  <link rel="stylesheet" href="/static/vendor/workdesktop-ai/style.css">
+  <style>
+    html, body, #app { height: 100%; margin: 0; }
+    body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif; }
+    .md-page { height: 100%; padding: 16px 20px 24px; box-sizing: border-box; }
+    .md-mono { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
+  </style>
+</head>
+
+<body>
+  <div id="app"></div>
+
+  <script type="text/x-template" id="md-tpl">
+    <div class="md-page">
+      <wd-panel :border="true">
+        <wd-tips type="box" style="margin-bottom:12px">
+          LLM 网关模型实例管理（T9）：每个实例对应一个具体 provider 上的某个模型（如 gpt-4o / deepseek-chat / qwen-plus）。
+          provider 的 base_url / api_key 不在这里配置，统一走环境变量 <span class="md-mono">LLM_PROVIDER_&lt;NAME&gt;_BASE_URL</span> / <span class="md-mono">LLM_PROVIDER_&lt;NAME&gt;_API_KEY</span>。
+        </wd-tips>
+
+        <wd-data-grid ref="grid" api="/admin/llm_model_admin/rows" api-method="get" :active="true"
+                      filter="llmModel" :with-index="false" row-key="id">
+          <template #toolbar>
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+              <el-input v-model="filters.code" placeholder="模型 code（模糊）" size="small" clearable style="width:180px" @keyup.enter="doSearch" @clear="doSearch" />
+              <el-input v-model="filters.provider" placeholder="provider（精确）" size="small" clearable style="width:160px" @keyup.enter="doSearch" @clear="doSearch" />
+              <el-select v-model="filters.capability" placeholder="能力" size="small" clearable style="width:140px">
+                <el-option label="chat" value="chat" />
+                <el-option label="chat_stream" value="chat_stream" />
+                <el-option label="embedding" value="embedding" />
+              </el-select>
+              <el-select v-model="filters.is_enabled" placeholder="状态" size="small" clearable style="width:120px">
+                <el-option label="启用" value="1" />
+                <el-option label="禁用" value="0" />
+              </el-select>
+              <el-button size="small" type="primary" @click="doSearch">搜索</el-button>
+              <el-button size="small" @click="doReset">重置</el-button>
+
+              <wd-drawer-button label="新建模型" drawer-size="52%" size="small" title="新建模型" type="primary"
+                                filter="llmModel" @open="openCreate">
+                <template #default>
+                  <el-form :model="editForm" label-width="140px">
+                    <el-form-item label="Code" required>
+                      <el-input v-model="editForm.code" placeholder="如 gpt-4o / deepseek-chat" />
+                      <div style="color:#909399;font-size:12px;margin-top:4px">平台内部标识，创建后不可修改</div>
+                    </el-form-item>
+                    <el-form-item label="Provider" required>
+                      <el-input v-model="editForm.provider" placeholder="如 openai / deepseek / kimi / qwen" />
+                    </el-form-item>
+                    <el-form-item label="外部模型名" required>
+                      <el-input v-model="editForm.model_name" placeholder="对应 provider 上的模型标识" />
+                    </el-form-item>
+                    <el-form-item label="能力">
+                      <el-select v-model="editForm.capability" style="width:100%">
+                        <el-option label="chat（同步对话）" value="chat" />
+                        <el-option label="chat_stream（流式对话）" value="chat_stream" />
+                        <el-option label="embedding（向量）" value="embedding" />
+                      </el-select>
+                    </el-form-item>
+                    <el-form-item label="Max Tokens">
+                      <el-input-number v-model="editForm.max_tokens" :min="1" :max="200000" :step="256" style="width:240px" />
+                    </el-form-item>
+                    <el-form-item label="默认 Temperature">
+                      <el-input-number v-model="editForm.temperature_default" :min="0" :max="2" :step="0.1" :precision="2" style="width:240px" />
+                    </el-form-item>
+                    <el-form-item label="模型日配额 (token)">
+                      <el-input-number v-model="editForm.daily_token_quota" :min="0" :step="100000" style="width:240px" />
+                      <div style="color:#909399;font-size:12px;margin-top:4px">0 表示不限</div>
+                    </el-form-item>
+                    <el-form-item label="输入单价 / 1K token">
+                      <el-input-number v-model="editForm.unit_cost_input" :min="0" :precision="6" :step="0.001" style="width:240px" />
+                    </el-form-item>
+                    <el-form-item label="输出单价 / 1K token">
+                      <el-input-number v-model="editForm.unit_cost_output" :min="0" :precision="6" :step="0.001" style="width:240px" />
+                    </el-form-item>
+                    <el-form-item label="启用状态">
+                      <el-switch v-model="editForm.is_enabled" :active-value="1" :inactive-value="0" active-text="启用" inactive-text="禁用" />
+                    </el-form-item>
+                    <el-form-item label="备注">
+                      <el-input v-model="editForm.remark" type="textarea" :rows="2" />
+                    </el-form-item>
+                  </el-form>
+                </template>
+                <template #footer="f">
+                  <el-button @click="f.close">取消</el-button>
+                  <wd-api-button label="保存" type="primary" api="/admin/llm_model_admin/save"
+                                 :api-param="{ ...editForm }"
+                                 head-refresh-datagrid="llmModel"
+                                 :before-api="beforeSave"
+                                 @api-success="f.close">保存</wd-api-button>
+                </template>
+              </wd-drawer-button>
+            </div>
+          </template>
+
+          <el-table-column prop="code" label="Code" min-width="140">
+            <template #default="{ row }"><span class="md-mono">{{ row.code }}</span></template>
+          </el-table-column>
+          <el-table-column prop="provider" label="Provider" width="110">
+            <template #default="{ row }"><el-tag size="small" effect="plain">{{ row.provider }}</el-tag></template>
+          </el-table-column>
+          <el-table-column prop="model_name" label="外部模型名" min-width="160">
+            <template #default="{ row }"><span class="md-mono">{{ row.model_name }}</span></template>
+          </el-table-column>
+          <el-table-column prop="capability" label="能力" width="120">
+            <template #default="{ row }"><el-tag size="small">{{ row.capability }}</el-tag></template>
+          </el-table-column>
+          <el-table-column prop="max_tokens" label="Max Tokens" width="100" />
+          <el-table-column prop="daily_token_quota" label="模型日配额" width="110">
+            <template #default="{ row }">
+              <span class="md-mono">{{ row.daily_token_quota > 0 ? row.daily_token_quota : '不限' }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="状态" width="80">
+            <template #default="{ row }">
+              <el-tag size="small" :type="row.is_enabled ? 'success' : 'info'">{{ row.is_enabled ? '启用' : '禁用' }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="updated_at" label="更新时间" width="170" />
+          <el-table-column label="操作" width="220" fixed="right">
+            <template #default="{ row }">
+              <el-button-group size="small">
+                <wd-drawer-button label="编辑" title="编辑模型" type="primary" size="small" filter="llmModel" @open="openEdit(row)">
+                  <template #default>
+                    <el-form :model="editForm" label-width="140px">
+                      <el-form-item label="Code" required>
+                        <el-input v-model="editForm.code" disabled />
+                        <div style="color:#909399;font-size:12px;margin-top:4px">创建后不可修改</div>
+                      </el-form-item>
+                      <el-form-item label="Provider" required>
+                        <el-input v-model="editForm.provider" />
+                      </el-form-item>
+                      <el-form-item label="外部模型名" required>
+                        <el-input v-model="editForm.model_name" />
+                      </el-form-item>
+                      <el-form-item label="能力">
+                        <el-select v-model="editForm.capability" style="width:100%">
+                          <el-option label="chat（同步对话）" value="chat" />
+                          <el-option label="chat_stream（流式对话）" value="chat_stream" />
+                          <el-option label="embedding（向量）" value="embedding" />
+                        </el-select>
+                      </el-form-item>
+                      <el-form-item label="Max Tokens">
+                        <el-input-number v-model="editForm.max_tokens" :min="1" :max="200000" :step="256" style="width:240px" />
+                      </el-form-item>
+                      <el-form-item label="默认 Temperature">
+                        <el-input-number v-model="editForm.temperature_default" :min="0" :max="2" :step="0.1" :precision="2" style="width:240px" />
+                      </el-form-item>
+                      <el-form-item label="模型日配额 (token)">
+                        <el-input-number v-model="editForm.daily_token_quota" :min="0" :step="100000" style="width:240px" />
+                        <div style="color:#909399;font-size:12px;margin-top:4px">0 表示不限</div>
+                      </el-form-item>
+                      <el-form-item label="输入单价 / 1K token">
+                        <el-input-number v-model="editForm.unit_cost_input" :min="0" :precision="6" :step="0.001" style="width:240px" />
+                      </el-form-item>
+                      <el-form-item label="输出单价 / 1K token">
+                        <el-input-number v-model="editForm.unit_cost_output" :min="0" :precision="6" :step="0.001" style="width:240px" />
+                      </el-form-item>
+                      <el-form-item label="启用状态">
+                        <el-switch v-model="editForm.is_enabled" :active-value="1" :inactive-value="0" active-text="启用" inactive-text="禁用" />
+                      </el-form-item>
+                      <el-form-item label="备注">
+                        <el-input v-model="editForm.remark" type="textarea" :rows="2" />
+                      </el-form-item>
+                    </el-form>
+                  </template>
+                  <template #footer="f">
+                    <el-button @click="f.close">取消</el-button>
+                    <wd-api-button label="保存" type="primary" api="/admin/llm_model_admin/save"
+                                   :api-param="{ ...editForm }"
+                                   head-refresh-datagrid="llmModel"
+                                   :before-api="beforeSave"
+                                   @api-success="f.close">保存</wd-api-button>
+                  </template>
+                </wd-drawer-button>
+
+                <wd-popconfirm-button title="确认禁用该模型？" tip="禁用后该模型将不参与调用路由"
+                                      api="/admin/llm_model_admin/delete"
+                                      :api-param="{ code: row.code }"
+                                      type="warning" size="small"
+                                      head-refresh-datagrid="llmModel">禁用</wd-popconfirm-button>
+              </el-button-group>
+            </template>
+          </el-table-column>
+          <template #empty><el-empty description="暂无模型实例" :image-size="80" /></template>
+        </wd-data-grid>
+      </wd-panel>
+    </div>
+  </script>
+
+  <script src="/static/vendor/vue/vue.global.prod.js"></script>
+  <script src="/static/vendor/element-plus/index.full.min.js"></script>
+  <script src="/static/vendor/icons/index.iife.min.js"></script>
+  <script src="/static/vendor/workdesktop-ai/index.umd.js"></script>
+  <script>
+    const WD = window.WorkDesktop;
+    const ElementPlus = window.ElementPlus;
+    const { WorkDesktop } = WD;
+    const { ref, reactive } = Vue;
+
+    const app = Vue.createApp({
+      template: '#md-tpl',
+      setup() {
+        const filters = reactive({ code: '', provider: '', capability: '', is_enabled: '' });
+        const editForm = reactive({
+          id: 0, code: '', provider: '', model_name: '', capability: 'chat',
+          max_tokens: 4096, temperature_default: 0.7, is_enabled: 1,
+          daily_token_quota: 0, unit_cost_input: null, unit_cost_output: null, remark: ''
+        });
+
+        function doSearch() {
+          // wd-data-grid 通过 filter 属性监听外部筛选条件变化，自动重新拉取
+          // 这里通过 ref 触发 reload，把 filters 作为额外 query 传给后端
+          if (grid.value) {
+            grid.value.refresh({ ...filters });
+          }
+        }
+
+        const grid = ref(null);
+
+        function doReset() {
+          filters.code = ''; filters.provider = ''; filters.capability = ''; filters.is_enabled = '';
+          if (grid.value) grid.value.refresh();
+        }
+
+        function resetForm() {
+          Object.assign(editForm, {
+            id: 0, code: '', provider: '', model_name: '', capability: 'chat',
+            max_tokens: 4096, temperature_default: 0.7, is_enabled: 1,
+            daily_token_quota: 0, unit_cost_input: null, unit_cost_output: null, remark: ''
+          });
+        }
+
+        function openCreate() { resetForm(); }
+        function openEdit(row) {
+          Object.assign(editForm, {
+            id: row.id, code: row.code, provider: row.provider, model_name: row.model_name,
+            capability: row.capability, max_tokens: row.max_tokens,
+            temperature_default: row.temperature_default,
+            is_enabled: row.is_enabled ? 1 : 0,
+            daily_token_quota: row.daily_token_quota,
+            unit_cost_input: row.unit_cost_input,
+            unit_cost_output: row.unit_cost_output,
+            remark: row.remark || ''
+          });
+        }
+
+        function beforeApi() {
+          // wd-api-button 的 before-api 钩子：返回 false 阻止提交
+          if (!editForm.code || !editForm.provider || !editForm.model_name) {
+            ElementPlus.ElMessage.warning('code / provider / model_name 为必填');
+            return false;
+          }
+          return true;
+        }
+
+        return {
+          grid, filters, editForm,
+          doSearch, doReset, openCreate, openEdit, beforeApi,
+          beforeSave: beforeApi
+        };
+      }
+    });
+
+    for (const [name, comp] of Object.entries(window.ElementPlusIconsVue)) {
+      app.component(name, comp);
+    }
+    app.use(ElementPlus);
+    app.use(WorkDesktop);
+    app.mount('#app');
+  </script>
+</body>
+
+</html>

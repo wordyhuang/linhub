@@ -1,0 +1,193 @@
+{
+    "linhub-guide@0.1.0": {
+        "short": "linhub-guide",
+        "title": "林枢演示功能包",
+        "version": "0.1.0",
+        "dir": "lgg-pkg-linhub-guide",
+        "fingerprint": "b3332c9550b406b40a5c45f58cd1ef40b9b4bc7126e4d2cea7ddf5b6810e2b74",
+        "status": "approved",
+        "reviewer": "黄",
+        "reviewed_at": "2026-10-20T21:30:17+08:00",
+        "comment": "",
+        "history": [
+            {
+                "status": "approved",
+                "reviewer": "wordyhuang",
+                "reviewed_at": "2026-10-19T21:46:06+08:00",
+                "comment": ""
+            },
+            {
+                "status": "approved",
+                "reviewer": "wordyhuang",
+                "reviewed_at": "2026-10-19T22:50:25+08:00",
+                "comment": ""
+            },
+            {
+                "status": "approved",
+                "reviewer": "wordyhuang",
+                "reviewed_at": "2026-10-20T09:27:31+08:00",
+                "comment": ""
+            },
+            {
+                "status": "approved",
+                "reviewer": "黄",
+                "reviewed_at": "2026-10-20T21:30:17+08:00",
+                "comment": ""
+            }
+        ]
+    },
+    "lin-trade@1.0.0": {
+        "short": "lin-trade",
+        "title": "林销 · 进销存",
+        "version": "1.0.0",
+        "dir": "lgg-pkg-lin-trade",
+        "fingerprint": "e8ca9d4ae974e1c710cf51e569434f54669146ce637f8f54281c87251a3d8665",
+        "status": "approved",
+        "reviewer": "黄",
+        "reviewed_at": "2026-10-22T13:49:45+08:00",
+        "comment": "",
+        "history": [
+            {
+                "status": "approved",
+                "reviewer": "黄",
+                "reviewed_at": "2026-10-20T23:29:33+08:00",
+                "comment": ""
+            },
+            {
+                "status": "approved",
+                "reviewer": "黄",
+                "reviewed_at": "2026-10-21T07:21:20+08:00",
+                "comment": ""
+            },
+            {
+                "status": "approved",
+                "reviewer": "黄",
+                "reviewed_at": "2026-10-22T13:38:45+08:00",
+                "comment": ""
+            },
+            {
+                "status": "approved",
+                "reviewer": "黄",
+                "reviewed_at": "2026-10-22T13:43:18+08:00",
+                "comment": ""
+            },
+            {
+                "status": "approved",
+                "reviewer": "黄",
+                "reviewed_at": "2026-10-22T13:49:45+08:00",
+                "comment": ""
+            }
+        ]
+    },
+    "lin-trade@1.1.0": {
+        "short": "lin-trade",
+        "title": "林销 · 进销存",
+        "version": "1.1.0",
+        "dir": "lgg-pkg-lin-trade",
+        "fingerprint": "c612ec854742b65101c47355dfde37183eb25ccf52cd22a04e859f8c6c487329",
+        "status": "approved",
+        "reviewer": "黄",
+        "reviewed_at": "2026-10-27T21:12:37+08:00",
+        "comment": "",
+        "history": [
+            {
+                "status": "approved",
+                "reviewer": "黄",
+                "reviewed_at": "2026-10-22T17:43:51+08:00",
+                "comment": ""
+            },
+            {
+                "status": "approved",
+                "reviewer": "黄",
+                "reviewed_at": "2026-10-23T18:15:35+08:00",
+                "comment": ""
+            },
+            {
+                "status": "approved",
+                "reviewer": "黄",
+                "reviewed_at": "2026-10-27T21:12:37+08:00",
+                "comment": ""
+            }
+        ]
+    },
+    "lin-crm@1.0.0": {
+        "short": "lin-crm",
+        "title": "林客 CRM",
+        "version": "1.0.0",
+        "dir": "lgg-pkg-lin-crm",
+        "fingerprint": "4e7d4a5a37d4a23ecd82e35bdf741c8283ff3ca8889dba0fbc0e94f1fd338e0b",
+        "status": "approved",
+        "reviewer": "黄",
+        "reviewed_at": "2026-10-27T23:56:02+08:00",
+        "comment": "",
+        "history": [
+            {
+                "status": "approved",
+                "reviewer": "黄",
+                "reviewed_at": "2026-10-24T01:00:26+08:00",
+                "comment": ""
+            },
+            {
+                "status": "approved",
+                "reviewer": "黄",
+                "reviewed_at": "2026-10-25T17:52:44+08:00",
+                "comment": ""
+            },
+            {
+                "status": "approved",
+                "reviewer": "黄",
+                "reviewed_at": "2026-10-27T23:56:02+08:00",
+                "comment": ""
+            }
+        ]
+    },
+    "crm@1.0.0": {
+        "short": "crm",
+        "title": "林客 CRM",
+        "version": "1.0.0",
+        "dir": "lgg-pkg-crm",
+        "fingerprint": "9ae31b7de2a2ea3f744a592585145f9fd7bf76bec17f867865051ab0ba319090",
+        "status": "approved",
+        "reviewer": "黄",
+        "reviewed_at": "2026-10-27T21:12:37+08:00",
+        "comment": "",
+        "history": [
+            {
+                "status": "approved",
+                "reviewer": "黄",
+                "reviewed_at": "2026-10-27T18:21:24+08:00",
+                "comment": ""
+            },
+            {
+                "status": "approved",
+                "reviewer": "黄",
+                "reviewed_at": "2026-10-27T19:41:02+08:00",
+                "comment": ""
+            },
+            {
+                "status": "approved",
+                "reviewer": "黄",
+                "reviewed_at": "2026-10-27T20:03:45+08:00",
+                "comment": ""
+            },
+            {
+                "status": "approved",
+                "reviewer": "黄",
+                "reviewed_at": "2026-10-27T20:13:57+08:00",
+                "comment": ""
+            },
+            {
+                "status": "approved",
+                "reviewer": "黄",
+                "reviewed_at": "2026-10-27T20:25:01+08:00",
+                "comment": ""
+            },
+            {
+                "status": "approved",
+                "reviewer": "黄",
+                "reviewed_at": "2026-10-27T21:12:37+08:00",
+                "comment": ""
+            }
+        ]
+    }
+}

@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>附件清理记录 - LinHub 林枢</title>
+  <link rel="icon" type="image/svg+xml" href="/brand/favicon.svg">
+  <link rel="stylesheet" href="/static/vendor/element-plus/index.css">
+  <link rel="stylesheet" href="/static/vendor/workdesktop-ai/style.css">
+  <style>
+    html, body, #app { height: 100%; margin: 0; }
+    body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif; }
+    .cl-page { height: 100%; padding: 16px 20px 24px; box-sizing: border-box; }
+    .cl-mono { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
+    .cl-toolbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+    .cl-pager { display: flex; justify-content: flex-end; margin-top: 12px; }
+    .cl-json { margin: 0; white-space: pre-wrap; word-break: break-all; font-size: 12px; line-height: 1.6; }
+  </style>
+</head>
+
+<body>
+  <div id="app"></div>
+
+  <script type="text/x-template" id="cl-tpl">
+    <div class="cl-page">
+      <wd-panel :border="true">
+        <wd-tips type="box" style="margin-bottom:12px">
+          附件托管服务（AT-12）过期与孤儿文件清理记录。手动触发会扫描已过期元数据与存储目录中的孤儿对象；自动计划由 .env 的 ATTACH_CLEAN_ENABLED / ATTACH_CLEAN_CRON 控制，执行记录同样汇总于此。
+        </wd-tips>
+
+        <div class="cl-toolbar">
+          <el-button type="primary" :icon="Delete" :loading="running" @click="runClean">立即执行一次清理</el-button>
+          <el-button :icon="Refresh" @click="load">刷新记录</el-button>
+          <span style="flex:1"></span>
+          <el-tag type="info" effect="plain">共 {{ total }} 次执行记录</el-tag>
+        </div>
+
+        <wd-data-grid :data-source="rows" border stripe :with-index="false" :with-pager="false" v-loading="loading">
+          <el-table-column prop="id" label="ID" width="70" />
+          <el-table-column label="触发方式" width="110">
+            <template #default="{ row }">
+              <el-tag size="small" :type="row.trigger_type === 'manual' ? 'primary' : 'success'" effect="light">
+                {{ row.trigger_type === 'manual' ? '手动' : (row.trigger_type === 'cron' ? '定时' : row.trigger_type) }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="driver" label="驱动" width="90">
+            <template #default="{ row }"><span class="cl-mono">{{ row.driver }}</span></template>
+          </el-table-column>
+          <el-table-column prop="scanned" label="扫描数" width="90" />
+          <el-table-column label="删除数" width="90">
+            <template #default="{ row }">
+              <span :style="{ color: row.deleted > 0 ? 'var(--el-color-danger,#f56c6c)' : '' }">{{ row.deleted }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="明细" min-width="200">
+            <template #default="{ row }">
+              <el-popover placement="left" :width="420" trigger="click">
+                <template #reference>
+                  <el-button size="small" text type="primary">查看明细</el-button>
+                </template>
+                <pre class="cl-json cl-mono">{{ prettyDetail(row) }}</pre>
+              </el-popover>
+            </template>
+          </el-table-column>
+          <el-table-column prop="operator_id" label="执行人" width="140">
+            <template #default="{ row }"><span class="cl-mono">{{ row.operator_id || '系统' }}</span></template>
+          </el-table-column>
+          <el-table-column prop="created_at" label="执行时间" width="200" />
+          <template #empty><el-empty description="暂无清理记录" :image-size="80" /></template>
+        </wd-data-grid>
+
+        <div class="cl-pager">
+          <el-pagination
+            v-model:current-page="page" v-model:page-size="size"
+            :total="total" :page-sizes="[20, 50, 100]"
+            layout="total, sizes, prev, pager, next, jumper"
+            @current-change="load" @size-change="onSizeChange" />
+        </div>
+      </wd-panel>
+    </div>
+  </script>
+
+  <script src="/static/vendor/vue/vue.global.prod.js"></script>
+  <script src="/static/vendor/element-plus/index.full.min.js"></script>
+  <script src="/static/vendor/icons/index.iife.min.js"></script>
+  <script src="/static/vendor/workdesktop-ai/index.umd.js"></script>
+  <script>
+    const WD = window.WorkDesktop;
+    const ElementPlus = window.ElementPlus;
+    const { WorkDesktop } = WD;
+    const { ref } = Vue;
+
+    const app = Vue.createApp({
+      template: '#cl-tpl',
+      setup() {
+        const loading = ref(false);
+        const running = ref(false);
+        const rows = ref([]);
+        const total = ref(0);
+        const page = ref(1);
+        const size = ref(20);
+
+        async function load() {
+          loading.value = true;
+          try {
+            const res = await WD.request.get('/admin/attach_admin/cleanRows?page=' + page.value + '&size=' + size.value);
+            if (!res.success) {
+              ElementPlus.ElMessage.error(res.message || '加载失败');
+              return;
+            }
+            rows.value = res.data.list || [];
+            total.value = res.data.total || 0;
+          } finally {
+            loading.value = false;
+          }
+        }
+
+        function onSizeChange() { page.value = 1; load(); }
+
+        function prettyDetail(row) {
+          // detail 字段可能是字符串或数组/对象（服务端均做了规整）
+          if (row.detail === null || row.detail === undefined || row.detail === '') return '（无明细）';
+          if (typeof row.detail === 'string') {
+            try { return JSON.stringify(JSON.parse(row.detail), null, 2); } catch (e) { return row.detail; }
+          }
+          try { return JSON.stringify(row.detail, null, 2); } catch (e) { return String(row.detail); }
+        }
+
+        async function runClean() {
+          try {
+            await ElementPlus.ElMessageBox.confirm('立即扫描并清理过期附件与孤儿文件？', '确认执行清理', {
+              confirmButtonText: '执行', cancelButtonText: '取消', type: 'info'
+            });
+          } catch (e) { return; }
+          running.value = true;
+          try {
+            const res = await WD.request.post('/admin/attach_admin/cleanRun', {});
+            if (!res.success) {
+              ElementPlus.ElMessage.error(res.message || '清理失败');
+              return;
+            }
+            const d = res.data || {};
+            ElementPlus.ElMessage.success(
+              (res.message || '清理完成') + '：扫描 ' + (d.scanned ?? 0) + '，删除 ' + (d.deleted ?? 0)
+            );
+            page.value = 1;
+            await load();
+          } finally {
+            running.value = false;
+          }
+        }
+
+        load();
+        return { loading, running, rows, total, page, size, load, onSizeChange, prettyDetail, runClean };
+      }
+    });
+
+    for (const [name, comp] of Object.entries(window.ElementPlusIconsVue)) {
+      app.component(name, comp);
+    }
+    app.use(ElementPlus);
+    app.use(WorkDesktop);
+    app.mount('#app');
+  </script>
+</body>
+
+</html>

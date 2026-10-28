@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LLM 调用方配额 - LinHub 林枢</title>
+  <link rel="icon" type="image/svg+xml" href="/brand/favicon.svg">
+  <link rel="stylesheet" href="/static/vendor/element-plus/index.css">
+  <link rel="stylesheet" href="/static/vendor/workdesktop-ai/style.css">
+  <style>
+    html, body, #app { height: 100%; margin: 0; }
+    body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif; }
+    .md-page { height: 100%; padding: 16px 20px 24px; box-sizing: border-box; }
+    .md-mono { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
+    .md-filter { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; align-items: center; }
+    .md-pager { display: flex; justify-content: flex-end; margin-top: 12px; }
+  </style>
+</head>
+
+<body>
+  <div id="app"></div>
+
+  <script type="text/x-template" id="md-tpl">
+    <div class="md-page">
+      <wd-panel :border="true">
+        <wd-tips type="box" style="margin-bottom:12px">
+          LLM 网关调用方配额（T12）：按 <span class="md-mono">(caller, model_code)</span> 粒度配置日 token 上限。<b>daily_token_limit = 0 表示不限</b>。未配置的 caller 默认继承模型自身日配额。
+        </wd-tips>
+
+        <form class="md-filter" @submit.prevent="search">
+          <el-input v-model="filters.caller" placeholder="caller（模糊）" style="width:200px" clearable @keyup.enter="search" />
+          <el-input v-model="filters.model_code" placeholder="model_code（模糊）" style="width:200px" clearable @keyup.enter="search" />
+          <el-button native-type="submit" type="primary" :icon="Search" :loading="loading">检索</el-button>
+          <el-button :icon="RefreshLeft" @click="reset">重置</el-button>
+          <div style="flex:1"></div>
+          <el-button type="primary" :icon="Plus" @click="openCreate">新建配额</el-button>
+        </form>
+
+        <wd-data-grid :data-source="rows" border stripe :with-index="false" :with-pager="false" v-loading="loading">
+          <el-table-column prop="caller" label="Caller" min-width="180">
+            <template #default="{ row }"><span class="md-mono">{{ row.caller }}</span></template>
+          </el-table-column>
+          <el-table-column prop="model_code" label="模型" width="180">
+            <template #default="{ row }"><span class="md-mono">{{ row.model_code }}</span></template>
+          </el-table-column>
+          <el-table-column label="日 token 上限" width="140">
+            <template #default="{ row }">
+              <span class="md-mono">{{ row.daily_token_limit > 0 ? Number(row.daily_token_limit).toLocaleString() : '不限' }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="今日已用" width="140">
+            <template #default="{ row }">
+              <span class="md-mono">{{ row.today_used ? Number(row.today_used).toLocaleString() : 0 }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="updated_at" label="更新时间" width="170" />
+          <el-table-column label="操作" width="150" fixed="right">
+            <template #default="{ row }">
+              <el-button size="small" text type="primary" @click="openEdit(row)">编辑</el-button>
+              <el-button size="small" text type="danger" @click="doDelete(row)">删除</el-button>
+            </template>
+          </el-table-column>
+          <template #empty><el-empty description="暂无配额配置" :image-size="80" /></template>
+        </wd-data-grid>
+
+        <div class="md-pager">
+          <el-pagination
+            v-model:current-page="page" v-model:page-size="size"
+            :total="total" :page-sizes="[20, 50, 100]"
+            layout="total, sizes, prev, pager, next, jumper"
+            @current-change="load" @size-change="onSizeChange" />
+        </div>
+      </wd-panel>
+
+      <el-drawer v-model="editVisible" :title="editForm.id ? '编辑配额' : '新建配额'" size="40%">
+        <el-form :model="editForm" label-width="160px" v-loading="editLoading">
+          <el-form-item label="Caller">
+            <el-input v-model="editForm.caller" :disabled="!!editForm.id" placeholder="如 feature.package.xxx" />
+            <div style="color:#909399;font-size:12px;margin-top:4px">与模型 code 构成唯一键，创建后不可修改</div>
+          </el-form-item>
+          <el-form-item label="模型 code">
+            <el-select v-model="editForm.model_code" :disabled="!!editForm.id" placeholder="选择模型" style="width:100%">
+              <el-option v-for="m in modelOptions" :key="m" :label="m" :value="m" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="日 token 上限">
+            <el-input-number v-model="editForm.daily_token_limit" :min="0" :step="10000" style="width:260px" />
+            <div style="color:#909399;font-size:12px;margin-top:4px">0 表示不限</div>
+          </el-form-item>
+          <el-form-item label="备注">
+            <el-input v-model="editForm.remark" type="textarea" :rows="2" />
+          </el-form-item>
+        </el-form>
+        <div style="text-align:right">
+          <el-button @click="editVisible = false">取消</el-button>
+          <el-button type="primary" :loading="saving" @click="saveEdit">保存</el-button>
+        </div>
+      </el-drawer>
+    </div>
+  </script>
+
+  <script src="/static/vendor/vue/vue.global.prod.js"></script>
+  <script src="/static/vendor/element-plus/index.full.min.js"></script>
+  <script src="/static/vendor/icons/index.iife.min.js"></script>
+  <script src="/static/vendor/workdesktop-ai/index.umd.js"></script>
+  <script>
+    const WD = window.WorkDesktop;
+    const ElementPlus = window.ElementPlus;
+    const { WorkDesktop } = WD;
+    const { ref, reactive } = Vue;
+    const { Plus, Search, RefreshLeft } = window.ElementPlusIconsVue || {};
+
+    const app = Vue.createApp({
+      template: '#md-tpl',
+      setup() {
+        const loading = ref(false);
+        const editLoading = ref(false);
+        const saving = ref(false);
+        const rows = ref([]);
+        const total = ref(0);
+        const page = ref(1);
+        const size = ref(20);
+        const filters = reactive({ caller: '', model_code: '' });
+        const editVisible = ref(false);
+        const editForm = reactive({ id: 0, caller: '', model_code: '', daily_token_limit: 0, remark: '' });
+        const modelOptions = ref([]);
+
+        function qs(obj) {
+          const p = new URLSearchParams();
+          for (const [k, v] of Object.entries(obj)) { if (v !== '' && v != null) p.append(k, v); }
+          const s = p.toString();
+          return s ? '?' + s : '';
+        }
+
+        async function load() {
+          loading.value = true;
+          try {
+            const res = await WD.request.get('/admin/llm_quota_admin/rows' + qs({
+              ...filters, page: page.value, size: size.value
+            }));
+            if (!res.success) {
+              ElementPlus.ElMessage.error(res.message || '加载失败');
+              return;
+            }
+            rows.value = res.data.list || [];
+            total.value = res.data.total || 0;
+          } finally {
+            loading.value = false;
+          }
+        }
+
+        async function loadModelOptions() {
+          try {
+            const res = await WD.request.get('/admin/llm_quota_admin/modelOptions');
+            if (res.success) modelOptions.value = res.data || [];
+          } catch (e) { /* 静默 */ }
+        }
+
+        function search() { page.value = 1; load(); }
+        function reset() {
+          filters.caller = ''; filters.model_code = '';
+          page.value = 1; load();
+        }
+        function onSizeChange() { page.value = 1; load(); }
+
+        function openCreate() {
+          Object.assign(editForm, { id: 0, caller: '', model_code: '', daily_token_limit: 0, remark: '' });
+          editVisible.value = true;
+        }
+
+        function openEdit(row) {
+          Object.assign(editForm, {
+            id: row.id, caller: row.caller, model_code: row.model_code,
+            daily_token_limit: row.daily_token_limit, remark: row.remark || ''
+          });
+          editVisible.value = true;
+        }
+
+        async function saveEdit() {
+          if (!editForm.caller || !editForm.model_code) {
+            ElementPlus.ElMessage.warning('caller / model_code 为必填');
+            return;
+          }
+          saving.value = true;
+          try {
+            const res = await WD.request.post('/admin/llm_quota_admin/save', { ...editForm });
+            ElementPlus.ElMessage[res.success ? 'success' : 'error'](
+              res.message || (res.success ? '已保存' : '保存失败'));
+            if (res.success) { editVisible.value = false; load(); }
+          } finally {
+            saving.value = false;
+          }
+        }
+
+        async function doDelete(row) {
+          try {
+            await ElementPlus.ElMessageBox.confirm(
+              `确定删除配额 "${row.caller} / ${row.model_code}"？删除后该 caller 在此模型上回到默认限额。`,
+              '确认删除', { type: 'warning' });
+          } catch (e) { return; }
+          const res = await WD.request.post('/admin/llm_quota_admin/delete', { id: row.id });
+          ElementPlus.ElMessage[res.success ? 'success' : 'error'](
+            res.message || (res.success ? '已删除' : '操作失败'));
+          if (res.success) load();
+        }
+
+        load();
+        loadModelOptions();
+
+        return {
+          loading, editLoading, saving, rows, total, page, size, filters,
+          editVisible, editForm, modelOptions,
+          load, search, reset, onSizeChange, openCreate, openEdit, saveEdit, doDelete,
+          Plus, Search, RefreshLeft
+        };
+      }
+    });
+
+    for (const [name, comp] of Object.entries(window.ElementPlusIconsVue)) {
+      app.component(name, comp);
+    }
+    app.use(ElementPlus);
+    app.use(WorkDesktop);
+    app.mount('#app');
+  </script>
+</body>
+
+</html>

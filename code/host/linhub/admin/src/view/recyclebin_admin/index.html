@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>回收站 - LinHub 林枢</title>
+  <link rel="icon" type="image/svg+xml" href="/brand/favicon.svg">
+  <link rel="stylesheet" href="/static/vendor/element-plus/index.css">
+  <link rel="stylesheet" href="/static/vendor/workdesktop-ai/style.css">
+  <style>
+    html, body, #app { height: 100%; margin: 0; }
+    body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif; }
+    .rb-page { height: 100%; padding: 16px 20px 24px; box-sizing: border-box; }
+    .rb-mono { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
+    .rb-filter { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; align-items: center; }
+    .rb-pager { display: flex; justify-content: flex-end; margin-top: 12px; }
+    .rb-stat { display: flex; gap: 12px; margin-bottom: 12px; }
+    .rb-stat .el-tag { font-size: 12px; }
+    .rb-pre { background: #f6f8fa; border: 1px solid #e4e7ed; border-radius: 6px; padding: 12px;
+      max-height: 50vh; overflow: auto; white-space: pre-wrap; word-break: break-all;
+      font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; margin: 0; }
+  </style>
+</head>
+
+<body>
+  <div id="app"></div>
+
+  <script type="text/x-template" id="rb-tpl">
+    <div class="rb-page">
+      <wd-panel :border="true">
+        <wd-tips type="box" style="margin-bottom:12px">
+          回收站服务（RB）超管视图：功能包删除业务数据前的任意结构托管快照。恢复需包代码参与写回，本页仅提供查看、导出、保留期调整与彻底删除。
+          包卸载后条目转为「孤儿态」保留，重装同名包自动接管。
+        </wd-tips>
+
+        <div class="rb-stat">
+          <el-tag effect="plain">总条目 {{ stats.total }}</el-tag>
+          <el-tag type="warning" effect="plain">孤儿条目 {{ stats.orphaned }}</el-tag>
+          <el-tag type="danger" effect="plain">7 日内到期 {{ stats.expiring }}</el-tag>
+          <div style="flex:1"></div>
+          <el-button size="small" type="danger" plain :icon="DeleteFilled" :loading="cleaning" @click="cleanExpired">清理到期条目</el-button>
+        </div>
+
+        <form class="rb-filter" @submit.prevent="search">
+          <el-select v-model="filters.namespace" placeholder="命名空间" style="width:200px" clearable filterable>
+            <el-option v-for="ns in namespaces" :key="ns.namespace"
+              :label="ns.namespace + '（' + ns.count + '）'" :value="ns.namespace" />
+          </el-select>
+          <el-select v-model="filters.orphaned" placeholder="孤儿态" style="width:130px" clearable>
+            <el-option label="仅孤儿" value="yes" />
+            <el-option label="仅正常" value="no" />
+          </el-select>
+          <el-input v-model="filters.source_table" placeholder="来源表" style="width:180px" clearable @keyup.enter="search" />
+          <el-input v-model="filters.keyword" placeholder="标题 / 业务键 / 主键" style="width:200px" clearable @keyup.enter="search" />
+          <el-button native-type="submit" type="primary" :icon="Search" :loading="loading">检索</el-button>
+          <el-button :icon="RefreshLeft" @click="reset">重置</el-button>
+          <el-button type="danger" plain :icon="Delete" :disabled="selected.length === 0" @click="removeBatch">
+            批量删除（{{ selected.length }}）
+          </el-button>
+        </form>
+
+        <wd-data-grid :data-source="rows" border stripe :with-index="false" :with-pager="false"
+          v-loading="loading" @selection-change="onSelectionChange">
+          <el-table-column type="selection" width="42" />
+          <el-table-column prop="namespace" label="命名空间" min-width="120">
+            <template #default="{ row }"><span class="rb-mono">{{ row.namespace }}</span></template>
+          </el-table-column>
+          <el-table-column prop="title" label="标题" min-width="160">
+            <template #default="{ row }">{{ row.title || '—' }}</template>
+          </el-table-column>
+          <el-table-column prop="source_table" label="来源表" min-width="150">
+            <template #default="{ row }"><span class="rb-mono">{{ row.source_table }}</span></template>
+          </el-table-column>
+          <el-table-column prop="source_pk" label="来源主键" min-width="110">
+            <template #default="{ row }"><span class="rb-mono">{{ row.source_pk }}</span></template>
+          </el-table-column>
+          <el-table-column label="大小" width="90">
+            <template #default="{ row }">{{ formatSize(row.payload_size) }}</template>
+          </el-table-column>
+          <el-table-column label="状态" width="90">
+            <template #default="{ row }">
+              <el-tag size="small" :type="row.orphaned_at ? 'warning' : 'success'">{{ row.orphaned_at ? '孤儿' : '正常' }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="到期" min-width="150">
+            <template #default="{ row }">
+              <span v-if="!row.expires_at"><el-tag size="small" effect="plain">永久</el-tag></span>
+              <span v-else class="rb-mono">{{ row.expires_at }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="created_at" label="入库时间" width="180" />
+          <el-table-column label="操作" width="230" fixed="right">
+            <template #default="{ row }">
+              <el-button size="small" text type="primary" @click="openPreview(row)">预览</el-button>
+              <el-button size="small" text type="primary" @click="exportRow(row)">导出</el-button>
+              <el-button size="small" text type="primary" @click="openExtend(row)">保留期</el-button>
+              <el-button size="small" text type="danger" @click="remove(row)">删除</el-button>
+            </template>
+          </el-table-column>
+          <template #empty><el-empty description="回收站暂无条目" :image-size="80" /></template>
+        </wd-data-grid>
+
+        <div class="rb-pager">
+          <el-pagination
+            v-model:current-page="page" v-model:page-size="size"
+            :total="total" :page-sizes="[20, 50, 100]"
+            layout="total, sizes, prev, pager, next, jumper"
+            @current-change="load" @size-change="onSizeChange" />
+        </div>
+      </wd-panel>
+
+      <!-- 预览弹窗：payload 格式化 JSON -->
+      <el-dialog v-model="previewVisible" title="条目载荷预览" width="640px">
+        <el-descriptions :column="2" border size="small" style="margin-bottom:12px">
+          <el-descriptions-item label="命名空间"><span class="rb-mono">{{ previewRow.namespace }}</span></el-descriptions-item>
+          <el-descriptions-item label="来源"><span class="rb-mono">{{ previewRow.source_table }}#{{ previewRow.source_pk }}</span></el-descriptions-item>
+          <el-descriptions-item label="业务键"><span class="rb-mono">{{ previewRow.item_key || '—' }}</span></el-descriptions-item>
+          <el-descriptions-item label="大小">{{ formatSize(previewRow.payload_size) }}</el-descriptions-item>
+        </el-descriptions>
+        <pre class="rb-pre">{{ previewJson }}</pre>
+        <template #footer>
+          <el-button @click="previewVisible = false">关闭</el-button>
+          <el-button type="primary" @click="exportRow(previewRow)">导出 JSON</el-button>
+        </template>
+      </el-dialog>
+
+      <!-- 保留期调整弹窗 -->
+      <el-dialog v-model="extendVisible" title="调整保留期" width="420px">
+        <el-form label-width="90px">
+          <el-form-item label="条目">
+            <span class="rb-mono">{{ extendRow.namespace }} / {{ extendRow.token && extendRow.token.slice(0, 8) }}…</span>
+          </el-form-item>
+          <el-form-item label="保留方式">
+            <el-radio-group v-model="extendMode">
+              <el-radio value="forever">永久保留</el-radio>
+              <el-radio value="days">指定天数后到期</el-radio>
+            </el-radio-group>
+          </el-form-item>
+          <el-form-item label="天数" v-if="extendMode === 'days'">
+            <el-input-number v-model="extendDays" :min="1" :max="3650" />
+          </el-form-item>
+        </el-form>
+        <template #footer>
+          <el-button @click="extendVisible = false">取消</el-button>
+          <el-button type="primary" :loading="saving" @click="saveExtend">保存</el-button>
+        </template>
+      </el-dialog>
+    </div>
+  </script>
+
+  <script src="/static/vendor/vue/vue.global.prod.js"></script>
+  <script src="/static/vendor/element-plus/index.full.min.js"></script>
+  <script src="/static/vendor/icons/index.iife.min.js"></script>
+  <script src="/static/vendor/workdesktop-ai/index.umd.js"></script>
+  <script>
+    const WD = window.WorkDesktop;
+    const ElementPlus = window.ElementPlus;
+    const { WorkDesktop } = WD;
+    const { ref, reactive } = Vue;
+    const { Search, RefreshLeft, Delete, DeleteFilled } = window.ElementPlusIconsVue || {};
+
+    const app = Vue.createApp({
+      template: '#rb-tpl',
+      setup() {
+        const loading = ref(false);
+        const cleaning = ref(false);
+        const saving = ref(false);
+        const rows = ref([]);
+        const total = ref(0);
+        const page = ref(1);
+        const size = ref(20);
+        const filters = reactive({ namespace: '', orphaned: '', source_table: '', keyword: '' });
+        const stats = reactive({ total: 0, orphaned: 0, expiring: 0, namespaces: [] });
+        const namespaces = ref([]);
+        const selected = ref([]);
+
+        // —— 预览 ——
+        const previewVisible = ref(false);
+        const previewRow = ref({});
+        const previewJson = ref('');
+
+        // —— 保留期 ——
+        const extendVisible = ref(false);
+        const extendRow = ref({});
+        const extendMode = ref('forever');
+        const extendDays = ref(30);
+
+        function qs(obj) {
+          const p = new URLSearchParams();
+          for (const [k, v] of Object.entries(obj)) { if (v !== '' && v != null) p.append(k, v); }
+          const s = p.toString();
+          return s ? '?' + s : '';
+        }
+
+        function formatSize(n) {
+          n = Number(n) || 0;
+          if (n < 1024) return n + ' B';
+          if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+          return (n / 1024 / 1024).toFixed(2) + ' MB';
+        }
+
+        async function load() {
+          loading.value = true;
+          try {
+            const res = await WD.request.get('/admin/recyclebin_admin/rows' + qs({
+              ...filters, page: page.value, size: size.value
+            }));
+            if (!res.success) {
+              ElementPlus.ElMessage.error(res.message || '加载失败');
+              return;
+            }
+            rows.value = res.data.list || [];
+            total.value = res.data.total || 0;
+            const st = res.data.stats || {};
+            stats.total = st.total || 0;
+            stats.orphaned = st.orphaned || 0;
+            stats.expiring = st.expiring || 0;
+            stats.namespaces = st.namespaces || [];
+            namespaces.value = st.namespaces || [];
+          } finally {
+            loading.value = false;
+          }
+        }
+
+        function search() { page.value = 1; load(); }
+        function reset() {
+          filters.namespace = ''; filters.orphaned = ''; filters.source_table = ''; filters.keyword = '';
+          page.value = 1; load();
+        }
+        function onSizeChange() { page.value = 1; load(); }
+        function onSelectionChange(list) { selected.value = list || []; }
+
+        async function openPreview(row) {
+          const res = await WD.request.get('/admin/recyclebin_admin/preview' + qs({ token: row.token }));
+          if (!res.success) {
+            ElementPlus.ElMessage.error(res.message || '读取失败');
+            return;
+          }
+          previewRow.value = res.data;
+          const p = res.data.payload;
+          previewJson.value = typeof p === 'string' ? p : JSON.stringify(p, null, 2);
+          previewVisible.value = true;
+        }
+
+        /** 单条导出 JSON：直接走下载路由（Content-Disposition），浏览器落盘。 */
+        function exportRow(row) {
+          window.open('/admin/recyclebin_admin/export' + qs({ token: row.token }), '_blank');
+        }
+
+        function openExtend(row) {
+          extendRow.value = row;
+          extendMode.value = row.expires_at ? 'days' : 'forever';
+          extendDays.value = 30;
+          extendVisible.value = true;
+        }
+
+        async function saveExtend() {
+          saving.value = true;
+          try {
+            const res = await WD.request.post('/admin/recyclebin_admin/extend', {
+              token: extendRow.value.token,
+              days: extendMode.value === 'forever' ? 0 : extendDays.value
+            });
+            ElementPlus.ElMessage[res.success ? 'success' : 'error'](
+              res.message || (res.success ? '已保存' : '保存失败'));
+            if (res.success) {
+              extendVisible.value = false;
+              load();
+            }
+          } finally {
+            saving.value = false;
+          }
+        }
+
+        async function remove(row) {
+          try {
+            await ElementPlus.ElMessageBox.confirm(
+              '彻底删除该条目？此操作不可恢复，包将无法再取回该数据。',
+              '删除确认', { type: 'warning' });
+          } catch (e) {
+            return;
+          }
+          const res = await WD.request.post('/admin/recyclebin_admin/purge', { token: row.token });
+          ElementPlus.ElMessage[res.success ? 'success' : 'error'](
+            res.message || (res.success ? '已删除' : '删除失败'));
+          if (res.success) load();
+        }
+
+        async function removeBatch() {
+          try {
+            await ElementPlus.ElMessageBox.confirm(
+              '彻底删除选中的 ' + selected.value.length + ' 条条目？此操作不可恢复。',
+              '批量删除确认', { type: 'warning' });
+          } catch (e) {
+            return;
+          }
+          const res = await WD.request.post('/admin/recyclebin_admin/purgeBatch', {
+            tokens: selected.value.map(r => r.token).join(',')
+          });
+          ElementPlus.ElMessage[res.success ? 'success' : 'error'](
+            res.message || (res.success ? '已删除' : '删除失败'));
+          if (res.success) load();
+        }
+
+        async function cleanExpired() {
+          try {
+            await ElementPlus.ElMessageBox.confirm(
+              '清理全部命名空间的到期条目？', '清理确认', { type: 'warning' });
+          } catch (e) {
+            return;
+          }
+          cleaning.value = true;
+          try {
+            const res = await WD.request.post('/admin/recyclebin_admin/cleanExpired', {});
+            ElementPlus.ElMessage[res.success ? 'success' : 'error'](
+              res.message || (res.success ? '已清理' : '清理失败'));
+            if (res.success) load();
+          } finally {
+            cleaning.value = false;
+          }
+        }
+
+        load();
+
+        return {
+          loading, cleaning, saving, rows, total, page, size, filters, stats, namespaces, selected,
+          previewVisible, previewRow, previewJson,
+          extendVisible, extendRow, extendMode, extendDays,
+          load, search, reset, onSizeChange, onSelectionChange,
+          openPreview, exportRow, openExtend, saveExtend, remove, removeBatch, cleanExpired, formatSize,
+          Search, RefreshLeft, Delete, DeleteFilled
+        };
+      }
+    });
+
+    for (const [name, comp] of Object.entries(window.ElementPlusIconsVue)) {
+      app.component(name, comp);
+    }
+    app.use(ElementPlus);
+    app.use(WorkDesktop);
+    app.mount('#app');
+  </script>
+</body>
+
+</html>

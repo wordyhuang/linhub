@@ -1,0 +1,1077 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>功能安装 - LinHub 林枢</title>
+  <link rel="icon" type="image/svg+xml" href="/brand/favicon.svg">
+  <link rel="stylesheet" href="/static/vendor/element-plus/index.css">
+  <link rel="stylesheet" href="/static/vendor/workdesktop-ai/style.css">
+  <style>
+    html,
+    body,
+    #app {
+      height: 100%;
+      margin: 0;
+    }
+
+    .pkg-page {
+      height: 100%;
+      padding: 16px 20px 24px;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+
+    .section-title {
+      margin: 20px 0 12px;
+      font-size: 16px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .section-title .hint {
+      font-size: 12px;
+      font-weight: 400;
+      color: var(--wd-text-color-secondary, #6b7280);
+    }
+
+    .installable-list {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+      gap: 14px;
+      align-items: stretch;
+    }
+
+    /* 卡片内部 flex 纵向布局：描述区占满中间，操作按钮齐平置于底部 */
+    .installable-card {
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .installable-card .el-card__header {
+      flex: 0 0 auto;
+    }
+
+    .installable-card .el-card__body {
+      display: flex;
+      flex-direction: column;
+      flex: 1 1 auto;
+      min-height: 0;
+    }
+
+    .installable-card .desc {
+      flex: 1 1 0;
+      color: var(--wd-text-color-secondary, #6b7280);
+      font-size: 12px;
+      line-height: 1.6;
+      margin-top: 6px;
+      word-break: break-all;
+    }
+
+    .installable-card .card-actions {
+      flex: 0 0 auto;
+      margin-top: 12px;
+      text-align: right;
+    }
+
+    /* 当前版本 panel */
+    .version-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+      gap: 14px;
+    }
+
+    .version-item {
+      border: 1px solid var(--el-border-color-light, #e4e7ed);
+      border-radius: 8px;
+      padding: 14px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      background: var(--el-fill-color-blank, #fff);
+    }
+
+    .version-head {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .version-name {
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .version-body {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .version-current {
+      font-size: 22px;
+      font-weight: 700;
+      color: var(--el-color-primary, #409eff);
+      line-height: 1;
+    }
+
+    .version-note {
+      font-size: 12px;
+      color: var(--wd-text-color-secondary, #6b7280);
+      line-height: 1.5;
+      word-break: break-all;
+    }
+
+    .version-error {
+      font-size: 12px;
+      color: var(--el-color-danger, #f56c6c);
+      line-height: 1.5;
+      word-break: break-all;
+    }
+
+    .version-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 2px;
+    }
+
+    .wd-rb-group-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--wd-text-color-secondary, #6b7280);
+      margin: 4px 0 8px;
+    }
+
+    .wd-rb-item {
+      display: flex;
+      align-items: center;
+      margin: 0 0 10px;
+      height: auto;
+      padding: 8px 12px;
+      border: 1px solid var(--wd-border-color, #e5e7eb);
+      border-radius: 8px;
+      width: 100%;
+    }
+
+    /* —— 卸载确认面板 —— */
+    .rv-label {
+      font-size: 13px;
+      color: var(--wd-text-color-secondary, #6b7280);
+      margin-right: 6px;
+    }
+    .kv-list {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      gap: 6px 16px;
+    }
+    .kv-list .kv {
+      font-size: 13px;
+      line-height: 1.8;
+    }
+    .kv-list .kv .k {
+      color: var(--wd-text-color-secondary, #6b7280);
+      margin-right: 6px;
+    }
+    /* 路径类条目跨整行显示，避免与其他条目并排成多列 */
+    .kv-list .kv-full {
+      grid-column: 1 / -1;
+    }
+    .mono {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      word-break: break-all;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="app"></div>
+
+  <script type="text/x-template" id="pkg-tpl">
+  <div class="pkg-page">
+        <!-- 当前版本 / 平台与 workdesktop 版本检测升级 -->
+        <wd-panel :border="true">
+            <template #description>
+              平台按配置的检测接口检测；workdesktop 按包发布地址（npm）自动检测最新版本。有新版本时可一键升级（服务端自动下载替换，升级前自动备份）。
+            </template>
+            <div class="version-grid">
+              <div class="version-item">
+                <div class="version-head">
+                  <span class="version-name">平台版本</span>
+                  <el-tag size="small" type="info">LinHub Host</el-tag>
+                </div>
+                <div class="version-body">
+                  <span class="version-current">v{{ versions.host.current || '—' }}</span>
+                  <el-tag v-if="!versions.host.configured && !versions.host.error" size="small" type="info">未配置检测</el-tag>
+                  <el-tag v-else-if="versions.host.error" size="small" type="danger">检测失败</el-tag>
+                  <el-tag v-else-if="versions.host.hasUpdate" size="small" type="warning">可升级 v{{ versions.host.latest }}</el-tag>
+                  <el-tag v-else size="small" type="success">已是最新</el-tag>
+                </div>
+                <div v-if="versions.host.error" class="version-error">{{ versions.host.error }}</div>
+                <div v-else-if="versions.host.releaseNote" class="version-note">{{ versions.host.releaseNote }}</div>
+                <div class="version-actions">
+                  <el-button size="small" :loading="versions.host.checking" @click="recheck('host')">重新检测</el-button>
+                  <el-button
+                    v-if="versions.host.hasUpdate"
+                    size="small" type="primary"
+                    :loading="upgrading.host"
+                    @click="doUpgrade('host')">升级到 v{{ versions.host.latest }}</el-button>
+                </div>
+              </div>
+
+              <div class="version-item">
+                <div class="version-head">
+                  <span class="version-name">workdesktop 版本</span>
+                  <el-tag size="small" type="info">WorkDesktop-AI</el-tag>
+                </div>
+                <div class="version-body">
+                  <span class="version-current">v{{ versions.workdesktop.current || '—' }}</span>
+                  <el-tag v-if="!versions.workdesktop.configured && !versions.workdesktop.error" size="small" type="info">未配置检测</el-tag>
+                  <el-tag v-else-if="versions.workdesktop.error" size="small" type="danger">检测失败</el-tag>
+                  <el-tag v-else-if="versions.workdesktop.hasUpdate" size="small" type="warning">可升级 v{{ versions.workdesktop.latest }}</el-tag>
+                  <el-tag v-else size="small" type="success">已是最新</el-tag>
+                </div>
+                <div v-if="versions.workdesktop.error" class="version-error">{{ versions.workdesktop.error }}</div>
+                <div v-else-if="versions.workdesktop.releaseNote" class="version-note">{{ versions.workdesktop.releaseNote }}</div>
+                <div class="version-actions">
+                  <el-button size="small" :loading="versions.workdesktop.checking" @click="recheck('workdesktop')">重新检测</el-button>
+                  <el-button
+                    v-if="versions.workdesktop.hasUpdate"
+                    size="small" type="primary"
+                    :loading="upgrading.workdesktop"
+                    @click="doUpgrade('workdesktop')">升级到 v{{ versions.workdesktop.latest }}</el-button>
+                  <el-button
+                    size="small" type="warning" plain
+                    :loading="wdRollback.loading"
+                    @click="openWdRollback">回退版本</el-button>
+                </div>
+              </div>
+            </div>
+        </wd-panel>
+
+        <wd-panel :border="true" title="已安装功能包">
+            <template #description>
+              超管专属：管理已安装功能包，并从暂存目录安装新功能包。宿主平台版本：v{{ hostVersion }}
+            </template>
+
+          <wd-data-grid :data-source="installed" border stripe :with-index="false" :with-pager="false">
+            <template #toolbar>
+              <el-button type="primary" @click="openCreate">
+                <el-icon><Plus /></el-icon>
+                <span style="margin-left:4px">新建功能包</span>
+              </el-button>
+            </template>
+            <el-table-column label="状态" width="90" align="center">
+              <template #default="{ row }">
+                <el-tag :type="row.state === 'enabled' ? 'success' : 'info'" size="small">
+                  {{ row.state === 'enabled' ? '启用' : '禁用' }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="包名 / 短名">
+              <template #default="{ row }">
+                <div>{{ row.title }}</div>
+                <div style="font-size:12px;color:var(--wd-text-color-secondary, #6b7280)">
+                  {{ row.name }} · {{ row.short }}
+                </div>
+              </template>
+            </el-table-column>
+            <el-table-column prop="version" label="版本" width="90" />
+            <el-table-column prop="installed_at" label="安装时间" width="170" :formatter="fmtDate" />
+            <el-table-column prop="description" label="说明" min-width="160">
+              <template #default="{ row }">
+                <div class="desc" :style="row.state==='disabled' ? 'opacity:0.6;' : ''">{{ row.description || '—' }}</div>
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="280" align="center">
+              <template #default="{ row }">
+                <el-button-group size="small">
+                  <wd-drawer-button
+                    label="查看"
+                    type="primary"
+                    size="small"
+                    drawer-size="900px"
+                    :title="'功能包详情 · ' + row.title"
+                    :url="'/admin/package/view?name=' + encodeURIComponent(row.name)"
+                    reload-on-open />
+                  <el-button
+                    v-if="row.state === 'disabled'" type="primary"
+                    :loading="busy"
+                    @click="doAction('enable', row)">启用</el-button>
+                  <el-button
+                    v-if="row.state === 'enabled'" type="warning"
+                    :loading="busy"
+                    @click="doAction('disable', row)">禁用</el-button>
+                  <el-button
+                    v-if="row.upgrade_version" type="info"
+                    :loading="busy"
+                    @click="doAction('upgrade', row)">升级 v{{ row.upgrade_version }}</el-button>
+                  <el-button
+                    v-if="row.rollback_versions && row.rollback_versions.length"
+                    type="warning" plain
+                    @click="openRollback(row)">回退</el-button>
+                  <el-button type="danger" plain @click="confirmRemove(row)">卸载</el-button>
+                </el-button-group>
+              </template>
+            </el-table-column>
+            <template #empty>
+              <el-empty description="尚未安装任何功能包" :image-size="80" />
+            </template>
+          </wd-data-grid>
+
+          </wd-panel>
+
+          <wd-panel title="暂存可安装">
+            <template #description>
+              放在暂存目录内的功能包，目录名须为 lgg-pkg-短名</template>
+
+          <el-alert
+            v-if="!zipEnabled"
+            type="warning"
+            :closable="false"
+            show-icon
+            style="margin-bottom:12px"
+            title="PHP 未启用 zip 扩展：点击「打包」不会下载 zip，将在服务器 data/plugin-packout 目录生成目录包。如需 zip 下载，请先在 PHP 中启用 zip 扩展。" />
+          <el-empty v-if="!installable.length" description="暂存目录为空，没有可安装的功能包" :image-size="80" />
+          <div v-else class="installable-list">
+            <el-card v-for="p in installable" :key="p.dir" class="installable-card" shadow="hover">
+              <template #header>
+                <span>{{ p.title }}</span>
+                <el-tag v-if="p.installed" type="success" size="small" style="margin-left:8px">已安装</el-tag>
+                <el-tag v-else type="warning" size="small" style="margin-left:8px">未安装</el-tag>
+                <span v-if="!p.valid" style="margin-left:8px">
+                  <el-tag type="danger" size="small">校验失败</el-tag>
+                </span>
+              </template>
+              <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                <el-tag type="info" size="small">{{ p.short }}</el-tag>
+                <el-tag size="small">v{{ p.version }}</el-tag>
+                <el-tag :type="reviewTagType(p.review_status)" size="small">{{ reviewText(p.review_status) }}</el-tag>
+              </div>
+              <div v-if="p.review_status !== 'approved'" style="margin-top:6px;font-size:12px">
+                <span style="color:#e6a23c">{{ reviewHint(p.review_status) }}</span>
+                <wd-drawer-button
+                  label="去审核"
+                  type="primary"
+                  link
+                  size="small"
+                  style="margin-left:6px;font-size:12px"
+                  drawer-size="80%"
+                  title="功能包审核"
+                  url="/admin/package_review/index"
+                  reload-on-open
+                  @close="loadData" />
+              </div>
+              <div class="desc">{{ p.description || '—' }}</div>
+              <ul v-if="!p.valid" style="margin:8px 0 0;padding-left:18px;font-size:12px;color:#f56c6c">
+                <li v-for="(m, i) in p.problems" :key="i">{{ m }}</li>
+              </ul>
+              <div class="card-actions">
+                <wd-drawer-button
+                  label="查看"
+                  type="primary"
+                  size="small"
+                  drawer-size="900px"
+                  :title="'功能包详情 · ' + p.title"
+                  :url="'/admin/package/view?name=' + encodeURIComponent('lgg/' + p.short)"
+                  reload-on-open />
+                <el-button
+                  size="small" :disabled="!p.valid || packing" @click="doPack(p)">打包</el-button>
+                <el-button
+                  v-if="!p.installed"
+                  size="small" type="primary"
+                  :disabled="!p.valid || p.review_status !== 'approved' || busy"
+                  :loading="busy"
+                  @click="doInstall(p)">安装</el-button>
+                <el-button
+                  v-if="p.upgrade_version"
+                  size="small" type="info" plain
+                  :disabled="p.review_status !== 'approved' || busy"
+                  :loading="busy"
+                  @click="doUpgradeStaged(p)">升级 v{{ p.upgrade_version }}</el-button>
+                <el-button
+                  size="small" type="danger" plain
+                  @click="confirmRemoveStaged(p)">删除</el-button>
+              </div>
+            </el-card>
+          </div>
+        </wd-panel>
+
+        <!-- 卸载确认 -->
+    <el-dialog v-model="removeOpen" title="卸载功能包" width="600px" append-to-body>
+      <template v-if="!rv">
+        <div v-loading="true" style="height:120px" />
+      </template>
+      <template v-else>
+        <el-alert type="warning" show-icon :closable="false" style="margin-bottom:12px"
+          title="卸载将移除以下内容，且不可恢复。请确认后继续。" />
+        <p style="margin:0 0 10px;font-weight:600">
+          卸载「{{ rv.title || rv.short }}」 v{{ rv.version }}（{{ rv.name }}）
+        </p>
+        <div style="font-size:13px;line-height:1.9">
+          <div class="kv-list" style="grid-template-columns: 1fr;gap:2px 12px">
+            <div class="kv kv-full"><span class="k">源码目录</span><span class="mono">{{ rv.source_dir || '—' }}（将被删除）</span></div>
+            <div class="kv kv-full"><span class="k">接入点</span>
+              菜单 <b>{{ rv.counts.menus }}</b> · 权限点 <b>{{ rv.counts.permissions }}</b> · 对外服务 <b>{{ rv.counts.provides }}</b>（将被移除）
+            </div>
+            <div v-for="t in rv.tables" :key="t.table" class="kv kv-full" style="display:flex;align-items:center;gap:8px">
+              <span class="k">受影响的表</span>
+              <span class="mono">{{ t.table }}</span>
+              <el-tag v-if="t.exists === false" size="small" type="danger">表不存在</el-tag>
+              <el-tag v-else-if="t.exists === true" size="small" type="info">{{ t.rowCount }} 行</el-tag>
+              <el-tag v-else size="small" type="warning">不可探查</el-tag>
+            </div>
+            <div v-if="!rv.tables.length" class="kv kv-full"><span class="k">受影响的数据表</span>无</div>
+            <div v-if="rv.applied_migrations.length" class="kv kv-full">
+              <span class="k">已应用迁移</span><span class="mono">{{ rv.applied_migrations.join('、') }}（{{ handle === 'drop' ? '将被回滚' : '保持不变' }}）</span>
+            </div>
+          </div>
+        </div>
+        <el-alert v-if="!rv.db_connectable" type="warning" show-icon :closable="false" style="margin-top:10px"
+          title="数据库当前不可连接，无法回滚删除数据表，只能选择「保留数据表」。"
+          description="请先恢复数据库连接，如确需回滚数据表请稍后再试。" />
+        <div style="margin-top:14px">
+          <div class="rv-label" style="margin-bottom:6px">数据表处理方式</div>
+          <el-radio-group v-model="handle" :disabled="!rv.db_connectable">
+            <el-radio label="keep" style="margin-right:16px">保留数据表（默认，推荐）</el-radio>
+            <el-radio label="drop">回滚删除该包建的数据表</el-radio>
+          </el-radio-group>
+          <el-checkbox v-if="handle === 'drop'" v-model="dropConfirmed" style="display:block;margin-top:10px" :disabled="!rv.db_connectable">
+            我已了解，将永久删除该功能包创建的 {{ rv.tables.length }} 张数据表及其数据，且无法恢复
+          </el-checkbox>
+        </div>
+      </template>
+      <template #footer>
+        <el-button @click="removeOpen = false">取消</el-button>
+        <el-button type="danger" :loading="busy"
+          :disabled="!rv || (handle === 'drop' && !dropConfirmed || handle === 'drop' && !rv.db_connectable)"
+          @click="doRemove">确认卸载</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 删除暂存包确认 -->
+    <el-dialog v-model="delStagedOpen" title="删除暂存功能包" width="420px" append-to-body>
+      <p style="margin:0">确定要从暂存目录删除「{{ delStagedRow?.title }}」吗？该操作会删除暂存区源码目录 {{ delStagedRow?.dir }}，且不可恢复。</p>
+      <template #footer>
+        <el-button @click="delStagedOpen = false">取消</el-button>
+        <el-button type="danger" :loading="busy" @click="doRemoveStaged">确认删除</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 新建功能包 -->
+    <el-dialog v-model="createOpen" title="新建功能包" width="440px" append-to-body>
+      <el-form label-width="80px" @submit.prevent>
+        <el-form-item label="短名" required>
+          <el-input v-model="createForm.short" placeholder="小写字母/数字/中划线，如 demo" />
+        </el-form-item>
+        <el-form-item label="标题" required>
+          <el-input v-model="createForm.title" placeholder="人类可读名称，如 演示包" />
+        </el-form-item>
+        <el-form-item label="版本">
+          <el-input v-model="createForm.version" placeholder="0.1.0" />
+        </el-form-item>
+        <el-form-item label="类型">
+          <wd-radio-list v-model="createForm.type" button-style
+                         :data-source="[{type:'app',name:'app（业务应用包）'},{type:'lib',name:'lib（能力库包）'}]"
+                         text-prop="name" value-prop="type" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="createOpen = false">取消</el-button>
+        <el-button type="primary" :loading="busy" @click="doCreate">生成骨架</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 回退版本选择 -->
+    <el-dialog v-model="rollbackOpen" :title="'回退功能包 · ' + (rollbackRow?.title || '')" width="520px" append-to-body>
+      <el-alert
+        type="warning" :closable="false" show-icon
+        style="margin-bottom:12px"
+        title="回退会用所选历史版本的源码覆盖当前版本，数据库迁移不会自动执行，请确认后再操作。" />
+      <el-radio-group v-model="rollbackPath" style="width:100%">
+        <el-radio
+          v-for="v in rollbackRow?.rollback_versions || []"
+          :key="v.path" :label="v.path"
+          style="display:flex;align-items:center;margin:0 0 10px;height:auto;padding:8px 12px;border:1px solid var(--wd-border-color, #e5e7eb);border-radius:8px;">
+          <div style="margin-left:4px">
+            <div style="font-weight:600">
+              v{{ v.version }}
+              <el-tag size="small" :type="rollbackTagType(v.tag)" style="margin-left:8px">{{ rollbackTagText(v.tag) }}</el-tag>
+            </div>
+            <div style="font-size:12px;color:var(--wd-text-color-secondary, #6b7280);margin-top:2px">
+              备份时间：{{ v.time }}
+            </div>
+          </div>
+        </el-radio>
+      </el-radio-group>
+      <template #footer>
+        <el-button @click="rollbackOpen = false">取消</el-button>
+        <el-button type="warning" :loading="busy" :disabled="!rollbackPath" @click="doRollback">确认回退</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- workdesktop 版本回退：本地备份 + npm 历史版本 -->
+    <el-dialog v-model="wdRollback.open" title="回退 workdesktop 版本" width="540px" append-to-body>
+      <div v-loading="wdRollback.loading">
+        <el-alert
+          type="warning" :closable="false" show-icon
+          style="margin-bottom:12px"
+          title="回退会用所选旧版本整目录替换当前前端资源，执行前会自动再备份一次当前版本。回退成功后请刷新页面加载旧资源。" />
+
+        <div v-if="!wdRollback.loading && !wdRollback.backups.length && !wdRollback.npmVersions.length">
+          <el-empty :image-size="80" :description="wdRollback.npmError ? '暂无可回退版本（npm 历史版本获取失败）' : '暂无可回退版本'" />
+          <div v-if="wdRollback.npmError" style="font-size:12px;color:var(--el-color-danger,#f56c6c);word-break:break-all">
+            {{ wdRollback.npmError }}
+          </div>
+        </div>
+
+        <el-radio-group v-model="wdRollback.selected" style="width:100%">
+          <template v-if="wdRollback.backups.length">
+            <div class="wd-rb-group-title">本地备份（离线可用）</div>
+            <el-radio
+              v-for="b in wdRollback.backups"
+              :key="'b:' + b.backup" :label="'backup:' + b.backup"
+              class="wd-rb-item">
+              <div style="margin-left:4px">
+                <div style="font-weight:600">v{{ b.version }}</div>
+                <div style="font-size:12px;color:var(--wd-text-color-secondary,#6b7280);margin-top:2px">
+                  备份时间：{{ b.time }}
+                </div>
+              </div>
+            </el-radio>
+          </template>
+
+          <template v-if="wdRollback.npmVersions.length">
+            <div class="wd-rb-group-title">npm 历史版本（在线下载）</div>
+            <el-radio
+              v-for="n in wdRollback.npmVersions"
+              :key="'n:' + n.version" :label="'npm:' + n.version"
+              class="wd-rb-item"
+              :disabled="!upgradeCapable.workdesktop">
+              <div style="margin-left:4px">
+                <div style="font-weight:600">
+                  v{{ n.version }}
+                  <el-tag v-if="!upgradeCapable.workdesktop" size="small" type="info" style="margin-left:8px">需 phar/zlib</el-tag>
+                </div>
+                <div style="font-size:12px;color:var(--wd-text-color-secondary,#6b7280);margin-top:2px">
+                  从 npm registry 下载 tgz 安装
+                </div>
+              </div>
+            </el-radio>
+          </template>
+        </el-radio-group>
+
+        <div v-if="wdRollback.npmError && wdRollback.backups.length"
+             style="margin-top:8px;font-size:12px;color:var(--el-color-danger,#f56c6c);word-break:break-all">
+          npm 历史版本获取失败：{{ wdRollback.npmError }}
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="wdRollback.open = false">取消</el-button>
+        <el-button type="warning" :loading="wdRollback.submitting" :disabled="!wdRollback.selected" @click="doWdRollback">确认回退</el-button>
+      </template>
+    </el-dialog>
+  </div>
+</script>
+
+  <script src="/static/vendor/vue/vue.global.prod.js"></script>
+  <script src="/static/vendor/element-plus/index.full.min.js"></script>
+  <script src="/static/vendor/icons/index.iife.min.js"></script>
+  <script src="/static/vendor/workdesktop-ai/index.umd.js"></script>
+  <script>
+    const WD = window.WorkDesktop;
+    const ElementPlus = window.ElementPlus;
+    const { WorkDesktop } = WD;
+    const { ref, reactive } = Vue;
+
+    const app = Vue.createApp({
+      template: '#pkg-tpl',
+      setup() {
+        const hostVersion = ref('');
+        const installed = ref([]);
+        const installable = ref([]);
+        // 将绝对路径转换为相对 project 根（code/）的路径
+        function relPath(fullPath) {
+          if (!fullPath) return fullPath;
+          fullPath = String(fullPath).replace(/\\/g, '/');
+          const idx = fullPath.indexOf('code/');
+          return idx >= 0 ? fullPath.substring(idx) : fullPath;
+        }
+        const loading = ref(false);
+        const busy = ref(false);
+        const packing = ref(false);
+        const zipEnabled = ref(true);
+        const removeOpen = ref(false);
+        const removingRow = ref(null);
+        // 卸载预览数据 / 数据表处理方式 / 二次强确认
+        const rv = ref(null);
+        const handle = ref('keep');
+        const dropConfirmed = ref(false);
+        const delStagedOpen = ref(false);
+        const delStagedRow = ref(null);
+        const createOpen = ref(false);
+        const createForm = ref({ short: '', title: '', version: '0.1.0', type: 'app' });
+        const rollbackOpen = ref(false);
+        const rollbackRow = ref(null);
+        const rollbackPath = ref('');
+
+        // —— 当前版本 panel：平台（host）与 workdesktop 各自独立检测/升级 ——
+        function makeVersionItem() {
+          return {
+            current: '',
+            latest: '',
+            downloadUrl: '',
+            releaseNote: '',
+            configured: false,
+            hasUpdate: false,
+            checking: true,
+            error: '',
+          };
+        }
+        const versions = ref({ host: makeVersionItem(), workdesktop: makeVersionItem() });
+        const upgrading = ref({ host: false, workdesktop: false });
+        // 服务端升级能力：host 需 zip 扩展，workdesktop 需 phar+zlib
+        const upgradeCapable = ref({ host: true, workdesktop: true });
+
+        const VERSION_NAME = { host: '平台版本', workdesktop: 'workdesktop 版本' };
+        const CAPABILITY_HINT = {
+          host: 'PHP 未启用 zip 扩展，无法升级平台，请先在 php.ini 开启 extension=zip。',
+          workdesktop: 'PHP 未启用 phar/zlib 扩展，无法升级 workdesktop，请检查 PHP 环境。',
+        };
+
+        async function loadVersions() {
+          for (const k of Object.keys(versions.value)) {
+            versions.value[k].checking = true;
+          }
+          try {
+            const res = await WD.request.get('/admin/update/versions');
+            if (!res.success) {
+              for (const k of Object.keys(versions.value)) {
+                versions.value[k].checking = false;
+                versions.value[k].error = res.message || '版本检测请求失败';
+              }
+              return;
+            }
+            const data = res.data || {};
+            for (const k of ['host', 'workdesktop']) {
+              const incoming = data[k] || {};
+              versions.value[k] = Object.assign(makeVersionItem(), incoming, { checking: false });
+            }
+            upgradeCapable.value = {
+              host: data.hostUpgradable !== false,
+              workdesktop: data.workdesktopUpgradable !== false,
+            };
+          } catch (e) {
+            for (const k of Object.keys(versions.value)) {
+              versions.value[k].checking = false;
+              versions.value[k].error = (e && e.message) ? e.message : '版本检测请求失败';
+            }
+          }
+        }
+
+        async function recheck(target) {
+          if (!versions.value[target] || versions.value[target].checking) return;
+          versions.value[target].checking = true;
+          versions.value[target].error = '';
+          // 后端在每次请求 versions 时实时检测，整体重拉后仅保留本项 loading 语义即可
+          await loadVersions();
+        }
+
+        async function doUpgrade(target) {
+          const item = versions.value[target];
+          if (!item || !item.hasUpdate || !item.downloadUrl) {
+            ElementPlus.ElMessage.warning('当前没有可升级的版本或缺少下载地址');
+            return;
+          }
+          if (!upgradeCapable.value[target]) {
+            ElementPlus.ElMessage.warning(CAPABILITY_HINT[target] || '当前环境不支持服务端升级');
+            return;
+          }
+          try {
+            await ElementPlus.ElMessageBox.confirm(
+              `确定将${VERSION_NAME[target]}从 v${item.current} 升级到 v${item.latest} 吗？升级前会自动备份当前版本，升级期间请勿关闭页面。`,
+              '升级确认',
+              { confirmButtonText: '确认升级', cancelButtonText: '取消', type: 'warning' }
+            );
+          } catch (e) {
+            return;
+          }
+          upgrading.value[target] = true;
+          try {
+            const res = await WD.request.post('/admin/update/run', {
+              target,
+              download_url: item.downloadUrl,
+              version: item.latest,
+            });
+            ElementPlus.ElMessage[res.success ? 'success' : 'error'](
+              res.message || (res.success ? '升级成功' : '升级失败')
+            );
+            if (res.success) {
+              await Promise.all([loadVersions(), loadData()]);
+            }
+          } finally {
+            upgrading.value[target] = false;
+          }
+        }
+
+        // —— workdesktop 版本回退：本地备份 / npm 历史版本 ——
+        const wdRollback = reactive({
+          open: false,
+          loading: false,
+          submitting: false,
+          current: '',
+          backups: [],
+          npmVersions: [],
+          npmError: '',
+          selected: '',
+        });
+
+        async function openWdRollback() {
+          wdRollback.open = true;
+          wdRollback.loading = true;
+          wdRollback.selected = '';
+          wdRollback.backups = [];
+          wdRollback.npmVersions = [];
+          wdRollback.npmError = '';
+          try {
+            const res = await WD.request.get('/admin/update/rollbackOptions');
+            if (!res.success) {
+              ElementPlus.ElMessage.error(res.message || '回退版本清单获取失败');
+              return;
+            }
+            const d = res.data || {};
+            wdRollback.current = d.current || '';
+            wdRollback.backups = d.backups || [];
+            wdRollback.npmVersions = d.npmVersions || [];
+            wdRollback.npmError = d.npmError || '';
+            // 默认选中最新一份本地备份（离线、无扩展依赖）
+            if (wdRollback.backups.length) {
+              wdRollback.selected = 'backup:' + wdRollback.backups[0].backup;
+            } else if (wdRollback.npmVersions.length && upgradeCapable.value.workdesktop) {
+              // npm 列表旧版本在前，默认选中最接近当前的（末项）
+              const last = wdRollback.npmVersions[wdRollback.npmVersions.length - 1];
+              wdRollback.selected = 'npm:' + last.version;
+            }
+          } catch (e) {
+            ElementPlus.ElMessage.error((e && e.message) ? e.message : '回退版本清单获取失败');
+          } finally {
+            wdRollback.loading = false;
+          }
+        }
+
+        async function doWdRollback() {
+          const raw = wdRollback.selected;
+          if (!raw) return;
+          const sep = raw.indexOf(':');
+          const source = raw.slice(0, sep);
+          const refVal = raw.slice(sep + 1);
+          const targetText = source === 'backup'
+            ? '本地备份 ' + refVal.replace(/^workdesktop-/, '').replace(/-\d{14}$/, '')
+            : 'npm v' + refVal;
+          try {
+            await ElementPlus.ElMessageBox.confirm(
+              `确定将 workdesktop 从 v${wdRollback.current} 回退到 ${targetText} 吗？回退前会自动备份当前版本，回退成功后需刷新页面加载旧资源。`,
+              '回退确认',
+              { confirmButtonText: '确认回退', cancelButtonText: '取消', type: 'warning' }
+            );
+          } catch (e) {
+            return;
+          }
+          const payload = { source, ref: refVal };
+          if (source === 'npm') {
+            const hit = wdRollback.npmVersions.find(n => n.version === refVal);
+            payload.download_url = hit ? hit.downloadUrl : '';
+          }
+          wdRollback.submitting = true;
+          try {
+            const res = await WD.request.post('/admin/update/rollback', payload);
+            ElementPlus.ElMessage[res.success ? 'success' : 'error'](
+              res.message || (res.success ? '回退成功' : '回退失败')
+            );
+            if (res.success) {
+              wdRollback.open = false;
+              await Promise.all([loadVersions(), loadData()]);
+              ElementPlus.ElMessageBox.alert(
+                '已回退到 v' + (res.data && res.data.to ? res.data.to : refVal) + '，请刷新页面以加载旧版本前端资源。',
+                '回退成功',
+                { confirmButtonText: '刷新页面', type: 'success' }
+              ).then(() => { window.location.reload(); }).catch(() => {});
+            }
+          } finally {
+            wdRollback.submitting = false;
+          }
+        }
+
+        function isInstalled(short) {
+          return installed.value.some(r => r.short === short);
+        }
+
+        // 把 ISO 8601（如 2026-10-08T10:20:07+08:00）格式化为 YYYY-MM-DD HH:mm:ss
+        function fmtDate(row) {
+          const v = row.installed_at;
+          if (!v) return '—';
+          let d;
+          if (typeof v === 'number') {
+            d = new Date(v * 1000);
+          } else {
+            d = new Date(String(v));
+          }
+          if (isNaN(d.getTime())) return String(v);
+          const p = (n) => String(n).padStart(2, '0');
+          return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ` +
+            `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+        }
+
+        async function loadData() {
+          loading.value = true;
+          try {
+            const res = await WD.request.get('/admin/package/rows');
+            if (!res.success) {
+              ElementPlus.ElMessage.error(res.message || '加载失败');
+              return;
+            }
+            hostVersion.value = res.data.hostVersion || '';
+            installed.value = res.data.installed || [];
+            installable.value = res.data.installable || [];
+            zipEnabled.value = res.data.zipEnabled !== false;
+          } finally {
+            loading.value = false;
+          }
+        }
+
+        async function doAction(action, row) {
+          busy.value = true;
+          try {
+            const res = await WD.request.post('/admin/package/' + action, { name: row.name });
+            ElementPlus.ElMessage[res.success ? 'success' : 'error'](res.message || (res.success ? '操作成功' : '操作失败'));
+            if (res.success) await loadData();
+          } finally {
+            busy.value = false;
+          }
+        }
+
+        // 打包为纯下载端点（返回二进制文件流），用隐藏表单提交，不做 JSON 处理
+        async function doPack(p) {
+          // 未启用 zip：明确告知不会下载，仅生成目录包，需用户确认
+          if (!zipEnabled.value) {
+            try {
+              await ElementPlus.ElMessageBox.confirm(
+                '当前 PHP 未启用 zip 扩展，打包不会下载 zip 文件，而是在服务器 data/plugin-packout 目录生成一份目录包。是否继续？',
+                '未启用 zip 扩展',
+                { confirmButtonText: '继续生成目录包', cancelButtonText: '取消', type: 'warning' }
+              );
+            } catch (e) {
+              return;
+            }
+          } else if (p.installed) {
+            // 已安装包：提示打包的是暂存源码，不影响已安装版本
+            try {
+              await ElementPlus.ElMessageBox.confirm(
+                `「${p.title}」已安装（v${p.installed_version || ''}）。打包的是暂存区源码（v${p.version}），不会影响当前已安装版本。是否继续？`,
+                '该功能包已安装',
+                { confirmButtonText: '继续打包', cancelButtonText: '取消', type: 'info' }
+              );
+            } catch (e) {
+              return;
+            }
+          }
+          packing.value = true;
+          const f = document.createElement('form');
+          f.method = 'POST';
+          f.action = '/admin/package/pack';
+          f.style.display = 'none';
+          const inp = document.createElement('input');
+          inp.type = 'hidden'; inp.name = 'target'; inp.value = p.dir;
+          f.appendChild(inp);
+          document.body.appendChild(f);
+          f.submit();
+          setTimeout(() => { packing.value = false; }, 2000);
+        }
+        // 需求 F：审核状态文案/颜色/提示
+        function reviewText(s) {
+          return { pending: '待审核', approved: '已通过', rejected: '已驳回', changed: '内容已变更' }[s] || '待审核';
+        }
+        function reviewTagType(s) {
+          return { pending: 'warning', approved: 'success', rejected: 'danger', changed: 'info' }[s] || 'warning';
+        }
+        function reviewHint(s) {
+          if (s === 'rejected') return '该版本已被审核驳回，不可接入。';
+          if (s === 'changed') return '审核通过后内容已变更，需重新审核。';
+          return '该版本尚未通过接入审核。';
+        }
+        async function doInstall(p) {
+          if (p.review_status !== 'approved') {
+            ElementPlus.ElMessage.warning('该版本尚未通过功能包接入审核，请先审核');
+            return;
+          }
+          busy.value = true;
+          try {
+            const res = await WD.request.post('/admin/package/install', { target: p.dir });
+            ElementPlus.ElMessage[res.success ? 'success' : 'error'](res.message || (res.success ? '已安装' : '安装失败'));
+            if (res.success) await loadData();
+          } finally {
+            busy.value = false;
+          }
+        }
+        async function doUpgradeStaged(p) {
+          if (!p.installed_name) return;
+          if (p.review_status !== 'approved') {
+            ElementPlus.ElMessage.warning('该升级版本尚未通过功能包接入审核，请先审核');
+            return;
+          }
+          busy.value = true;
+          try {
+            const res = await WD.request.post('/admin/package/upgrade', { name: p.installed_name });
+            ElementPlus.ElMessage[res.success ? 'success' : 'error'](res.message || (res.success ? '已升级' : '升级失败'));
+            if (res.success) await loadData();
+          } finally {
+            busy.value = false;
+          }
+        }
+        // 打开回退弹窗：默认选中最近（列表首项）的历史版本
+        function openRollback(row) {
+          rollbackRow.value = row;
+          rollbackPath.value = row.rollback_versions && row.rollback_versions.length
+            ? row.rollback_versions[0].path
+            : '';
+          rollbackOpen.value = true;
+        }
+        async function doRollback() {
+          if (!rollbackRow.value || !rollbackPath.value) return;
+          busy.value = true;
+          try {
+            const res = await WD.request.post('/admin/package/rollback', {
+              name: rollbackRow.value.name,
+              backupPath: rollbackPath.value,
+            });
+            ElementPlus.ElMessage[res.success ? 'success' : 'error'](res.message || (res.success ? '已回退' : '回退失败'));
+            if (res.success) {
+              rollbackOpen.value = false;
+              await loadData();
+            }
+          } finally {
+            busy.value = false;
+          }
+        }
+        // 备份标签文案与颜色
+        function rollbackTagText(tag) {
+          const map = { 'pre-upgrade': '升级前备份', 'pre-install': '安装前备份', manual: '手动备份' };
+          return map[tag] || (tag || '备份');
+        }
+        function rollbackTagType(tag) {
+          if (tag === 'pre-upgrade') return 'warning';
+          if (tag === 'pre-install') return 'info';
+          return '';
+        }
+        function openCreate() {
+          createForm.value = { short: '', title: '', version: '0.1.0', type: 'app' };
+          createOpen.value = true;
+        }
+        async function doCreate() {
+          if (!createForm.value.short || !createForm.value.title) {
+            ElementPlus.ElMessage.warning('请填写短名和标题');
+            return;
+          }
+          busy.value = true;
+          try {
+            const res = await WD.request.post('/admin/package/create', { ...createForm.value });
+            ElementPlus.ElMessage[res.success ? 'success' : 'error'](res.message || (res.success ? '已生成骨架' : '生成失败'));
+            if (res.success) {
+              createOpen.value = false;
+              await loadData();
+            }
+          } finally {
+            busy.value = false;
+          }
+        }
+        function confirmRemove(row) {
+          removingRow.value = row;
+          rv.value = null;
+          handle.value = 'keep';
+          dropConfirmed.value = false;
+          removeOpen.value = true;
+          WD.request.get('/admin/package/removePreview', { name: row.name }).then(async (res) => {
+            if (res.success) {
+              rv.value = res.data;
+            } else {
+              removeOpen.value = false;
+              rv.value = null;
+              ElementPlus.ElMessage.error(res.message || '无法获取卸载预览');
+            }
+          }).catch((e) => {
+            removeOpen.value = false;
+            rv.value = null;
+            ElementPlus.ElMessage.error('获取卸载预览失败：' + (e && e.message ? e.message : e));
+          });
+        }
+        async function doRemove() {
+          if (!removingRow.value || !rv.value || (handle.value === 'drop' && !dropConfirmed.value)) return;
+          busy.value = true;
+          try {
+            const res = await WD.request.post('/admin/package/remove', {
+              name: removingRow.value.name,
+              confirm: '1',
+              data_handling: handle.value,
+            });
+            ElementPlus.ElMessage[res.success ? 'success' : 'error'](res.message || (res.success ? '已卸载' : '卸载失败'));
+            if (res.success) {
+              removeOpen.value = false;
+              await loadData();
+            }
+          } finally {
+            busy.value = false;
+          }
+        }
+        function confirmRemoveStaged(p) {
+          delStagedRow.value = p;
+          delStagedOpen.value = true;
+        }
+        async function doRemoveStaged() {
+          if (!delStagedRow.value) return;
+          busy.value = true;
+          try {
+            const res = await WD.request.post('/admin/package/removeStaged', { target: delStagedRow.value.dir });
+            ElementPlus.ElMessage[res.success ? 'success' : 'error'](res.message || (res.success ? '已删除' : '删除失败'));
+            if (res.success) {
+              delStagedOpen.value = false;
+              await loadData();
+            }
+          } finally {
+            busy.value = false;
+          }
+        }
+
+        loadData();
+        loadVersions();
+
+        return {
+          hostVersion, installed, installable, loading, busy, packing, zipEnabled,
+          removeOpen, removingRow, rv, handle, dropConfirmed, delStagedOpen, delStagedRow, createOpen, createForm,
+          rollbackOpen, rollbackRow, rollbackPath,
+          versions, upgrading, upgradeCapable, loadVersions, recheck, doUpgrade,
+          wdRollback, openWdRollback, doWdRollback,
+          isInstalled, fmtDate, doAction, doPack, doInstall, doUpgradeStaged, openCreate, doCreate, confirmRemove, doRemove,
+          confirmRemoveStaged, doRemoveStaged,
+          openRollback, doRollback, rollbackTagText, rollbackTagType,
+          reviewText, reviewTagType, reviewHint, loadData, relPath
+        };
+      }
+    });
+
+    for (const [name, comp] of Object.entries(window.ElementPlusIconsVue)) {
+      app.component(name, comp);
+    }
+
+    app.use(ElementPlus);
+    app.use(WorkDesktop);
+    app.mount('#app');
+  </script>
+</body>
+
+</html>

@@ -1,0 +1,1001 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>功能包详情 - LinHub 林枢</title>
+<link rel="icon" type="image/svg+xml" href="/brand/favicon.svg">
+  <link rel="stylesheet" href="/static/vendor/element-plus/index.css">
+  <link rel="stylesheet" href="/static/vendor/workdesktop-ai/style.css">
+  <style>
+    html,
+    body,
+    #app {
+      min-height: 100%;
+      margin: 0;
+    }
+
+    body {
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+
+    .view-page {
+      padding: 16px 20px 28px;
+      box-sizing: border-box;
+    }
+
+    /* 被抽屉以 iframe 嵌入时无返回栏，收紧顶部留白 */
+    html.in-frame .view-page {
+      padding: 12px 16px 20px;
+    }
+
+    .view-top {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+
+    .view-top .vt-title {
+      font-size: 16px;
+      font-weight: 600;
+    }
+
+    /* wd-panel 之间留间距 */
+    .view-page .wd-panel + .wd-panel {
+      margin-top: 12px;
+    }
+
+    /* 简介直出块（不使用 wd-panel 折叠，默认展示） */
+    .desc-head {
+      margin: 2px 0 12px;
+    }
+
+    .desc-head .t {
+      font-size: 15px;
+      font-weight: 600;
+    }
+
+    .desc-head .d {
+      margin-top: 4px;
+      font-size: 13px;
+      line-height: 1.7;
+    }
+
+    .detail-head {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-bottom: 4px;
+    }
+
+    .detail-head .d-title {
+      font-size: 18px;
+      font-weight: 700;
+    }
+
+    .detail-sub {
+      font-size: 12px;
+      color: var(--wd-text-color-secondary, #6b7280);
+      margin: 0 0 12px;
+    }
+
+    .detail-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin: 0 0 14px;
+    }
+
+    .rv-box .rv-line {
+      font-size: 13px;
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 4px;
+    }
+
+    .rv-box .rv-line .k,
+    .rv-box .rv-label {
+      color: var(--wd-text-color-secondary, #6b7280);
+      margin-right: 6px;
+    }
+
+    .rv-box .rv-meta {
+      margin-top: 8px;
+      font-size: 12px;
+      color: var(--wd-text-color-secondary, #6b7280);
+    }
+
+    .rv-box .rv-comment {
+      margin-top: 10px;
+      font-size: 13px;
+      line-height: 1.6;
+      padding: 8px 10px;
+      background: var(--wd-fill-color-light, #f9fafb);
+      border-radius: 6px;
+    }
+
+    .rv-box .rv-label {
+      margin-bottom: 6px;
+      font-size: 13px;
+    }
+
+    .kv-list {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      gap: 6px 16px;
+    }
+
+    .kv-list .kv {
+      font-size: 13px;
+      line-height: 1.8;
+    }
+
+    .kv-list .kv .k {
+      color: var(--wd-text-color-secondary, #6b7280);
+      margin-right: 6px;
+    }
+
+    /* 路径类条目跨整行显示，避免与其他条目并排成多列 */
+    .kv-list .kv-full {
+      grid-column: 1 / -1;
+    }
+
+    /* 依赖面板分组标题 */
+    .dep-group-title {
+      margin: 10px 0 8px;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--wd-text-color-secondary, #6b7280);
+    }
+
+    .dep-group-title:first-child {
+      margin-top: 0;
+    }
+
+    .mono {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      word-break: break-all;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="app"></div>
+
+  <script type="text/x-template" id="view-tpl">
+  <div class="view-page">
+    <div class="view-top" v-if="!inFrame">
+      <el-button size="small" plain @click="goBack">
+        <el-icon><ArrowLeft /></el-icon>
+        <span style="margin-left:4px">返回功能安装</span>
+      </el-button>
+      <span class="vt-title">功能包详情</span>
+    </div>
+
+    <el-alert
+      v-if="error"
+      type="error" show-icon :closable="false"
+      :title="error"
+      style="margin-bottom:12px">
+      <el-button size="small" type="primary" plain style="margin-top:8px" @click="goBack">返回列表</el-button>
+    </el-alert>
+
+    <div v-loading="loading">
+      <template v-if="d">
+        <div class="detail-head">
+          <span class="d-title">{{ m.title || d.short }}</span>
+          <el-tag size="small" type="info">{{ d.name }}</el-tag>
+          <el-tag size="small">v{{ d.installed ? st.version : m.version }}</el-tag>
+          <el-tag v-if="d.installed" size="small" :type="st.state === 'enabled' ? 'success' : 'info'">
+            {{ st.state === 'enabled' ? '已启用' : '已禁用' }}
+          </el-tag>
+          <el-tag v-else size="small" type="warning">未安装</el-tag>
+          <el-tag v-if="m.type" size="small" type="warning">{{ m.type }}</el-tag>
+        </div>
+        <div class="detail-sub">
+          短名 {{ d.short }}<template v-if="d.installed"> · 安装于 {{ fmt(st.installedAt) }}</template> · 访问域 {{ m.access }}
+<template v-if="d.installed">
+<template v-if="st.sourceDir">
+          <br>安装路径：<el-button type="text" size="small" style="padding:0 4px;vertical-align:middle" title="拷贝路径" @click="copyPath(relPath(st.sourceDir))"><el-icon><DocumentCopy /></el-icon></el-button>
+          <span class="mono">{{ relPath(st.sourceDir) }}</span>
+</template>
+<template v-if="st.packOutDir">
+           · 打包路径：<el-button type="text" size="small" style="padding:0 4px;vertical-align:middle" title="拷贝路径" @click="copyPath(relPath(st.packOutDir))"><el-icon><DocumentCopy /></el-icon></el-button>
+          <span class="mono">{{ relPath(st.packOutDir) }}</span>
+</template>
+</template>
+        </div>
+
+        <!-- 操作按钮：审核对象为暂存包；禁用/启用、回退、卸载对象为已安装包 -->
+        <div class="detail-actions">
+          <el-button
+            v-if="d.staging"
+            size="small"
+            :type="d.staging.review_status === 'approved' ? 'success' : 'warning'"
+            plain
+            @click="openReview">
+            <el-icon><Checked /></el-icon>
+            <span style="margin-left:4px">审核（{{ reviewText(d.staging.review_status) }}）</span>
+          </el-button>
+          <el-button
+            v-if="d.installed && st.state === 'enabled'"
+            size="small" type="warning" plain :loading="busy"
+            @click="doDisable">
+            <el-icon><VideoPause /></el-icon>
+            <span style="margin-left:4px">禁用</span>
+          </el-button>
+          <el-button
+            v-if="d.installed && st.state === 'disabled'"
+            size="small" type="primary" plain :loading="busy"
+            @click="doEnable">
+            <el-icon><VideoPlay /></el-icon>
+            <span style="margin-left:4px">启用</span>
+          </el-button>
+          <el-button
+            v-if="d.installed && d.rollback_versions.length"
+            size="small" type="warning" plain
+            @click="openRollback">
+            <el-icon><RefreshLeft /></el-icon>
+            <span style="margin-left:4px">回退</span>
+          </el-button>
+          <el-button
+            v-if="d.installed"
+            size="small" type="danger" plain
+            @click="openRemove">
+            <el-icon><Delete /></el-icon>
+            <span style="margin-left:4px">卸载</span>
+          </el-button>
+        </div>
+
+        <el-alert
+          v-if="d.dbDiagnostic"
+          type="warning" show-icon :closable="false"
+          title="数据库连接失败，以下数据表仅显示 manifest 声明，未取得真实结构。"
+          :description="d.dbDiagnostic.error" />
+
+        <!-- 简介直出（不折叠，不使用 wd-panel） -->
+        <div v-if="m.description" class="desc-head">
+          <div class="t">简介</div>
+          <div class="d">{{ m.description }}</div>
+        </div>
+
+        <!-- 服务声明 -->
+        <wd-panel :border="true" title="服务" collapsible :opened="false">
+          <div style="font-size:13px">
+            <span class="k" style="color:var(--wd-text-color-secondary,#6b7280)">对外提供：</span>
+            <template v-if="m.provides.length">
+              <el-tag v-for="p in m.provides" :key="p.id" size="small" type="success" effect="plain" style="margin:0 6px 4px 0">
+                {{ p.id }} <span class="mono" style="opacity:0.7">· {{ shortClass(p.class) }}</span>
+              </el-tag>
+            </template>
+            <span v-else>无</span>
+          </div>
+        </wd-panel>
+
+        <!-- 依赖（平台 / 功能包 / 宿主服务） -->
+        <wd-panel :border="true" title="依赖" :description="'平台 ' + m.platform.length + ' · 功能包 ' + m.dependencies.length + ' · 服务 ' + m.requires.length" collapsible :opened="false">
+          <div class="dep-group-title">平台依赖</div>
+          <div v-if="m.platform.length" class="kv-list">
+            <div v-for="p in m.platform" :key="p.name" class="kv">
+              <span class="mono">{{ p.name }}</span> → <span class="mono">{{ p.constraint || '—' }}</span>
+            </div>
+          </div>
+          <div v-else style="font-size:13px">无</div>
+
+          <div class="dep-group-title">功能包依赖</div>
+          <div v-if="m.dependencies.length" class="kv-list">
+            <div v-for="dp in m.dependencies" :key="dp.name" class="kv">
+              <span class="mono">{{ dp.name }}</span> → <span class="mono">{{ dp.constraint || '—' }}</span>
+            </div>
+          </div>
+          <div v-else style="font-size:13px">无</div>
+
+          <div class="dep-group-title">宿主服务依赖</div>
+          <div style="font-size:13px">
+            <template v-if="m.requires.length">
+              <el-tag v-for="r in m.requires" :key="r" size="small" type="info" effect="plain" style="margin:0 6px 4px 0">{{ r }}</el-tag>
+            </template>
+            <span v-else>无</span>
+          </div>
+        </wd-panel>
+
+        <!-- 菜单 -->
+        <wd-panel :border="true" title="菜单" :description="String(d.menus.length)" collapsible :opened="false">
+          <el-empty v-if="!d.menus.length" description="无菜单" :image-size="50" />
+          <el-table v-else :data="menuTree" row-key="id" size="small" border default-expand-all>
+            <el-table-column prop="title" label="标题" min-width="180">
+              <template #default="{ row }">
+                <span>{{ row.title }}</span>
+                <el-tag v-if="row.isHost" size="small" type="info" effect="plain" style="margin-left:6px">工作台</el-tag>
+                <el-tag v-else-if="row.unknownParent" size="small" type="warning" effect="plain" style="margin-left:6px">parent: {{ row.unknownParent }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="id" label="ID" width="140" />
+            <el-table-column prop="route" label="路由" min-width="140" />
+            <el-table-column prop="icon" label="图标" width="100" />
+          </el-table>
+        </wd-panel>
+
+        <!-- 挂载点（工作台插槽 / 界面替换 / 首页快捷入口） -->
+        <wd-panel :border="true" title="挂载点" :description="mountSummary" collapsible :opened="false">
+          <el-empty v-if="!hasMounts" description="未声明内容挂载点（工作台插槽 / 界面替换 / 首页快捷入口）" :image-size="50" />
+          <template v-else>
+            <!-- 工作台内容插槽（workspace.php）：zone 为挂载区锚点 -->
+            <template v-if="d.mounts.workspace.length">
+              <div class="dep-group-title">工作台插槽（workspace.php）</div>
+              <el-table :data="d.mounts.workspace" size="small" border>
+                <el-table-column prop="title" label="标题" min-width="130" />
+                <el-table-column prop="id" label="ID" min-width="150" />
+                <el-table-column prop="zone" label="挂载区" width="110" />
+                <el-table-column prop="render" label="渲染" min-width="130" />
+                <el-table-column prop="order" label="排序" width="70" align="right" />
+                <el-table-column label="权限" min-width="130">
+                  <template #default="{ row }">{{ row.perms.length ? row.perms.join('、') : '不限' }}</template>
+                </el-table-column>
+              </el-table>
+            </template>
+            <!-- 界面替换候选（ui_replace.php）：target 为被替换的平台页面 -->
+            <template v-if="d.mounts.uiReplace.length">
+              <div class="dep-group-title">界面替换（ui_replace.php）</div>
+              <el-table :data="d.mounts.uiReplace" size="small" border>
+                <el-table-column prop="target" label="目标页" min-width="150" />
+                <el-table-column prop="view" label="候选视图" min-width="170" />
+                <el-table-column prop="label" label="标签" min-width="110" />
+                <el-table-column prop="priority" label="优先级" width="80" align="right" />
+              </el-table>
+            </template>
+            <!-- 首页快捷入口（shortcuts.php）：引用菜单 id -->
+            <template v-if="d.mounts.shortcuts">
+              <div class="dep-group-title">首页快捷入口（shortcuts.php）</div>
+              <div style="font-size:13px;margin-bottom:6px">
+                <span style="color:var(--wd-text-color-secondary,#6b7280)">默认置卡（{{ d.mounts.shortcuts.default.length }}）：</span>
+                <template v-if="d.mounts.shortcuts.default.length">
+                  <el-tag v-for="id in d.mounts.shortcuts.default" :key="id" size="small" effect="plain" style="margin:0 6px 4px 0">{{ id }}</el-tag>
+                </template>
+                <span v-else>无</span>
+              </div>
+              <div style="font-size:13px">
+                <span style="color:var(--wd-text-color-secondary,#6b7280)">备选池（{{ d.mounts.shortcuts.optional.length }}）：</span>
+                <template v-if="d.mounts.shortcuts.optional.length">
+                  <el-tag v-for="id in d.mounts.shortcuts.optional" :key="id" size="small" type="info" effect="plain" style="margin:0 6px 4px 0">{{ id }}</el-tag>
+                </template>
+                <span v-else>无</span>
+              </div>
+            </template>
+          </template>
+        </wd-panel>
+
+        <!-- 权限点 -->
+        <wd-panel :border="true" title="权限点" :description="String(d.permissions.length)" collapsible :opened="false">
+          <el-empty v-if="!d.permissions.length" description="无权限点" :image-size="50" />
+          <el-table v-else :data="d.permissions" size="small" border>
+            <el-table-column prop="code" label="编码" min-width="160" />
+            <el-table-column prop="title" label="名称" min-width="120" />
+            <el-table-column prop="description" label="说明" min-width="200">
+              <template #default="{ row }">
+                <span v-if="row.description">{{ row.description }}</span>
+                <span v-else style="color:var(--wd-text-color-tertiary, #9ca3af)">—</span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="group" label="分组" min-width="120" />
+          </el-table>
+        </wd-panel>
+
+        <!-- 数据表（重点：列/索引/行数） -->
+        <wd-panel :border="true" title="数据表" :description="String(d.tables.length)" collapsible :opened="false">
+          <el-empty v-if="!d.tables.length" description="未声明数据表" :image-size="60" />
+          <template v-for="t in d.tables" :key="t.table">
+            <wd-panel :border="true" :title="t.table">
+              <template #extra>
+                <el-tag v-if="t.type" size="small">{{ t.type }}</el-tag>
+                <el-tag v-if="t.exists === false" size="small" type="danger">表不存在</el-tag>
+                <el-tag v-else-if="t.exists === true" size="small" type="success">已建表</el-tag>
+                <el-tag v-if="t.exists === true" size="small" type="info">{{ t.rowCount }} 行</el-tag>
+              </template>
+              <template v-if="t.columns.length">
+                <el-table :data="t.columns" size="small" border style="margin-bottom:8px">
+                  <el-table-column prop="name" label="字段" width="140">
+                    <template #default="{ row }"><span class="mono">{{ row.name }}</span></template>
+                  </el-table-column>
+                  <el-table-column prop="type" label="类型" width="120" />
+                  <el-table-column label="可空" width="70" align="center">
+                    <template #default="{ row }">{{ row.nullable ? '是' : '否' }}</template>
+                  </el-table-column>
+                  <el-table-column label="主键" width="70" align="center">
+                    <template #default="{ row }">
+                      <el-tag v-if="row.primary" size="small" type="warning">PK</el-tag>
+                      <span v-else>—</span>
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="默认值" min-width="100">
+                    <template #default="{ row }">
+                      <span v-if="row.default === null">NULL</span>
+                      <span v-else>{{ row.default }}</span>
+                    </template>
+                  </el-table-column>
+                </el-table>
+                <div v-if="t.indexes.length" style="font-size:12px;color:var(--wd-text-color-secondary,#6b7280)">
+                  <span style="margin-right:6px">索引：</span>
+                  <el-tag
+                    v-for="ix in t.indexes" :key="ix.name" size="small" effect="plain"
+                    :type="ix.unique ? 'danger' : 'info'" style="margin:0 6px 4px 0">
+                    {{ ix.name }}（{{ ix.columns.join(', ') }}）{{ ix.unique ? ' · UNIQUE' : '' }}
+                  </el-tag>
+                </div>
+              </template>
+            </wd-panel>
+          </template>
+        </wd-panel>
+
+        <!-- 迁移 -->
+        <wd-panel :border="true" title="迁移版本" :description="String(d.migrations.length)" collapsible :opened="false">
+          <el-timeline v-if="d.migrations.length">
+            <el-timeline-item v-for="mg in d.migrations" :key="mg.version" :timestamp="mg.version" placement="top">
+              <el-tag v-for="f in mg.files" :key="f" size="small" effect="plain" style="margin:0 6px 4px 0">{{ f }}</el-tag>
+            </el-timeline-item>
+          </el-timeline>
+          <el-empty v-else description="无迁移" :image-size="50" />
+        </wd-panel>
+
+        <!-- 命名空间 PSR-4 -->
+        <wd-panel :border="true" title="命名空间（PSR-4）" collapsible :opened="false">
+          <div v-if="psrPairs.length" class="kv-list">
+            <div v-for="kv in psrPairs" :key="kv[0]" class="kv">
+              <span class="mono">{{ kv[0] }}</span> → <span class="mono">{{ kv[1] }}</span>
+            </div>
+          </div>
+          <el-empty v-else description="未声明 PSR-4" :image-size="50" />
+        </wd-panel>
+
+        <!-- 目录配置 -->
+        <wd-panel :border="true" title="目录配置" collapsible :opened="false">
+          <div class="kv-list">
+            <div class="kv kv-full">
+              <span class="k">源码目录</span><template v-if="st.sourceDir"> <el-button type="text" size="small" style="padding:0 4px;vertical-align:middle" title="拷贝路径" @click="copyPath(relPath(st.sourceDir))"><el-icon><DocumentCopy /></el-icon></el-button>
+              <span class="mono">{{ relPath(st.sourceDir) }}</span></template>
+<template v-else>
+              <span>—</span></template>
+            </div>
+            <div class="kv kv-full">
+              <span class="k">备份目录</span><template v-if="st.backupDir"> <el-button type="text" size="small" style="padding:0 4px;vertical-align:middle" title="拷贝路径" @click="copyPath(relPath(st.backupDir))"><el-icon><DocumentCopy /></el-icon></el-button>
+              <span class="mono">{{ relPath(st.backupDir) }}</span></template>
+<template v-else>
+              <span>—</span></template>
+            </div>
+            <div class="kv kv-full">
+              <span class="k">打包目录</span><template v-if="st.packOutDir"> <el-button type="text" size="small" style="padding:0 4px;vertical-align:middle" title="拷贝路径" @click="copyPath(relPath(st.packOutDir))"><el-icon><DocumentCopy /></el-icon></el-button>
+              <span class="mono">{{ relPath(st.packOutDir) }}</span></template>
+<template v-else>
+              <span>—</span></template>
+            </div>
+            <div class="kv kv-full">
+              <span class="k">暂存目录</span><template v-if="d.staging && d.staging.dir"> <el-button type="text" size="small" style="padding:0 4px;vertical-align:middle" title="拷贝路径" @click="copyPath('lgg-pkg-' + d.short)"><el-icon><DocumentCopy /></el-icon></el-button>
+              <span class="mono">{{ d.staging.dir }}</span></template>
+<template v-else>
+              <span>—</span></template>
+            </div>
+          </div>
+        </wd-panel>
+      </template>
+    </div>
+
+    <!-- 功能包接入审核（对象：暂存区 lgg-pkg-<short>） -->
+    <el-dialog v-model="reviewOpen" title="功能包接入审核" width="540px" append-to-body>
+      <div class="rv-box" v-if="d && d.staging">
+        <div class="rv-line">
+          <span class="k">暂存目录</span><el-tag size="small" type="info">{{ d.staging.dir }}</el-tag>
+        </div>
+        <div class="rv-meta">
+          暂存版本 <b>v{{ d.staging.version || '未知' }}</b>
+          <el-tag v-if="d.installed" size="small" type="info" style="margin-left:8px">
+            已安装 v{{ st.version }}
+          </el-tag>
+        </div>
+        <div class="rv-meta">
+          审核状态：
+          <el-tag size="small" :type="reviewTagType(d.staging.review_status)">
+            {{ reviewText(d.staging.review_status) }}
+          </el-tag>
+          <span v-if="d.staging.reviewer" style="margin-left:8px">
+            {{ d.staging.reviewer }} · {{ fmt(d.staging.reviewed_at) }}
+          </span>
+        </div>
+        <el-alert
+          v-if="!d.staging.valid"
+          type="error" show-icon :closable="false" style="margin-top:10px"
+          title="暂存包未通过完整性校验，存在以下问题，不允许审核接入：">
+          <div v-for="(p, i) in d.staging.problems" :key="i" class="mono" style="font-size:12px;line-height:1.7">· {{ p }}</div>
+        </el-alert>
+        <el-alert
+          v-else-if="d.staging.review_status === 'rejected'"
+          type="error" show-icon :closable="false" style="margin-top:10px"
+          title="该版本已被驳回，不可接入；问题修复后可重新审核通过。" />
+        <el-alert
+          v-else-if="d.staging.review_status === 'changed'"
+          type="warning" show-icon :closable="false" style="margin-top:10px"
+          title="审核通过后内容已变更，需重新审核后方可安装/升级。" />
+        <div v-if="d.staging.review_comment" class="rv-comment">
+          <span style="color:var(--wd-text-color-secondary,#6b7280)">上次审核意见：</span>{{ d.staging.review_comment }}
+        </div>
+        <div class="rv-label" style="margin-top:12px">审核意见</div>
+        <el-input
+          v-model="reviewComment" type="textarea" :rows="3" resize="none"
+          placeholder="可填写审核结论或驳回原因（驳回时建议填写）" />
+      </div>
+      <template #footer>
+        <el-button @click="reviewOpen = false">取消</el-button>
+        <el-button
+          type="danger" plain :loading="busy"
+          :disabled="!(d && d.staging && d.staging.valid)"
+          @click="doReview('reject')">驳回</el-button>
+        <el-button
+          type="primary" :loading="busy"
+          :disabled="!(d && d.staging && d.staging.valid)"
+          @click="doReview('approve')">审核通过</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 回退版本选择 -->
+    <el-dialog v-model="rollbackOpen" :title="'回退功能包 · ' + ((m && m.title) || (d && d.short) || '')" width="520px" append-to-body>
+      <el-alert
+        type="warning" :closable="false" show-icon
+        style="margin-bottom:12px"
+        title="回退会用所选历史版本的源码覆盖当前版本，数据库迁移不会自动执行，请确认后再操作。" />
+      <el-radio-group v-model="rollbackPath" style="width:100%">
+        <el-radio
+          v-for="v in (d ? d.rollback_versions : [])"
+          :key="v.path" :label="v.path"
+          style="display:flex;align-items:center;margin:0 0 10px;height:auto;padding:8px 12px;border:1px solid var(--wd-border-color, #e5e7eb);border-radius:8px;">
+          <div style="margin-left:4px">
+            <div style="font-weight:600">
+              v{{ v.version }}
+              <el-tag size="small" :type="rollbackTagType(v.tag)" style="margin-left:8px">{{ rollbackTagText(v.tag) }}</el-tag>
+            </div>
+            <div style="font-size:12px;color:var(--wd-text-color-secondary, #6b7280);margin-top:2px">
+              备份时间：{{ v.time }}
+            </div>
+          </div>
+        </el-radio>
+      </el-radio-group>
+      <template #footer>
+        <el-button @click="rollbackOpen = false">取消</el-button>
+        <el-button type="warning" :loading="busy" :disabled="!rollbackPath" @click="doRollback">确认回退</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 卸载确认 -->
+    <el-dialog v-model="removeOpen" title="卸载功能包" width="600px" append-to-body>
+      <template v-if="!rv">
+        <div v-loading="true" style="height:120px" />
+      </template>
+      <template v-else>
+        <el-alert
+          type="warning" show-icon :closable="false"
+          style="margin-bottom:12px"
+          title="卸载将移除以下内容，且不可恢复。请确认后继续。" />
+        <p style="margin:0 0 10px;font-weight:600">
+          卸载「{{ rv.title || rv.short }}」 v{{ rv.version }}（{{ rv.name }}）
+        </p>
+        <div style="font-size:13px;line-height:1.9">
+          <div class="kv-list" style="grid-template-columns: 1fr;gap:2px 12px">
+            <div class="kv kv-full"><span class="k">源码目录</span><span class="mono">{{ rv.source_dir || '—' }}（将被删除）</span></div>
+            <div class="kv kv-full"><span class="k">接入点</span>
+              菜单 <b>{{ rv.counts.menus }}</b> · 权限点 <b>{{ rv.counts.permissions }}</b> · 对外服务 <b>{{ rv.counts.provides }}</b>（将被移除）
+            </div>
+            <div
+              v-for="t in rv.tables" :key="t.table"
+              class="kv kv-full" style="display:flex;align-items:center;gap:8px">
+              <span class="k">受影响的表</span>
+              <span class="mono">{{ t.table }}</span>
+              <el-tag v-if="t.exists === false" size="small" type="danger">表不存在</el-tag>
+              <el-tag v-else-if="t.exists === true" size="small" type="info">{{ t.rowCount }} 行</el-tag>
+              <el-tag v-else size="small" type="warning">不可探查</el-tag>
+            </div>
+            <div v-if="!rv.tables.length" class="kv kv-full"><span class="k">受影响的数据表</span>无</div>
+            <div v-if="rv.applied_migrations.length" class="kv kv-full">
+              <span class="k">已应用迁移</span><span class="mono">{{ rv.applied_migrations.join('、') }}（{{ handle === 'drop' ? '将被回滚' : '保持不变' }}）</span>
+            </div>
+          </div>
+        </div>
+
+        <el-alert
+          v-if="!rv.db_connectable"
+          type="warning" show-icon :closable="false" style="margin-top:10px"
+          title="数据库当前不可连接，无法回滚删除数据表，只能选择「保留数据表」。"
+          description="请先恢复数据库连接，如确需回滚数据表请稍后再试。" />
+
+        <div style="margin-top:14px">
+          <div class="rv-label" style="margin-bottom:6px">数据表处理方式</div>
+          <el-radio-group v-model="handle" :disabled="!rv.db_connectable">
+            <el-radio label="keep" style="margin-right:16px">保留数据表（默认，推荐）</el-radio>
+            <el-radio label="drop">回滚删除该包建的数据表</el-radio>
+          </el-radio-group>
+          <el-checkbox
+            v-if="handle === 'drop'"
+            v-model="dropConfirmed"
+            style="display:block;margin-top:10px"
+            :disabled="!rv.db_connectable">
+            我已了解，将永久删除该功能包创建的 {{ rv.tables.length }} 张数据表及其数据，且无法恢复
+          </el-checkbox>
+        </div>
+      </template>
+      <template #footer>
+        <el-button @click="removeOpen = false">取消</el-button>
+        <el-button
+          type="danger" :loading="busy"
+          :disabled="!rv || (handle === 'drop' && !dropConfirmed || handle === 'drop' && !rv.db_connectable)"
+          @click="doRemove">确认卸载</el-button>
+      </template>
+    </el-dialog>
+  </div>
+  </script>
+
+  <script src="/static/vendor/vue/vue.global.prod.js"></script>
+  <script src="/static/vendor/element-plus/index.full.min.js"></script>
+  <script src="/static/vendor/icons/index.iife.min.js"></script>
+  <script src="/static/vendor/workdesktop-ai/index.umd.js"></script>
+  <script>
+    const WD = window.WorkDesktop;
+    const ElementPlus = window.ElementPlus;
+    const { WorkDesktop } = WD;
+    const { ref, computed } = Vue;
+
+    const app = Vue.createApp({
+      template: '#view-tpl',
+      setup() {
+        const detail = ref(null);
+        const loading = ref(false);
+        const error = ref('');
+        // 是否被 wd-drawer-button 以 iframe 嵌入：嵌入时隐藏自身返回栏（抽屉自带标题/关闭）
+        const inFrame = ref(window.self !== window.top);
+        if (inFrame.value) {
+          document.documentElement.classList.add('in-frame');
+        }
+
+        const d = computed(() => detail.value);
+        const st = computed(() => detail.value ? detail.value.state : {});
+        const m = computed(() => detail.value ? detail.value.manifest : {});
+        const psrPairs = computed(() =>
+          (detail.value && detail.value.psr4) ? Object.entries(detail.value.psr4) : []
+        );
+
+        // 菜单平铺行按 parent 组树：包内互挂；parent 指向宿主工作台节点时挂到该节点
+        // （连同其祖先链一起展示，标记「工作台」）；指向未知节点则归为根并保留原始指向标记
+        const menuTree = computed(() => {
+          const rows = (detail.value && detail.value.menus) || [];
+          const hostRows = (detail.value && detail.value.hostMenus) || [];
+
+          const pkgMap = new Map(rows.map((r) => [r.id, { ...r, children: [] }]));
+          const hostMap = new Map(hostRows.map((r) => [r.id, { ...r, isHost: true, children: [] }]));
+
+          const roots = [];
+          for (const node of pkgMap.values()) {
+            if (node.parent && node.parent !== node.id) {
+              if (pkgMap.has(node.parent)) {
+                pkgMap.get(node.parent).children.push(node);
+                continue;
+              }
+              if (hostMap.has(node.parent)) {
+                hostMap.get(node.parent).children.push(node);
+                continue;
+              }
+              node.unknownParent = node.parent;
+            }
+            roots.push(node);
+          }
+
+          // 收集被引用的宿主节点自身及其祖先链；链外的宿主子树不展开
+          const used = new Set();
+          for (const [id, node] of hostMap) {
+            if (!node.children.length) {
+              continue;
+            }
+            used.add(id);
+            let cur = node;
+            while (cur.parent && hostMap.has(cur.parent)) {
+              used.add(cur.parent);
+              cur = hostMap.get(cur.parent);
+            }
+          }
+          const hostRoots = [];
+          for (const [id, node] of hostMap) {
+            if (!used.has(id)) {
+              continue;
+            }
+            if (node.parent && used.has(node.parent)) {
+              hostMap.get(node.parent).children.push(node);
+            } else {
+              hostRoots.push(node);
+            }
+          }
+
+          const clean = (nodes) => {
+            for (const n of nodes) {
+              if (n.children.length) {
+                clean(n.children);
+              } else {
+                delete n.children;
+              }
+            }
+          };
+          const all = [...roots, ...hostRoots];
+          clean(all);
+          return all;
+        });
+
+        // 挂载点：汇总描述与有无判断（插槽 / 界面替换 / 快捷入口）
+        const hasMounts = computed(() => {
+          const mo = detail.value && detail.value.mounts;
+          if (!mo) return false;
+          return (mo.workspace || []).length > 0 || (mo.uiReplace || []).length > 0 || !!mo.shortcuts;
+        });
+        const mountSummary = computed(() => {
+          const mo = detail.value && detail.value.mounts;
+          if (!mo) return '';
+          const sc = mo.shortcuts ? (mo.shortcuts.default || []).length + (mo.shortcuts.optional || []).length : 0;
+          return '插槽 ' + (mo.workspace || []).length + ' · 替换 ' + (mo.uiReplace || []).length + ' · 快捷 ' + sc;
+        });
+
+        // 操作按钮/弹层状态
+        const busy = ref(false);
+        const reviewOpen = ref(false);
+        const reviewComment = ref('');
+        const rollbackOpen = ref(false);
+        const rollbackPath = ref('');
+        const removeOpen = ref(false);
+        // 卸载预览数据 / 数据表处理方式 / 二次强确认
+        const rv = ref(null);
+        const handle = ref('keep');
+        const dropConfirmed = ref(false);
+
+        function shortClass(cls) {
+          const parts = String(cls).split('\\');
+          return parts[parts.length - 1] || cls;
+        }
+
+        // ISO 8601 -> YYYY-MM-DD HH:mm
+        function fmt(v) {
+          if (!v) return '—';
+          const dt = new Date(String(v));
+          if (isNaN(dt.getTime())) return String(v);
+          const p = (n) => String(n).padStart(2, '0');
+          return `${dt.getFullYear()}-${p(dt.getMonth() + 1)}-${p(dt.getDate())} ` +
+            `${p(dt.getHours())}:${p(dt.getMinutes())}`;
+        }
+
+        function goBack() {
+          window.location.href = '/admin/package/index';
+        }
+
+        // 需求 F：审核状态文案/颜色
+        function reviewText(s) {
+          return { pending: '待审核', approved: '已通过', rejected: '已驳回', changed: '内容已变更' }[s] || '待审核';
+        }
+        function reviewTagType(s) {
+          return { pending: 'warning', approved: 'success', rejected: 'danger', changed: 'info' }[s] || 'warning';
+        }
+        // 备份标签文案与颜色
+        function rollbackTagText(tag) {
+          const map = { 'pre-upgrade': '升级前备份', 'pre-install': '安装前备份', manual: '手动备份' };
+          return map[tag] || (tag || '备份');
+        }
+        function rollbackTagType(tag) {
+          if (tag === 'pre-upgrade') return 'warning';
+          if (tag === 'pre-install') return 'info';
+          return '';
+        }
+
+        function openReview() {
+          reviewComment.value = detail.value && detail.value.staging
+            ? (detail.value.staging.review_comment || '')
+            : '';
+          reviewOpen.value = true;
+        }
+
+        async function doReview(decision) {
+          if (!detail.value || !detail.value.staging) return;
+          if (decision === 'reject' && !reviewComment.value.trim()) {
+            ElementPlus.ElMessage.warning('驳回时请填写审核意见（驳回原因）');
+            return;
+          }
+          busy.value = true;
+          try {
+            const res = await WD.request.post('/admin/package_review/' + decision, {
+              target: detail.value.staging.dir,
+              comment: reviewComment.value.trim(),
+            });
+            ElementPlus.ElMessage[res.success ? 'success' : 'error'](
+              res.message || (res.success ? '审核完成' : '审核失败')
+            );
+            if (res.success) {
+              reviewOpen.value = false;
+              await loadDetail();
+            }
+          } finally {
+            busy.value = false;
+          }
+        }
+
+        async function doDisable() {
+          if (!detail.value) return;
+          busy.value = true;
+          try {
+            const res = await WD.request.post('/admin/package/disable', { name: detail.value.name });
+            ElementPlus.ElMessage[res.success ? 'success' : 'error'](
+              res.message || (res.success ? '已禁用' : '禁用失败')
+            );
+            if (res.success) await loadDetail();
+          } finally {
+            busy.value = false;
+          }
+        }
+
+        async function doEnable() {
+          if (!detail.value) return;
+          busy.value = true;
+          try {
+            const res = await WD.request.post('/admin/package/enable', { name: detail.value.name });
+            ElementPlus.ElMessage[res.success ? 'success' : 'error'](
+              res.message || (res.success ? '已启用' : '启用失败')
+            );
+            if (res.success) await loadDetail();
+          } finally {
+            busy.value = false;
+          }
+        }
+
+        function openRollback() {
+          const list = detail.value ? detail.value.rollback_versions : [];
+          rollbackPath.value = list && list.length ? list[0].path : '';
+          rollbackOpen.value = true;
+        }
+
+        async function doRollback() {
+          if (!detail.value || !rollbackPath.value) return;
+          busy.value = true;
+          try {
+            const res = await WD.request.post('/admin/package/rollback', {
+              name: detail.value.name,
+              backupPath: rollbackPath.value,
+            });
+            ElementPlus.ElMessage[res.success ? 'success' : 'error'](
+              res.message || (res.success ? '已回退' : '回退失败')
+            );
+            if (res.success) {
+              rollbackOpen.value = false;
+              await loadDetail();
+            }
+          } finally {
+            busy.value = false;
+          }
+        }
+
+        // 打开卸载确认前先拉取变更清单（源码/接入点/数据表行数）
+        async function openRemove() {
+          if (!detail.value) return;
+          rv.value = null;
+          handle.value = 'keep';
+          dropConfirmed.value = false;
+          removeOpen.value = true;
+          try {
+            const res = await WD.request.get('/admin/package/removePreview', { name: detail.value.name });
+            if (res.success) {
+              rv.value = res.data;
+            } else {
+              rv.value = { error: res.message || '无法获取卸载预览' };
+              removeOpen.value = false;
+              ElementPlus.ElMessage.error(res.message || '无法获取卸载预览');
+            }
+          } catch (e) {
+            removeOpen.value = false;
+            rv.value = null;
+            ElementPlus.ElMessage.error('获取卸载预览失败：' + (e && e.message ? e.message : e));
+          }
+        }
+
+        async function doRemove() {
+          if (!detail.value || !rv.value || (handle.value === 'drop' && !dropConfirmed.value)) return;
+          busy.value = true;
+          try {
+            const res = await WD.request.post('/admin/package/remove', {
+              name: detail.value.name,
+              confirm: '1',
+              data_handling: handle.value,
+            });
+            ElementPlus.ElMessage[res.success ? 'success' : 'error'](
+              res.message || (res.success ? '已卸载' : '卸载失败')
+            );
+            if (res.success) {
+              removeOpen.value = false;
+              // 卸载后若暂存区仍有同名包，转为展示暂存包详情；否则返回列表
+              await loadDetail();
+              if (error.value) goBack();
+            }
+          } finally {
+            busy.value = false;
+          }
+        }
+
+        async function loadDetail() {
+          const name = new URLSearchParams(window.location.search).get('name') || '';
+          if (!name) {
+            error.value = '缺少功能包标识参数 name';
+            return;
+          }
+          loading.value = true;
+          try {
+            const res = await WD.request.get('/admin/package/detail', { name });
+            if (res.success) {
+              error.value = '';
+              detail.value = res.data;
+            } else {
+              error.value = res.message || '详情加载失败';
+            }
+          } catch (e) {
+            error.value = '详情加载失败：' + (e && e.message ? e.message : e);
+          } finally {
+            loading.value = false;
+          }
+        }
+
+        loadDetail();
+
+        // 转换为相对项目根的路径
+        function relPath(fullPath) {
+          // 替换 Windows 反斜杠为斜杠
+          fullPath = fullPath.replace(/\\/g, '/');
+          // 找到 code/ 开始的位置，截取相对路径
+          const idx = fullPath.indexOf('code/');
+          return idx >= 0 ? fullPath.substring(idx) : fullPath;
+        }
+
+        // 拷贝路径到剪贴板（抽屉 iframe 内 clipboard API 可能被拦，降级 execCommand）
+        function copyPath(path) {
+          const ok = () => ElementPlus.ElMessage.success('路径已拷贝');
+          const fail = () => ElementPlus.ElMessage.error('拷贝失败，请手动复制');
+          if (navigator.clipboard && window.isSecureContext) {
+            navigator.clipboard.writeText(path).then(ok).catch(() => (fallbackCopy(path) ? ok() : fail()));
+          } else {
+            fallbackCopy(path) ? ok() : fail();
+          }
+        }
+        function fallbackCopy(text) {
+          const ta = document.createElement('textarea');
+          ta.value = text;
+          ta.style.position = 'fixed';
+          ta.style.opacity = '0';
+          document.body.appendChild(ta);
+          ta.select();
+          let ok = false;
+          try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+          document.body.removeChild(ta);
+          return ok;
+        }
+
+        return {
+          detail, loading, error, inFrame, d, st, m, psrPairs, menuTree, hasMounts, mountSummary, shortClass, fmt, goBack,
+          busy, reviewOpen, reviewComment, rollbackOpen, rollbackPath, removeOpen,
+              rv, handle, dropConfirmed, openRemove,
+              reviewText, reviewTagType, rollbackTagText, rollbackTagType,
+              openReview, doReview, doDisable, doEnable, openRollback, doRollback, doRemove,
+          relPath, copyPath,
+        };
+      }
+    });
+
+    for (const [name, comp] of Object.entries(window.ElementPlusIconsVue)) {
+      app.component(name, comp);
+    }
+
+    app.use(ElementPlus);
+    app.use(WorkDesktop);
+    app.mount('#app');
+  </script>
+</body>
+
+</html>

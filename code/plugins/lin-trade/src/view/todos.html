@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>审批与待办中心 - 林销</title>
+  <link rel="icon" type="image/svg+xml" href="/brand/favicon.svg">
+  <link rel="stylesheet" href="/static/vendor/element-plus/index.css">
+  <link rel="stylesheet" href="/static/vendor/workdesktop-ai/style.css">
+  <style>
+    html,
+    body,
+    #app {
+      height: 100%;
+      margin: 0;
+    }
+
+    body {
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+
+    .trade-page {
+      height: 100%;
+      padding: 16px 20px 24px;
+      box-sizing: border-box;
+      overflow: auto;
+    }
+
+    .trade-low {
+      color: #f56c6c;
+      font-weight: 600;
+    }
+
+    .trade-gap {
+      color: #e6a23c;
+      font-weight: 600;
+    }
+
+    .tab-badge {
+      margin-right: 6px;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="app"></div>
+
+  <script type="text/x-template" id="todos-tpl">
+  <div class="trade-page">
+    <wd-tips type="box" style="display:flex;margin-bottom:12px">
+      审批与待办中心汇总需要你处理的单据与异常：「待我审批」可直接跳转处理，「我的待办」汇总库存、到货、草稿与信用四类提醒，「已处理」保留最近的审批记录。
+    </wd-tips>
+
+    <wd-panel :border="true">
+      <el-tabs v-model="tab">
+        <!-- 页签一：待我审批 -->
+        <el-tab-pane name="audit">
+          <template #label>
+            <el-badge :value="auditCount" :hidden="!auditCount" class="tab-badge">
+              <span>待我审批</span>
+            </el-badge>
+          </template>
+
+          <wd-panel :border="true" style="margin-bottom:16px"
+                    :title="'待审核销售单（' + d.audit.saleOrders.length + '）'"
+                    description="审核入口在销售管理页对应单据详情，点击「去处理」跳转。">
+            <el-table :data="d.audit.saleOrders" size="default"
+                      empty-text="暂无待审核销售单">
+            <el-table-column label="单号" min-width="140">
+              <template #default="{ row }">{{ row.order_no || '-' }}</template>
+            </el-table-column>
+            <el-table-column label="客户" min-width="150" show-overflow-tooltip>
+              <template #default="{ row }">{{ row.customer_name || '-' }}</template>
+            </el-table-column>
+            <el-table-column label="订单金额" width="120" align="right">
+              <template #default="{ row }">{{ fmtNum(row.total_amount, 2) }}</template>
+            </el-table-column>
+            <el-table-column label="提交时间" width="170">
+              <template #default="{ row }">{{ row.created_at || '-' }}</template>
+            </el-table-column>
+            <el-table-column label="操作" width="100" align="center" fixed="right">
+              <template #default>
+                <el-button size="small" text type="primary" @click="go('/trade/sale/index')">去处理</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+          </wd-panel>
+
+          <wd-panel :border="true" style="margin-bottom:16px"
+                    :title="'超低价待审批（' + d.audit.priceApprovals.length + '）'"
+                    description="申请价低于最低售价的明细需审批通过后，对应销售单方可提交审核。">
+            <el-table :data="d.audit.priceApprovals" size="default"
+                      empty-text="暂无待审批的最低售价申请">
+            <el-table-column label="销售单号" min-width="140">
+              <template #default="{ row }">{{ row.order_no || '-' }}</template>
+            </el-table-column>
+            <el-table-column label="商品" min-width="150" show-overflow-tooltip>
+              <template #default="{ row }">{{ row.product_name || '-' }}</template>
+            </el-table-column>
+            <el-table-column label="申请价" width="110" align="right">
+              <template #default="{ row }">
+                <span class="trade-low">{{ fmtNum(row.applied_price, 2) }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="最低售价" width="110" align="right">
+              <template #default="{ row }">{{ fmtNum(row.min_price, 2) }}</template>
+            </el-table-column>
+            <el-table-column label="申请时间" width="170">
+              <template #default="{ row }">{{ row.created_at || '-' }}</template>
+            </el-table-column>
+            <el-table-column label="操作" width="100" align="center" fixed="right">
+              <template #default>
+                <el-button size="small" text type="primary" @click="go('/trade/product/price')">去审批</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+          </wd-panel>
+        </el-tab-pane>
+
+        <!-- 页签二：我的待办 -->
+        <el-tab-pane label="我的待办" name="todo">
+          <wd-panel :border="true" style="margin-bottom:16px"
+                    :title="'库存预警' + (d.todo.lowTotal > 0 ? '（' + d.todo.lowTotal + ' 项）' : '')"
+                    description="当前库存低于商品档案安全库存的商品明细，红色为当前库存、橙色为缺口；补货与批量采购建议在库存预警页处理。">
+            <template #extra>
+              <el-button size="small" text type="primary" @click="go('/trade/inventory/warningPage')">查看全部</el-button>
+            </template>
+            <el-table :data="d.todo.lowStock" size="small" empty-text="库存均高于安全水位">
+            <el-table-column label="商品" min-width="150" show-overflow-tooltip>
+              <template #default="{ row }">{{ row.product_name || '-' }}</template>
+            </el-table-column>
+            <el-table-column label="仓库" min-width="120">
+              <template #default="{ row }">{{ row.warehouse_name || '-' }}</template>
+            </el-table-column>
+            <el-table-column label="当前库存" width="100" align="right">
+              <template #default="{ row }">
+                <span class="trade-low">{{ fmtNum(row.quantity, 0) }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="安全库存" width="100" align="right">
+              <template #default="{ row }">{{ fmtNum(row.safety_stock, 0) }}</template>
+            </el-table-column>
+            <el-table-column label="缺口" width="100" align="right">
+              <template #default="{ row }">
+                <span class="trade-gap">{{ fmtNum(row.gap, 0) }}</span>
+              </template>
+            </el-table-column>
+          </el-table>
+          </wd-panel>
+
+          <wd-panel :border="true" style="margin-bottom:16px"
+                    :title="'到货超期采购单（' + d.todo.overdue.length + '）'"
+                    description="已过预计到货日期仍未收满的采购单，需优先催货，避免影响销售发货。">
+            <template #extra>
+              <el-button size="small" text type="primary" @click="go('/trade/purchase/track')">去采购跟踪</el-button>
+            </template>
+            <el-table :data="d.todo.overdue" size="small" empty-text="暂无到货超期的采购单">
+            <el-table-column label="单号" min-width="140">
+              <template #default="{ row }">{{ row.order_no || '-' }}</template>
+            </el-table-column>
+            <el-table-column label="预计到货" width="130">
+              <template #default="{ row }">
+                <span class="trade-low">{{ row.expected_arrival_at || '-' }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="状态" width="110">
+              <template #default="{ row }">{{ purchaseStatus(row.status) }}</template>
+            </el-table-column>
+          </el-table>
+          </wd-panel>
+
+          <wd-panel :border="true" style="margin-bottom:16px"
+                    :title="'草稿到期（提醒 ' + (d.todo.drafts.remind || []).length + ' / 超期 ' + (d.todo.drafts.expired || []).length + '）'"
+                    description="草稿单超过保留期会被系统清理，列表按超期在前、临近保留期在后排列；转为正式单据后不再作为草稿管理。">
+            <template #extra>
+              <el-button size="small" text type="primary" @click="go('/trade/toolbox/draft')">去草稿单</el-button>
+            </template>
+            <el-table :data="draftRows" size="small" empty-text="暂无到期草稿">
+            <el-table-column label="类型" width="100">
+              <template #default="{ row }">{{ docTypeLabel(row.doc_type) }}</template>
+            </el-table-column>
+            <el-table-column label="单号" min-width="140">
+              <template #default="{ row }">{{ row.doc_no || '-' }}</template>
+            </el-table-column>
+            <el-table-column label="创建时间" width="170">
+              <template #default="{ row }">{{ row.created_at || '-' }}</template>
+            </el-table-column>
+            <el-table-column label="提醒状态" width="110">
+              <template #default="{ row }">
+                <el-tag :type="row.remind ? 'warning' : 'danger'" size="small">
+                  {{ row.remind ? '临近保留期' : '已超保留期' }}
+                </el-tag>
+              </template>
+            </el-table-column>
+          </el-table>
+          </wd-panel>
+
+          <wd-panel :border="true" style="margin-bottom:16px"
+                    :title="'信用超额客户（' + d.todo.creditOver.length + '）'"
+                    description="当前应收占用已超过信用额度的客户，开新销售单前建议先收款或调整额度，避免继续占用授信。">
+            <template #extra>
+              <el-button size="small" text type="primary" @click="go('/trade/sale/credit')">去客户信用</el-button>
+            </template>
+            <el-table :data="d.todo.creditOver" size="small" empty-text="暂无信用超额客户">
+            <el-table-column label="客户" min-width="150" show-overflow-tooltip>
+              <template #default="{ row }">{{ row.customer_name || '-' }}</template>
+            </el-table-column>
+            <el-table-column label="信用额度" width="130" align="right">
+              <template #default="{ row }">{{ fmtNum(row.credit_limit, 2) }}</template>
+            </el-table-column>
+            <el-table-column label="当前占用" width="130" align="right">
+              <template #default="{ row }">{{ fmtNum(row.occupancy, 2) }}</template>
+            </el-table-column>
+            <el-table-column label="超出" width="130" align="right">
+              <template #default="{ row }">
+                <span class="trade-low">{{ fmtNum(row.exceed, 2) }}</span>
+              </template>
+            </el-table-column>
+          </el-table>
+          </wd-panel>
+        </el-tab-pane>
+
+        <!-- 页签三：已处理 -->
+        <el-tab-pane label="已处理" name="done">
+          <wd-panel :border="true"
+                    :title="'最低售价审批历史（' + d.done.priceHistory.length + '）'"
+                    description="仅展示最近 50 条；审批入口在价格体系页。">
+            <el-table :data="d.done.priceHistory" size="default" empty-text="暂无审批记录">
+            <el-table-column label="销售单号" min-width="140">
+              <template #default="{ row }">{{ row.order_no || '-' }}</template>
+            </el-table-column>
+            <el-table-column label="商品" min-width="150" show-overflow-tooltip>
+              <template #default="{ row }">{{ row.product_name || '-' }}</template>
+            </el-table-column>
+            <el-table-column label="申请价" width="100" align="right">
+              <template #default="{ row }">{{ fmtNum(row.applied_price, 2) }}</template>
+            </el-table-column>
+            <el-table-column label="最低售价" width="100" align="right">
+              <template #default="{ row }">{{ fmtNum(row.min_price, 2) }}</template>
+            </el-table-column>
+            <el-table-column label="结果" width="100" align="center">
+              <template #default="{ row }">
+                <el-tag :type="'approved' === row.status ? 'success' : 'danger'" size="small">
+                  {{ 'approved' === row.status ? '已通过' : '已驳回' }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="审批原因" min-width="160" show-overflow-tooltip>
+              <template #default="{ row }">{{ row.reason || '-' }}</template>
+            </el-table-column>
+            <el-table-column label="时间" width="170">
+              <template #default="{ row }">{{ row.created_at || '-' }}</template>
+            </el-table-column>
+          </el-table>
+          </wd-panel>
+        </el-tab-pane>
+      </el-tabs>
+    </wd-panel>
+  </div>
+</script>
+
+  <script src="/static/vendor/vue/vue.global.prod.js"></script>
+  <script src="/static/vendor/element-plus/index.full.min.js"></script>
+  <script src="/static/vendor/icons/index.iife.min.js"></script>
+  <script src="/static/vendor/workdesktop-ai/index.umd.js"></script>
+  <script>
+    const WD = window.WorkDesktop;
+    const ElementPlus = window.ElementPlus;
+    const { WorkDesktop } = WD;
+    const { ref, computed, onMounted } = Vue;
+
+    const app = Vue.createApp({
+      template: '#todos-tpl',
+      setup() {
+        const tab = ref('audit');
+        // 聚合数据：audit（待我审批）/ todo（我的待办）/ done（已处理）
+        const d = ref({
+          audit: { saleOrders: [], priceApprovals: [] },
+          todo: { lowTotal: 0, lowStock: [], overdue: [], drafts: { remind: [], expired: [] }, creditOver: [] },
+          done: { priceHistory: [] }
+        });
+
+        const auditCount = computed(() =>
+          d.value.audit.saleOrders.length + d.value.audit.priceApprovals.length);
+
+        // 草稿提醒 + 超期合并展示（超期在前）
+        const draftRows = computed(() => [
+          ...d.value.todo.drafts.expired.map(x => ({ ...x, remind: false })),
+          ...d.value.todo.drafts.remind.map(x => ({ ...x, remind: true }))
+        ]);
+
+        const PURCHASE_STATUS = { submitted: '已提交', partial: '部分入库', done: '已入库', closed: '已关闭', voided: '已作废' };
+        function purchaseStatus(s) { return PURCHASE_STATUS[s] || (s || '-'); }
+
+        const DOC_TYPES = { purchase_order: '采购单', sale_order: '销售单' };
+        function docTypeLabel(t) { return DOC_TYPES[t] || (t || '-'); }
+
+        function go(url) { window.location.href = url; }
+
+        // 数字/金额格式化：千分位 + 指定小数位，空值显示 '-'
+        function fmtNum(v, dec) {
+          if (v === null || v === undefined || v === '') return '-';
+          const n = Number(v);
+          if (isNaN(n)) return '-';
+          return n.toLocaleString('zh-CN', { minimumFractionDigits: dec, maximumFractionDigits: dec });
+        }
+
+        async function load() {
+          const res = await WD.request.get('/trade/todos/rows');
+          if (res.success && res.data) {
+            d.value = {
+              audit: res.data.audit || { saleOrders: [], priceApprovals: [] },
+              todo: Object.assign(
+                { lowTotal: 0, lowStock: [], overdue: [], drafts: { remind: [], expired: [] }, creditOver: [] },
+                res.data.todo || {}),
+              done: res.data.done || { priceHistory: [] }
+            };
+          } else {
+            ElementPlus.ElMessage.error(res.message || '加载待办数据失败');
+          }
+        }
+
+        onMounted(load);
+
+        return {
+          tab, d, auditCount, draftRows,
+          purchaseStatus, docTypeLabel, go, fmtNum
+        };
+      }
+    });
+
+    for (const [name, comp] of Object.entries(window.ElementPlusIconsVue)) {
+      app.component(name, comp);
+    }
+    app.use(ElementPlus);
+    app.use(WorkDesktop);
+    app.mount('#app');
+  </script>
+</body>
+
+</html>

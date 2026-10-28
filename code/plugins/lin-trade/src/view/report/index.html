@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>报表统计 - 林销</title>
+  <link rel="icon" type="image/svg+xml" href="/brand/favicon.svg">
+  <link rel="stylesheet" href="/static/vendor/element-plus/index.css">
+  <link rel="stylesheet" href="/static/vendor/workdesktop-ai/style.css">
+  <style>
+    .trade-page { padding: 16px 20px 24px; box-sizing: border-box; }
+    .trade-filter { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 4px; }
+    .trade-section { margin-bottom: 20px; }
+    .trade-section h3 { font-size: 15px; margin: 0 0 10px; color: #333; }
+    .trade-stats { display: flex; flex-wrap: wrap; gap: 14px; }
+    .trade-stat { flex: 1; min-width: 150px; }
+    .trade-stat .num { font-size: 24px; font-weight: 700; color: #409eff; }
+    .trade-stat .lbl { font-size: 12px; color: #999; margin-top: 4px; }
+    .trade-trend { display: flex; align-items: flex-end; gap: 14px; padding: 16px; min-height: 180px; overflow-x: auto; }
+    .trade-bar-col { display: flex; flex-direction: column; align-items: center; gap: 6px; flex: 1; min-width: 40px; }
+    .trade-bar { width: 100%; max-width: 40px; background: #409eff; border-radius: 3px 3px 0 0; min-height: 2px; }
+    .trade-bar.out { background: #e6a23c; }
+    .trade-bar-lbl { font-size: 11px; color: #666; white-space: nowrap; }
+    .trade-bar-val { font-size: 11px; color: #999; }
+  </style>
+</head>
+
+<body>
+  <div id="app"></div>
+
+  <script type="text/x-template" id="report-tpl">
+    <div class="trade-page">
+      <wd-tips type="box" style="display:flex;margin-bottom:12px">
+        本页是林销的经营看板：上方汇总库存规模与预警情况，下方按日展示出入库趋势。库存总览为当前实时快照，只有出入库趋势受日期区间影响。
+      </wd-tips>
+
+      <wd-panel :border="true" title="查询条件" style="margin-bottom:20px"
+                description="日期区间仅作用于下方出入库趋势；不填日期则按默认统计周期展示全部流水。">
+        <div class="trade-filter" style="margin-bottom:0">
+          <span style="font-size:13px;color:#666">开始</span>
+          <el-date-picker v-model="start" type="date" value-format="YYYY-MM-DD" placeholder="开始日期" size="small" style="width:150px" />
+          <span style="font-size:13px;color:#666">结束</span>
+          <el-date-picker v-model="end" type="date" value-format="YYYY-MM-DD" placeholder="结束日期" size="small" style="width:150px" />
+          <el-button size="small" type="primary" :icon="Refresh" :loading="loading" @click="loadAll">刷新</el-button>
+          <wd-route-button size="small" type="primary" plain route-path="/trade/report/salesRank">销售排行</wd-route-button>
+          <wd-route-button size="small" type="primary" plain route-path="/trade/report/summary">进销存汇总</wd-route-button>
+        </div>
+      </wd-panel>
+
+      <div class="trade-section">
+        <wd-panel :border="true" title="库存总览"
+                  description="实时快照，不受上方日期区间影响。「在库商品」指当前库存大于 0 的商品；「预警商品」按商品档案维护的安全库存判断，明细见库存预警页。">
+          <div class="trade-stats">
+            <el-card v-for="s in stats" :key="s.label" shadow="never" class="trade-stat">
+              <div class="trade-stat num">{{ fmtNum(s.value, s.dec) }}</div>
+              <div class="trade-stat lbl">{{ s.label }}</div>
+            </el-card>
+          </div>
+        </wd-panel>
+      </div>
+
+      <div class="trade-section">
+        <wd-panel :border="true" title="出入库趋势（按日）"
+                  description="数据取自出入库流水并按日期分组：蓝色为入库数量、橙色为出库数量；柱高按区间内最大值等比缩放，只用于比较相对趋势，不代表绝对数值刻度。">
+          <div v-if="trend.length" class="trade-trend">
+            <div v-for="t in trend" :key="t.day" class="trade-bar-col">
+              <div class="trade-bar-val">入{{ fmtNum(t.in_qty, 0) }}</div>
+              <div class="trade-bar" :style="{ height: barH(t.in_qty) }"></div>
+              <div class="trade-bar-val">出{{ fmtNum(t.out_qty, 0) }}</div>
+              <div class="trade-bar out" :style="{ height: barH(t.out_qty) }"></div>
+              <div class="trade-bar-lbl">{{ t.day }}</div>
+            </div>
+          </div>
+          <el-empty v-else :image-size="70" description="暂无出入库流水" />
+        </wd-panel>
+      </div>
+
+      </div>
+  </script>
+
+  <script src="/static/vendor/vue/vue.global.prod.js"></script>
+  <script src="/static/vendor/element-plus/index.full.min.js"></script>
+  <script src="/static/vendor/icons/index.iife.min.js"></script>
+  <script src="/static/vendor/workdesktop-ai/index.umd.js"></script>
+  <script>
+    const WD = window.WorkDesktop;
+    const ElementPlus = window.ElementPlus;
+    // 数字/金额格式化：千分位 + 指定小数位，空值显示 '-'
+    function fmtNum(v, dec) {
+      if (v === null || v === undefined || v === '') return '-';
+      const n = Number(v);
+      if (isNaN(n)) return '-';
+      return n.toLocaleString('zh-CN', { minimumFractionDigits: dec, maximumFractionDigits: dec });
+    }
+    const { WorkDesktop } = WD;
+    const Icons = window.ElementPlusIconsVue;
+    const { ref, reactive, onMounted } = Vue;
+
+    const app = Vue.createApp({
+      template: '#report-tpl',
+      setup() {
+        const Refresh = Icons.Refresh;
+
+        const start = ref('');
+        const end = ref('');
+        const loading = ref(false);
+
+        const stats = ref([
+          { label: '商品总数', value: 0, dec: 0 },
+          { label: '在库商品', value: 0, dec: 0 },
+          { label: '库存总量', value: 0, dec: 0 },
+          { label: '库存金额', value: 0, dec: 2 },
+          { label: '预警商品', value: 0, dec: 0 }
+        ]);
+        const trend = ref([]);
+
+        let scale = 1;
+
+        function qs(obj) {
+          const p = new URLSearchParams();
+          for (const [k, v] of Object.entries(obj)) { if (v !== '' && v != null) p.append(k, v); }
+          const s = p.toString();
+          return s ? '?' + s : '';
+        }
+
+        function barH(v) {
+          return Math.max(2, Math.round((Number(v) || 0) / scale * 120)) + 'px';
+        }
+
+        async function loadAll() {
+          loading.value = true;
+          try {
+            const params = { start: start.value, end: end.value };
+            const oRes = await WD.request.get('/trade/report/overview' + qs(params));
+            if (oRes.success) {
+              const o = oRes.data.overview || {};
+              stats.value = [
+                { label: '商品总数', value: o.product_count || 0, dec: 0 },
+                { label: '在库商品', value: o.stock_products || 0, dec: 0 },
+                { label: '库存总量', value: o.total_qty || 0, dec: 0 },
+                { label: '库存金额', value: o.stock_amount || 0, dec: 2 },
+                { label: '预警商品', value: o.low_stock_count || 0, dec: 0 }
+              ];
+              const tr = oRes.data.trend || [];
+              trend.value = tr;
+              if (tr.length) {
+                let maxIn = 0, maxOut = 0;
+                tr.forEach(function (t) {
+                  if (Number(t.in_qty) > maxIn) maxIn = Number(t.in_qty);
+                  if (Number(t.out_qty) > maxOut) maxOut = Number(t.out_qty);
+                });
+                scale = Math.max(maxIn, maxOut, 1);
+              }
+            } else {
+              ElementPlus.ElMessage.error(oRes.message || '加载总览失败');
+            }
+          } finally {
+            loading.value = false;
+          }
+        }
+
+        onMounted(() => { loadAll(); });
+
+        return {
+          start, end, loading, stats, trend,
+          loadAll, barH, Refresh, fmtNum
+        };
+      }
+    });
+
+    for (const [name, comp] of Object.entries(window.ElementPlusIconsVue)) {
+      app.component(name, comp);
+    }
+    app.use(ElementPlus);
+    app.use(WorkDesktop);
+    app.mount('#app');
+  </script>
+</body>
+
+</html>

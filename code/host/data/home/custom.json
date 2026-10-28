@@ -1,0 +1,13 @@
+{
+    "35": {
+        "super_admin": [
+            "menu.superadmin.package",
+            "menu.superadmin.user",
+            "menu.superadmin.audit",
+            "menu.superadmin.systeminfo",
+            "menu.superadmin.site",
+            "menu.superadmin.review",
+            "menu.superadmin.ps"
+        ]
+    }
+}

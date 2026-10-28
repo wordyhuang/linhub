@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>消息投递记录 - LinHub 林枢</title>
+  <link rel="icon" type="image/svg+xml" href="/brand/favicon.svg">
+  <link rel="stylesheet" href="/static/vendor/element-plus/index.css">
+  <link rel="stylesheet" href="/static/vendor/workdesktop-ai/style.css">
+  <style>
+    html, body, #app { height: 100%; margin: 0; }
+    body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif; }
+    .mr-page { height: 100%; padding: 16px 20px 24px; box-sizing: border-box; }
+    .mr-mono { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
+    .mr-filter { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+    .mr-stats { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+    .mr-pager { display: flex; justify-content: flex-end; margin-top: 12px; }
+    .mr-content { white-space: pre-wrap; word-break: break-all; font-size: 13px; line-height: 1.6; }
+  </style>
+</head>
+
+<body>
+  <div id="app"></div>
+
+  <script type="text/x-template" id="mr-tpl">
+    <div class="mr-page">
+      <wd-panel :border="true">
+        <wd-tips type="box" style="margin-bottom:12px">
+          站内消息服务（IM-14）投递记录：只读查看平台与各功能包发出的消息主体，及发送时解析固化的收件人快照与已读状态，用于投递排障。消息不支持在此删除或撤回。
+        </wd-tips>
+
+        <div class="mr-stats">
+          <el-tag effect="plain">消息总量 {{ stats.message_total }}</el-tag>
+          <el-tag type="info" effect="plain">投递条数 {{ stats.recipient_total }}</el-tag>
+          <el-tag type="danger" effect="plain">未读 {{ stats.unread_total }}</el-tag>
+        </div>
+
+        <form class="mr-filter" @submit.prevent="search">
+          <el-input v-model="filters.keyword" placeholder="标题 / msg_key" style="width:200px" clearable @keyup.enter="search" />
+          <el-input v-model="filters.source_pkg" placeholder="来源功能包" style="width:140px" clearable @keyup.enter="search" />
+          <el-select v-model="filters.target_type" placeholder="目标类型" style="width:130px" clearable>
+            <el-option label="用户 user" value="user" />
+            <el-option label="角色 role" value="role" />
+            <el-option label="用户组 group" value="group" />
+          </el-select>
+          <el-input v-model="filters.user_id" placeholder="收件人 ID（排障）" style="width:180px" clearable @keyup.enter="search" />
+          <el-select v-if="filters.user_id" v-model="filters.is_read" placeholder="已读状态" style="width:120px" clearable>
+            <el-option label="未读" value="0" />
+            <el-option label="已读" value="1" />
+          </el-select>
+          <el-date-picker v-model="dateRange" type="datetimerange" range-separator="至"
+            start-placeholder="开始" end-placeholder="结束"
+            value-format="YYYY-MM-DD HH:mm:ss" style="width:340px" />
+          <el-button native-type="submit" type="primary" :icon="Search" :loading="loading">检索</el-button>
+          <el-button :icon="RefreshLeft" @click="reset">重置</el-button>
+        </form>
+
+        <wd-data-grid :data-source="rows" border stripe :with-index="false" :with-pager="false" v-loading="loading">
+          <el-table-column prop="title" label="标题" min-width="180" show-overflow-tooltip />
+          <el-table-column label="msg_key" min-width="170">
+            <template #default="{ row }"><span class="mr-mono">{{ row.msg_key }}</span></template>
+          </el-table-column>
+          <el-table-column prop="source_pkg" label="来源包" width="110">
+            <template #default="{ row }"><span class="mr-mono">{{ row.source_pkg || '—' }}</span></template>
+          </el-table-column>
+          <el-table-column label="发送人" width="140">
+            <template #default="{ row }">{{ row.sender_name || row.sender_id || '系统' }}</template>
+          </el-table-column>
+          <el-table-column label="目标" width="150">
+            <template #default="{ row }">
+              <el-tag size="small" effect="plain">{{ targetLabel(row.target_type) }}</el-tag>
+              <span class="mr-mono" style="margin-left:4px" v-if="targetRefText(row.target_ref)">{{ targetRefText(row.target_ref) }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="投递 / 已读" width="110">
+            <template #default="{ row }">
+              {{ row.recipient_count }} / <span style="color:var(--el-color-success,#67c23a)">{{ row.read_count }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="created_at" label="发送时间" width="190" />
+          <el-table-column label="操作" width="90" fixed="right">
+            <template #default="{ row }">
+              <el-button size="small" text type="primary" @click="openDetail(row)">收件人</el-button>
+            </template>
+          </el-table-column>
+          <template #empty><el-empty description="暂无消息记录" :image-size="80" /></template>
+        </wd-data-grid>
+
+        <div class="mr-pager">
+          <el-pagination
+            v-model:current-page="page" v-model:page-size="size"
+            :total="total" :page-sizes="[20, 50, 100]"
+            layout="total, sizes, prev, pager, next, jumper"
+            @current-change="load" @size-change="onSizeChange" />
+        </div>
+      </wd-panel>
+
+      <!-- 收件人快照抽屉 -->
+      <el-drawer v-model="detailVisible" title="消息与收件人快照" size="52%">
+        <div v-loading="detailLoading">
+          <el-descriptions :column="1" border>
+            <el-descriptions-item label="标题">{{ detail.title }}</el-descriptions-item>
+            <el-descriptions-item label="msg_key"><span class="mr-mono">{{ detail.msg_key }}</span></el-descriptions-item>
+            <el-descriptions-item label="来源 / 发送人">
+              <span class="mr-mono">{{ detail.source_pkg }}</span> / {{ detail.sender_name || detail.sender_id }}
+            </el-descriptions-item>
+            <el-descriptions-item label="跳转链接">
+              <span class="mr-mono" style="word-break:break-all">{{ detail.link || '—' }}</span>
+            </el-descriptions-item>
+            <el-descriptions-item label="目标">
+              {{ targetLabel(detail.target_type) }}
+              <span class="mr-mono">（{{ targetRefText(detail.target_ref) }}）</span>
+            </el-descriptions-item>
+            <el-descriptions-item label="发送时间">{{ detail.created_at }}</el-descriptions-item>
+            <el-descriptions-item label="正文">
+              <div class="mr-content">{{ detail.content }}</div>
+            </el-descriptions-item>
+          </el-descriptions>
+
+          <h4 style="margin:16px 0 8px">收件人解析快照（{{ (detail.recipients || []).length }} 人）</h4>
+          <el-table :data="detail.recipients || []" border stripe size="small">
+            <el-table-column label="用户" min-width="160">
+              <template #default="{ row }">{{ row.user_name || row.user_id }}</template>
+            </el-table-column>
+            <el-table-column label="user_id" min-width="150">
+              <template #default="{ row }"><span class="mr-mono">{{ row.user_id }}</span></template>
+            </el-table-column>
+            <el-table-column label="解析自" width="110">
+              <template #default="{ row }">
+                <el-tag size="small" effect="plain">{{ resolvedLabel(row.resolved_from) }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="状态" width="90">
+              <template #default="{ row }">
+                <el-tag size="small" :type="row.is_read ? 'success' : 'info'">{{ row.is_read ? '已读' : '未读' }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="read_at" label="阅读时间" min-width="180">
+              <template #default="{ row }">{{ row.read_at || '—' }}</template>
+            </el-table-column>
+            <el-table-column prop="created_at" label="投递时间" min-width="180" />
+            <template #empty><el-empty description="无收件人" :image-size="60" /></template>
+          </el-table>
+        </div>
+      </el-drawer>
+    </div>
+  </script>
+
+  <script src="/static/vendor/vue/vue.global.prod.js"></script>
+  <script src="/static/vendor/element-plus/index.full.min.js"></script>
+  <script src="/static/vendor/icons/index.iife.min.js"></script>
+  <script src="/static/vendor/workdesktop-ai/index.umd.js"></script>
+  <script>
+    const WD = window.WorkDesktop;
+    const ElementPlus = window.ElementPlus;
+    const { WorkDesktop } = WD;
+    const { ref, reactive } = Vue;
+
+    const TARGET_LABELS = { user: '用户', role: '角色', group: '用户组', mixed: '混合' };
+    const RESOLVED_LABELS = { direct: '直接指定', role: '角色', group: '用户组' };
+
+    const app = Vue.createApp({
+      template: '#mr-tpl',
+      setup() {
+        const loading = ref(false);
+        const detailLoading = ref(false);
+        const rows = ref([]);
+        const total = ref(0);
+        const page = ref(1);
+        const size = ref(20);
+        const filters = reactive({
+          keyword: '', source_pkg: '', target_type: '', user_id: '', is_read: ''
+        });
+        const dateRange = ref(null);
+        const stats = reactive({ message_total: 0, recipient_total: 0, unread_total: 0 });
+        const detailVisible = ref(false);
+        const detail = reactive({});
+
+        function qs(obj) {
+          const p = new URLSearchParams();
+          for (const [k, v] of Object.entries(obj)) { if (v !== '' && v != null) p.append(k, v); }
+          const s = p.toString();
+          return s ? '?' + s : '';
+        }
+
+        async function load() {
+          loading.value = true;
+          try {
+            const params = {
+              ...filters,
+              date_from: dateRange.value && dateRange.value[0] ? dateRange.value[0] : '',
+              date_to: dateRange.value && dateRange.value[1] ? dateRange.value[1] : '',
+              page: page.value, size: size.value
+            };
+            const res = await WD.request.get('/admin/message_admin/rows' + qs(params));
+            if (!res.success) {
+              ElementPlus.ElMessage.error(res.message || '加载失败');
+              return;
+            }
+            rows.value = res.data.list || [];
+            total.value = res.data.total || 0;
+            Object.assign(stats, res.data.stats || {});
+          } finally {
+            loading.value = false;
+          }
+        }
+
+        function search() { page.value = 1; load(); }
+        function reset() {
+          Object.keys(filters).forEach(k => filters[k] = '');
+          dateRange.value = null;
+          page.value = 1; load();
+        }
+        function onSizeChange() { page.value = 1; load(); }
+
+        function targetLabel(t) { return TARGET_LABELS[t] || t || '—'; }
+        function resolvedLabel(t) { return RESOLVED_LABELS[t] || t || '—'; }
+        function targetRefText(ref) {
+          if (!ref) return '';
+          if (Array.isArray(ref)) return ref.join(', ');
+          if (typeof ref === 'object') {
+            try { return JSON.stringify(ref); } catch (e) { return String(ref); }
+          }
+          return String(ref);
+        }
+
+        async function openDetail(row) {
+          detailVisible.value = true;
+          detailLoading.value = true;
+          Object.keys(detail).forEach(k => delete detail[k]);
+          try {
+            const res = await WD.request.get('/admin/message_admin/detail' + qs({ msg_key: row.msg_key }));
+            if (!res.success) {
+              ElementPlus.ElMessage.error(res.message || '详情加载失败');
+              return;
+            }
+            Object.assign(detail, res.data);
+          } finally {
+            detailLoading.value = false;
+          }
+        }
+
+        load();
+        return {
+          loading, detailLoading, rows, total, page, size, filters, dateRange, stats,
+          detailVisible, detail,
+          load, search, reset, onSizeChange, openDetail,
+          targetLabel, resolvedLabel, targetRefText
+        };
+      }
+    });
+
+    for (const [name, comp] of Object.entries(window.ElementPlusIconsVue)) {
+      app.component(name, comp);
+    }
+    app.use(ElementPlus);
+    app.use(WorkDesktop);
+    app.mount('#app');
+  </script>
+</body>
+
+</html>

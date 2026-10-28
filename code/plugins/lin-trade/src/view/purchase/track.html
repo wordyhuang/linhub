@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>采购跟踪 - 林销</title>
+  <link rel="icon" type="image/svg+xml" href="/brand/favicon.svg">
+  <link rel="stylesheet" href="/static/vendor/element-plus/index.css">
+  <link rel="stylesheet" href="/static/vendor/workdesktop-ai/style.css">
+  <style>
+    .trade-page { padding: 16px 20px 24px; box-sizing: border-box; }
+    .trade-section { margin-bottom: 20px; }
+    .trade-section h3 { font-size: 15px; margin: 0 0 10px; color: #333; }
+    .track-count { font-size: 12px; color: #999; margin-left: 8px; }
+  </style>
+</head>
+
+<body>
+  <div id="app"></div>
+
+  <script type="text/x-template" id="track-tpl">
+    <div class="trade-page">
+      <wd-tips type="box" style="display:flex;margin-bottom:12px">
+        采购跟踪按到货状态汇总采购单：在途、部分到货、3天内到货预警、超期未到货四类情况一眼可见。
+        建议每天开工先看「到货预警」与「超期未到货」，及时联系供应商；这些数据只读，入库请到「采购入库」页面办理。
+      </wd-tips>
+
+      <wd-panel :border="true" title="筛选条件" style="margin-bottom:12px"
+                description="按供应商过滤后可快速定位单个供应商的到货情况；不选供应商则统计全部采购单。">
+        <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
+          <el-select v-model="supplierId" placeholder="全部供应商" size="small" style="width:200px" clearable filterable>
+            <el-option v-for="s in suppliers" :key="s.id" :label="s.name" :value="s.id" />
+          </el-select>
+          <el-button size="small" type="primary" :icon="Refresh" :loading="loading" @click="load">刷新</el-button>
+        </div>
+      </wd-panel>
+
+      <div class="trade-section">
+        <wd-panel :border="true">
+          <template #title>
+            <span class="wd-panel__title">在途<span class="track-count">{{ data.transit.length }}</span></span>
+            <span class="wd-panel__description">已提交但尚未开始收货的采购单；预计到货日期仅供参考，实际以入库时间为准。</span>
+          </template>
+          <el-table :data="data.transit" border stripe size="small">
+            <el-table-column prop="order_no" label="采购单号" min-width="150" />
+            <el-table-column prop="supplier_name" label="供应商" width="130" show-overflow-tooltip />
+            <el-table-column prop="expected_arrival_at" label="预计到货" min-width="140" />
+            <el-table-column prop="line_count" label="行数" width="80" align="right" />
+            <template #empty><el-empty :image-size="70" description="暂无在途采购单" /></template>
+          </el-table>
+        </wd-panel>
+      </div>
+
+      <div class="trade-section">
+        <wd-panel :border="true">
+          <template #title>
+            <span class="wd-panel__title">部分到货<span class="track-count">{{ data.partial.length }}</span></span>
+            <span class="wd-panel__description">已部分收货的采购单，仍需继续入库；未收数量在「采购入库」页按订单处理。</span>
+          </template>
+          <el-table :data="data.partial" border stripe size="small">
+            <el-table-column prop="order_no" label="采购单号" min-width="150" />
+            <el-table-column prop="supplier_name" label="供应商" width="130" show-overflow-tooltip />
+            <el-table-column prop="status" label="状态" width="100">
+              <template #default="{ row }"><el-tag size="small" type="warning">{{ row.status_label || row.status }}</el-tag></template>
+            </el-table-column>
+            <el-table-column prop="partially_received" label="部分到货" width="100" align="right" />
+            <template #empty><el-empty :image-size="70" description="暂无部分到货" /></template>
+          </el-table>
+        </wd-panel>
+      </div>
+
+      <div class="trade-section">
+        <wd-panel :border="true">
+          <template #title>
+            <span class="wd-panel__title">到货预警（3天内）<span class="track-count">{{ data.arrival_alert.length }}</span></span>
+            <span class="wd-panel__description">预计到货日期落在未来 3 天内的采购单，便于提前安排收货人手与仓位。</span>
+          </template>
+          <el-table :data="data.arrival_alert" border stripe size="small">
+            <el-table-column prop="order_no" label="采购单号" min-width="150" />
+            <el-table-column prop="expected_arrival_at" label="预计到货" min-width="140" />
+            <template #empty><el-empty :image-size="70" description="暂无到货预警" /></template>
+          </el-table>
+        </wd-panel>
+      </div>
+
+      <div class="trade-section">
+        <wd-panel :border="true">
+          <template #title>
+            <span class="wd-panel__title">超期未到货<span class="track-count">{{ data.overdue.length }}</span></span>
+            <span class="wd-panel__description">已过预计到货日期但未收满的采购单，需优先催货，避免影响销售发货。</span>
+          </template>
+          <el-table :data="data.overdue" border stripe size="small">
+            <el-table-column prop="order_no" label="采购单号" min-width="150" />
+            <el-table-column prop="supplier_name" label="供应商" width="130" show-overflow-tooltip />
+            <el-table-column prop="expected_arrival_at" label="应到日期" min-width="140">
+              <template #default="{ row }"><span style="color:#f56c6c">{{ row.expected_arrival_at }}（已超期）</span></template>
+            </el-table-column>
+            <template #empty><el-empty :image-size="70" description="无超期采购单" /></template>
+          </el-table>
+        </wd-panel>
+      </div>
+    </div>
+  </script>
+
+  <script src="/static/vendor/vue/vue.global.prod.js"></script>
+  <script src="/static/vendor/element-plus/index.full.min.js"></script>
+  <script src="/static/vendor/icons/index.iife.min.js"></script>
+  <script src="/static/vendor/workdesktop-ai/index.umd.js"></script>
+  <script>
+    const WD = window.WorkDesktop;
+    const ElementPlus = window.ElementPlus;
+    const { WorkDesktop } = WD;
+    const Icons = window.ElementPlusIconsVue;
+    const { ref, onMounted } = Vue;
+
+    const app = Vue.createApp({
+      template: '#track-tpl',
+      setup() {
+        const Refresh = Icons.Refresh;
+        const loading = ref(false);
+        const supplierId = ref('');
+        const suppliers = ref([]);
+        const data = ref({ transit: [], partial: [], arrival_alert: [], overdue: [] });
+
+        function qs(obj) {
+          const p = new URLSearchParams();
+          for (const [k, v] of Object.entries(obj)) { if (v !== '' && v != null) p.append(k, v); }
+          const s = p.toString();
+          return s ? '?' + s : '';
+        }
+
+        async function load() {
+          loading.value = true;
+          try {
+            const res = await WD.request.get('/trade/purchase/trackRows' + qs({ supplier_id: supplierId.value }));
+            if (res.success) {
+              data.value = {
+                transit: res.data.transit || [],
+                partial: res.data.partial || [],
+                arrival_alert: res.data.arrival_alert || [],
+                overdue: res.data.overdue || []
+              };
+              suppliers.value = res.data.suppliers || [];
+            } else {
+              ElementPlus.ElMessage.error(res.message || '加载失败');
+            }
+          } finally {
+            loading.value = false;
+          }
+        }
+
+        onMounted(load);
+
+        return { Refresh, loading, supplierId, suppliers, data, load };
+      }
+    });
+
+    for (const [name, comp] of Object.entries(window.ElementPlusIconsVue)) {
+      app.component(name, comp);
+    }
+    app.use(ElementPlus);
+    app.use(WorkDesktop);
+    app.mount('#app');
+  </script>
+</body>
+
+</html>

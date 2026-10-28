@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>无访问权限 - LinHub 林枢</title>
+<link rel="icon" type="image/svg+xml" href="/brand/favicon.svg">
+<link rel="stylesheet" href="/static/vendor/element-plus/index.css">
+<style>
+  html, body { height: 100%; margin: 0; }
+  body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif; }
+  .forbid-wrap {
+    min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    background: var(--wd-bg-color-page, #f4f6fb); padding: 24px;
+  }
+  .forbid-card { width: 420px; max-width: 100%; border-radius: 14px; text-align: center; }
+  .forbid-code { font-size: 44px; font-weight: 700; color: var(--el-color-danger); margin: 0; letter-spacing: 2px; }
+  .forbid-title { font-size: 18px; margin: 10px 0 6px; color: #1f2937; }
+  .forbid-desc { font-size: 13px; color: #6b7280; line-height: 1.7; margin: 0 0 22px; }
+  .forbid-actions { display: flex; gap: 12px; justify-content: center; }
+</style>
+</head>
+<body>
+<div class="forbid-wrap">
+  <div class="el-card forbid-card" shadow="always">
+    <p class="forbid-code">403</p>
+    <div class="forbid-title">无平台访问权限</div>
+    <p class="forbid-desc">
+      平台管理面仅超级管理员可用（需持有 UAIS「LinHub SuperAdministrator」标签）。<br>
+      如需访问，请联系平台超级管理员。
+    </p>
+    <div class="forbid-actions">
+      <a class="el-button el-button--default" href="/admin/home/dashboard">返回工作台</a>
+      <a class="el-button el-button--primary" href="/admin/auth/logout">退出登录</a>
+    </div>
+  </div>
+</div>
+</body>
+</html>

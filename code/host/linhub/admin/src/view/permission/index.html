@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>权限项浏览 - LinHub 林枢</title>
+<link rel="icon" type="image/svg+xml" href="/brand/favicon.svg">
+<link rel="stylesheet" href="/static/vendor/element-plus/index.css">
+<link rel="stylesheet" href="/static/vendor/workdesktop-ai/style.css">
+<style>
+  html, body, #app { height: 100%; margin: 0; }
+  .per-page { height: 100%; padding: 16px 20px 24px; box-sizing: border-box; }
+  body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif; }
+  .per-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+  .per-mono { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
+  .open-tag { display: inline-block; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<script type="text/x-template" id="per-tpl">
+  <div class="per-page">
+    <wd-panel :border="true">
+      <wd-tips type="box" style="margin-bottom:10px">
+        只读视图：展示各功能包登记的平台与功能权限点（编码遵循「产品:资源:操作」）。
+      </wd-tips>
+
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px;flex-wrap:wrap">
+        <span style="font-size:13px;color:var(--wd-text-color-secondary, #6b7280)">按开放角色筛选：</span>
+        <el-radio-group v-model="roleFilter" size="small">
+          <el-radio-button value="">全部</el-radio-button>
+          <el-radio-button v-for="o in roleOptions" :key="o.type" :value="o.name">{{ o.name }}</el-radio-button>
+        </el-radio-group>
+      </div>
+
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap">
+        <el-input v-model="keyword" placeholder="按编码 / 标题 / 说明搜索" size="small" clearable style="width:240px" />
+        <el-select v-model="groupFilter" placeholder="按分组筛选" size="small" clearable style="width:180px">
+          <el-option v-for="g in groupOptions" :key="g" :label="g" :value="g" />
+        </el-select>
+        <el-tag type="info" size="small" style="margin-left:auto">{{ gridLen }} 项</el-tag>
+      </div>
+
+      <el-table :data="filtered" size="small" stripe border style="width:100%">
+        <el-table-column label="权限编码" min-width="240">
+          <template #default="{ row }">
+            <span class="per-mono">{{ row.code }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="title" label="标题" min-width="150" />
+        <el-table-column prop="description" label="说明" min-width="220">
+          <template #default="{ row }">
+            <span v-if="row.description">{{ row.description }}</span>
+            <span v-else class="per-mono" style="color:var(--wd-text-color-tertiary, #9ca3af)">—</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="group" label="分组" width="120" />
+        <el-table-column prop="short" label="来源" width="130">
+          <template #default="{ row }">
+            <el-tag size="small" type="info" effect="plain">{{ row.short }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="开放角色" min-width="170">
+          <template #default="{ row }">
+            <span v-if="row.open" class="open-tag"><el-tag size="small" type="success" effect="light">不限角色</el-tag></span>
+            <template v-else>
+              <el-tag v-for="r in row.roles" :key="r" size="small" effect="plain" style="margin-right:6px">{{ r }}</el-tag>
+            </template>
+          </template>
+        </el-table-column>
+        <template #empty>
+          <el-empty description="当前筛选下没有可见权限点" :image-size="80" />
+        </template>
+      </el-table>
+    </wd-panel>
+  </div>
+</script>
+
+<script src="/static/vendor/vue/vue.global.prod.js"></script>
+<script src="/static/vendor/element-plus/index.full.min.js"></script>
+<script src="/static/vendor/icons/index.iife.min.js"></script>
+<script src="/static/vendor/workdesktop-ai/index.umd.js"></script>
+<script>
+  const WD = window.WorkDesktop;
+  const ElementPlus = window.ElementPlus;
+  const { WorkDesktop } = WD;
+  const { ref, computed } = Vue;
+
+  const app = Vue.createApp({
+    template: '#per-tpl',
+    setup() {
+      const roleOptions = ref([]);
+      const roleFilter = ref('');
+      const keyword = ref('');
+      const groupFilter = ref('');
+      const items = ref([]);
+
+      // 分组下拉选项：由已加载权限点的 group 字段去重得到
+      const groupOptions = computed(() => {
+        const set = new Set();
+        items.value.forEach(p => { if (p.group) set.add(p.group); });
+        return Array.from(set).sort();
+      });
+
+      // 组合过滤：开放角色（J7/J7-b）→ 关键词（编码/标题/说明）→ 分组
+      const filtered = computed(() => {
+        const kw = keyword.value.trim().toLowerCase();
+        return items.value.filter(p => {
+          if (roleFilter.value && !(p.open || (p.roles || []).includes(roleFilter.value))) return false;
+          if (groupFilter.value && p.group !== groupFilter.value) return false;
+          if (kw) {
+            const hay = `${p.code || ''}\n${p.title || ''}\n${p.description || ''}`.toLowerCase();
+            if (!hay.includes(kw)) return false;
+          }
+          return true;
+        });
+      });
+      const gridLen = computed(() => filtered.value.length);
+
+      WD.request.get('/admin/permission/rows').then(res => {
+        if (!res.success) return;
+        items.value = res.data.list || [];
+        roleOptions.value = res.data.roleOptions || [];
+      });
+
+      return { roleOptions, roleFilter, keyword, groupFilter, groupOptions, filtered, gridLen };
+    }
+  });
+
+  for (const [name, comp] of Object.entries(window.ElementPlusIconsVue)) {
+    app.component(name, comp);
+  }
+  app.use(ElementPlus);
+  app.use(WorkDesktop);
+  app.mount('#app');
+</script>
+</body>
+</html>

@@ -1,0 +1,15 @@
+{
+    "name": "linhub/host",
+    "description": "LinHub 平台宿主内核（服务/能力装配层）",
+    "type": "library",
+    "license": "proprietary",
+    "require": {
+        "php": ">=8.0.0",
+        "linhub/capability": "*"
+    },
+    "autoload": {
+        "psr-4": {
+            "linhub\\host\\": "src/"
+        }
+    }
+}

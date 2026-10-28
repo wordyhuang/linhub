@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>数据字典 - 林客CRM</title>
+  <link rel="icon" type="image/svg+xml" href="/brand/favicon.svg">
+  <link rel="stylesheet" href="/static/vendor/element-plus/index.css">
+  <link rel="stylesheet" href="/static/vendor/workdesktop-ai/style.css">
+  <style>
+    html, body, #app { height: 100%; margin: 0; }
+    body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif; }
+    .crm-page { height: 100%; padding: 16px 20px 24px; box-sizing: border-box; }
+    .crm-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+
+  <script type="text/x-template" id="crm-dict-tpl">
+  <div class="crm-page">
+    <wd-tips type="box" style="display:flex;margin-bottom:12px">
+      数据字典维护租户级枚举（客户来源/行业/级别/线索来源等）：键为枚举值，值为显示文本；
+      停用项不再出现在业务下拉中，历史数据不受影响。
+    </wd-tips>
+
+    <wd-panel :border="true" title="数据字典">
+      <div class="crm-toolbar">
+        <el-select v-model="filterType" placeholder="全部类型" size="small" clearable style="width:180px" @change="load">
+          <el-option v-for="t in typeOptions" :key="t.v" :label="t.l" :value="t.v" />
+        </el-select>
+        <el-button size="small" :icon="Search" @click="load">刷新</el-button>
+        <!-- 新增入口 = 弹层触发器（规范 §0.13 DrawerButton） -->
+        <wd-drawer-button label="新增词条" title="新增词条" mode="dialog" drawer-size="420px"
+                          size="small" type="primary" @open="openEdit()">
+          <template #default>
+            <el-form label-width="110px" size="small">
+              <el-form-item label="类型" required>
+                <el-select v-model="form.dict_type" style="width:100%" placeholder="如 customer_source">
+                  <el-option v-for="t in typeOptions" :key="t.v" :label="t.l + '（' + t.v + '）'" :value="t.v" />
+                </el-select>
+              </el-form-item>
+              <el-form-item label="键（枚举值）" required><el-input v-model="form.dict_key" /></el-form-item>
+              <el-form-item label="值（显示文本）" required><el-input v-model="form.dict_value" /></el-form-item>
+              <el-form-item label="排序"><el-input-number v-model="form.sort" :min="0" style="width:100%" /></el-form-item>
+              <el-form-item label="状态">
+                <el-switch v-model="form.status" :active-value="1" :inactive-value="0" active-text="启用" />
+              </el-form-item>
+            </el-form>
+          </template>
+          <template #footer="f">
+            <el-button size="small" @click="f.close">取消</el-button>
+            <wd-api-button label="保存" type="primary" size="small" api="/lin-crm/setting/dict"
+                           :api-param="{ id: form.id, dict_type: form.dict_type, dict_key: form.dict_key, dict_value: form.dict_value, sort: form.sort, status: form.status }"
+                           :disabled="!form.dict_type || !form.dict_key.trim() || !form.dict_value.trim()"
+                           :head-refresh-datagrid="false" @api-success="onSaved(f.close)">保存</wd-api-button>
+          </template>
+        </wd-drawer-button>
+      </div>
+      <el-table :data="rows" size="small" border>
+        <el-table-column prop="dict_type" label="类型" width="130" />
+        <el-table-column prop="dict_key" label="键（枚举值）" width="150" />
+        <el-table-column prop="dict_value" label="值（显示文本）" min-width="150" />
+        <el-table-column prop="sort" label="排序" width="70" align="right" />
+        <el-table-column label="状态" width="90">
+          <template #default="{ row }">
+            <el-tag :type="row.status == 1 ? 'success' : 'info'" size="small">{{ row.status == 1 ? '启用' : '停用' }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="170" fixed="right">
+          <template #default="{ row }">
+            <el-button-group size="small">
+              <wd-drawer-button label="编辑" title="编辑词条" mode="dialog" drawer-size="420px" size="small"
+                                @open="openEdit(row)">
+                <template #default>
+                  <el-form label-width="110px" size="small">
+                    <el-form-item label="类型" required>
+                      <el-select v-model="form.dict_type" style="width:100%" placeholder="如 customer_source">
+                        <el-option v-for="t in typeOptions" :key="t.v" :label="t.l + '（' + t.v + '）'" :value="t.v" />
+                      </el-select>
+                    </el-form-item>
+                    <el-form-item label="键（枚举值）" required><el-input v-model="form.dict_key" /></el-form-item>
+                    <el-form-item label="值（显示文本）" required><el-input v-model="form.dict_value" /></el-form-item>
+                    <el-form-item label="排序"><el-input-number v-model="form.sort" :min="0" style="width:100%" /></el-form-item>
+                    <el-form-item label="状态">
+                      <el-switch v-model="form.status" :active-value="1" :inactive-value="0" active-text="启用" />
+                    </el-form-item>
+                  </el-form>
+                </template>
+                <template #footer="f">
+                  <el-button size="small" @click="f.close">取消</el-button>
+                  <wd-api-button label="保存" type="primary" size="small" api="/lin-crm/setting/dict"
+                                 :api-param="{ id: form.id, dict_type: form.dict_type, dict_key: form.dict_key, dict_value: form.dict_value, sort: form.sort, status: form.status }"
+                                 :disabled="!form.dict_type || !form.dict_key.trim() || !form.dict_value.trim()"
+                                 :head-refresh-datagrid="false" @api-success="onSaved(f.close)">保存</wd-api-button>
+                </template>
+              </wd-drawer-button>
+              <!-- 抹除操作：行内气泡二次确认（规范 §1.7 / §0.13 PopconfirmButton） -->
+              <wd-popconfirm-button label="删除" type="danger" size="small"
+                                    :title="'确认删除词条「' + row.dict_value + '」？'" tips="停用项不出现在业务下拉，历史数据不受影响"
+                                    api="/lin-crm/setting/dict" :api-param="{ op: 'delete', id: row.id }"
+                                    :head-refresh-datagrid="false" @api-success="load">删除</wd-popconfirm-button>
+            </el-button-group>
+          </template>
+        </el-table-column>
+        <template #empty><el-empty :image-size="60" description="暂无词条，点击右上角「新增词条」开始" /></template>
+      </el-table>
+    </wd-panel>
+  </div>
+</script>
+
+  <script src="/static/vendor/vue/vue.global.prod.js"></script>
+  <script src="/static/vendor/element-plus/index.full.min.js"></script>
+  <script src="/static/vendor/icons/index.iife.min.js"></script>
+  <script src="/static/vendor/workdesktop-ai/index.umd.js"></script>
+  <script>
+    const WD = window.WorkDesktop;
+    const ElementPlus = window.ElementPlus;
+    const { WorkDesktop } = WD;
+    const { ref, reactive } = Vue;
+    const Search = window.ElementPlusIconsVue.Search;
+
+    const typeOptions = [
+      { v: 'customer_source', l: '客户来源' },
+      { v: 'industry', l: '行业' },
+      { v: 'customer_level', l: '客户级别' },
+      { v: 'lead_source', l: '线索来源' },
+    ];
+
+    const app = Vue.createApp({
+      template: '#crm-dict-tpl',
+      setup() {
+        const rows = ref([]);
+        const filterType = ref('');
+        const form = reactive({ id: 0, dict_type: '', dict_key: '', dict_value: '', sort: 0, status: 1 });
+
+        async function load() {
+          const res = await fetch('/lin-crm/setting/dict', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ op: 'list', dict_type: filterType.value }) });
+          const body = await res.json();
+          if (body.code === 0) rows.value = body.data || [];
+          else ElementPlus.ElMessage.error(body.message || '加载失败');
+        }
+        load();
+        function openEdit(row) {
+          Object.assign(form, row || { id: 0, dict_type: filterType.value || '', dict_key: '', dict_value: '', sort: 0, status: 1 });
+        }
+        // wd-api-button 成功回调：关弹层 + 重载列表（提示由组件自动给出）
+        function onSaved(close) { close && close(); load(); }
+        return { rows, filterType, form, Search, typeOptions, load, openEdit, onSaved };
+      }
+    });
+    for (const [name, comp] of Object.entries(window.ElementPlusIconsVue)) app.component(name, comp);
+    app.use(ElementPlus);
+    app.use(WorkDesktop);
+    app.mount('#app');
+  </script>
+</body>
+</html>

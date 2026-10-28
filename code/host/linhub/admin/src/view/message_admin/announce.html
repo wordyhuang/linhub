@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>群发系统公告 - LinHub 林枢</title>
+  <link rel="icon" type="image/svg+xml" href="/brand/favicon.svg">
+  <link rel="stylesheet" href="/static/vendor/element-plus/index.css">
+  <link rel="stylesheet" href="/static/vendor/workdesktop-ai/style.css">
+  <style>
+    html, body, #app { height: 100%; margin: 0; }
+    body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif; }
+    .an-page { height: 100%; padding: 16px 20px 24px; box-sizing: border-box; }
+    .an-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 14px; }
+    .an-card { border: 1px solid var(--el-border-color-light, #e4e7ed); border-radius: 8px; padding: 16px; background: var(--el-bg-color, #fff); }
+    .an-card h3 { margin: 0 0 14px; font-size: 15px; }
+    .an-summary { line-height: 2; }
+    .an-warn { color: var(--el-color-warning,#e6a23c); font-size: 12px; }
+  </style>
+</head>
+
+<body>
+  <div id="app"></div>
+
+  <script type="text/x-template" id="an-tpl">
+    <div class="an-page" v-loading="loadingOpts" element-loading-text="加载接收对象...">
+      <wd-panel :border="true">
+        <wd-tips type="box" style="margin-bottom:12px">
+          站内消息服务（IM-15）系统公告群发：向指定用户、角色或用户组发送公告，三类目标可混合。服务端在发送时解析角色/组成员并固化去重为收件人快照，实际接收人数以服务端解析结果为准。
+        </wd-tips>
+
+        <div class="an-grid">
+          <!-- 编辑区 -->
+          <div class="an-card">
+            <h3>公告内容</h3>
+            <el-form label-width="80px">
+              <el-form-item label="标题" required>
+                <el-input v-model="form.title" maxlength="100" show-word-limit placeholder="公告标题（必填）" />
+              </el-form-item>
+              <el-form-item label="正文">
+                <el-input v-model="form.content" type="textarea" :rows="6" maxlength="2000" show-word-limit
+                  placeholder="公告正文，支持纯文本；通知中心点击后可展示全文" />
+              </el-form-item>
+              <el-form-item label="跳转链接">
+                <el-input v-model="form.link" placeholder="可选，点击通知后跳转的站内路径或 URL" />
+              </el-form-item>
+            </el-form>
+
+            <h3 style="margin-top:6px">接收对象</h3>
+            <el-form label-width="80px">
+              <el-form-item label="用户">
+                <el-select v-model="form.users" multiple filterable collapse-tags collapse-tags-tooltip
+                  placeholder="按用户发送" style="width:100%">
+                  <el-option v-for="u in targets.users" :key="u.id" :label="u.name + '（' + u.id + '）'" :value="u.id" />
+                </el-select>
+              </el-form-item>
+              <el-form-item label="角色">
+                <el-select v-model="form.roles" multiple filterable collapse-tags collapse-tags-tooltip
+                  placeholder="按角色发送（发送时解析成员）" style="width:100%">
+                  <el-option v-for="r in targets.roles" :key="r.id" :label="r.name" :value="r.id" />
+                </el-select>
+              </el-form-item>
+              <el-form-item label="用户组">
+                <el-select v-model="form.groups" multiple filterable collapse-tags collapse-tags-tooltip
+                  placeholder="按用户组发送（发送时解析成员）" style="width:100%">
+                  <el-option v-for="g in targets.groups" :key="g.id" :label="g.name" :value="g.id" />
+                </el-select>
+              </el-form-item>
+            </el-form>
+
+            <el-alert v-if="!hasTarget" title="请至少选择一个接收对象（用户/角色/用户组）"
+              type="warning" :closable="false" show-icon style="margin-bottom:10px" />
+
+            <div>
+              <el-button type="primary" :icon="Promotion" :loading="sending" :disabled="!canSend" @click="send">发送公告</el-button>
+              <el-button :icon="RefreshLeft" @click="resetForm">清空</el-button>
+            </div>
+          </div>
+
+          <!-- 说明区 -->
+          <div class="an-card">
+            <h3>发送前确认</h3>
+            <el-descriptions :column="1" border>
+              <el-descriptions-item label="标题">{{ form.title || '（未填写）' }}</el-descriptions-item>
+              <el-descriptions-item label="来源">
+                <el-tag size="small" type="primary" effect="plain">platform（系统公告）</el-tag>
+              </el-descriptions-item>
+              <el-descriptions-item label="选中用户">{{ form.users.length }} 人</el-descriptions-item>
+              <el-descriptions-item label="选中角色">{{ form.roles.length }} 个</el-descriptions-item>
+              <el-descriptions-item label="选中用户组">{{ form.groups.length }} 个</el-descriptions-item>
+            </el-descriptions>
+
+            <p class="an-summary" style="margin:14px 0 6px;font-size:13px;color:#4b5563">
+              目标在发送时解析：角色/用户组会展开为成员，与直接指定的用户合并并按 user_id 去重；
+              若所选角色/组无成员导致最终接收人为 0，服务端将拒绝发送。
+            </p>
+            <p class="an-warn">发送后消息进入各用户通知中心，不可撤回；操作会记录到管控轨迹。</p>
+
+            <h3 style="margin-top:16px">发送结果</h3>
+            <template v-if="lastResult">
+              <el-result :icon="lastResult.recipient_count > 0 ? 'success' : 'warning'" :title="lastTitle" :sub-title="lastSub" style="padding:8px 0">
+                <template #extra>
+                  <el-descriptions :column="1" border size="small" style="text-align:left">
+                    <el-descriptions-item label="msg_key">
+                      <span style="font-family:ui-monospace,Consolas,monospace;font-size:12px">{{ lastResult.msg_key }}</span>
+                    </el-descriptions-item>
+                    <el-descriptions-item label="实际接收人数">{{ lastResult.recipient_count }}</el-descriptions-item>
+                  </el-descriptions>
+                  <div style="margin-top:12px">
+                    <el-button size="small" @click="goRecords">前往投递记录查看</el-button>
+                  </div>
+                </template>
+              </el-result>
+            </template>
+            <el-empty v-else description="尚未发送" :image-size="70" />
+          </div>
+        </div>
+      </wd-panel>
+    </div>
+  </script>
+
+  <script src="/static/vendor/vue/vue.global.prod.js"></script>
+  <script src="/static/vendor/element-plus/index.full.min.js"></script>
+  <script src="/static/vendor/icons/index.iife.min.js"></script>
+  <script src="/static/vendor/workdesktop-ai/index.umd.js"></script>
+  <script>
+    const WD = window.WorkDesktop;
+    const ElementPlus = window.ElementPlus;
+    const { WorkDesktop } = WD;
+    const { ref, reactive, computed } = Vue;
+
+    const app = Vue.createApp({
+      template: '#an-tpl',
+      setup() {
+        const loadingOpts = ref(false);
+        const sending = ref(false);
+        const targets = reactive({ users: [], roles: [], groups: [] });
+        const form = reactive({ title: '', content: '', link: '', users: [], roles: [], groups: [] });
+        const lastResult = ref(null);
+        const lastTitle = ref('');
+        const lastSub = ref('');
+
+        const hasTarget = computed(() =>
+          form.users.length > 0 || form.roles.length > 0 || form.groups.length > 0
+        );
+        const canSend = computed(() => form.title.trim() !== '' && hasTarget.value && !sending.value);
+
+        async function loadTargets() {
+          loadingOpts.value = true;
+          try {
+            const res = await WD.request.get('/admin/message_admin/targets');
+            if (!res.success) {
+              ElementPlus.ElMessage.error(res.message || '接收对象加载失败');
+              return;
+            }
+            targets.users = res.data.users || [];
+            targets.roles = res.data.roles || [];
+            targets.groups = res.data.groups || [];
+          } finally {
+            loadingOpts.value = false;
+          }
+        }
+
+        function resetForm() {
+          form.title = ''; form.content = ''; form.link = '';
+          form.users = []; form.roles = []; form.groups = [];
+        }
+
+        async function send() {
+          if (!form.title.trim()) {
+            ElementPlus.ElMessage.warning('请填写公告标题');
+            return;
+          }
+          if (!hasTarget.value) {
+            ElementPlus.ElMessage.warning('请至少选择一个接收对象');
+            return;
+          }
+          try {
+            await ElementPlus.ElMessageBox.confirm(
+              '确认向所选 ' + (form.users.length + form.roles.length + form.groups.length) +
+                ' 类目标发送系统公告？发送后不可撤回。',
+              '发送确认', { confirmButtonText: '确认发送', cancelButtonText: '取消', type: 'warning' }
+            );
+          } catch (e) { return; }
+
+          sending.value = true;
+          try {
+            const res = await WD.request.post('/admin/message_admin/send', {
+              title: form.title.trim(),
+              content: form.content,
+              link: form.link.trim(),
+              users: form.users,
+              roles: form.roles,
+              groups: form.groups
+            });
+            if (!res.success) {
+              ElementPlus.ElMessage.error(res.message || '发送失败');
+              return;
+            }
+            lastResult.value = res.data;
+            lastTitle.value = '公告已发送';
+            lastSub.value = res.message || ('实际接收 ' + (res.data && res.data.recipient_count) + ' 人');
+            ElementPlus.ElMessage.success(res.message || '公告已发送');
+          } finally {
+            sending.value = false;
+          }
+        }
+
+        function goRecords() { window.location.href = '/admin/message_admin/records'; }
+
+        loadTargets();
+        return {
+          loadingOpts, sending, targets, form, lastResult, lastTitle, lastSub,
+          hasTarget, canSend, send, resetForm, goRecords
+        };
+      }
+    });
+
+    for (const [name, comp] of Object.entries(window.ElementPlusIconsVue)) {
+      app.component(name, comp);
+    }
+    app.use(ElementPlus);
+    app.use(WorkDesktop);
+    app.mount('#app');
+  </script>
+</body>
+
+</html>

@@ -1,0 +1,22 @@
+{* 林客 · 公海规则（PG-SET-02；FR-CUS-02；OI-002 默认值评审定稿） *}
+{include file="common/head" /}
+<div id="app">
+  <el-card shadow="never">
+    <template #header>公海规则（租户单行配置）</template>
+    <el-form label-width="180px" style="max-width:520px">
+      <el-form-item label="私海保护期（天）"><el-input-number v-model="r.protect_days" :min="1"/></el-form-item>
+      <el-form-item label="私海持有上限（个）"><el-input-number v-model="r.private_limit" :min="1"/></el-form-item>
+      <el-form-item label="释放检查时点"><el-input v-model="r.release_run_at" placeholder="02:00"/></el-form-item>
+      <el-button type="primary" @click="save">保存</el-button>
+    </el-form>
+  </el-card>
+</div>
+<script>
+crmPage(function () {
+  const V = Vue;
+  const state = V.reactive({ r: { protect_days: 30, private_limit: 50, release_run_at: '02:00' } });
+  crmRequest('/crm/setting/poolrule').then(function (res) { Object.assign(state.r, res.data || {}); });
+  function save() { crmRequest('/crm/setting/poolrule', state.r).then(function () { ElementPlus.ElMessage.success('已保存'); }); }
+  return Object.assign({}, V.toRefs(state), { save });
+});
+</script>

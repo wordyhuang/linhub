@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>登录 - {:htmlspecialchars($name)}</title>
+<link rel="icon" type="image/svg+xml" href="/brand/favicon.svg">
+<link rel="stylesheet" href="/static/vendor/element-plus/index.css">
+<link rel="stylesheet" href="/static/vendor/workdesktop-ai/style.css">
+<style>
+  html, body { height: 100%; margin: 0; }
+  body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif; }
+  #app { min-height: 100vh; }
+  .login-wrap {
+    min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    background: var(--wd-bg-color-page, #f4f6fb); padding: 24px;
+  }
+  .login-card { width: 380px; max-width: 100%; border-radius: 14px; }
+  .login-brand { margin-bottom: 4px; }
+  .login-brand .brand-logo { width: 220px; height: auto; display: block; }
+  .login-sub { color: var(--wd-text-color-secondary, #6b7280); font-size: 13px; margin-bottom: 22px; }
+  .login-hint { margin-top: 14px; font-size: 12px; color: var(--wd-text-color-secondary, #9ca3af); text-align: center; }
+  .login-icp { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--el-border-color-lighter, #ebeef5); text-align: center; }
+  .login-icp a { font-size: 12px; color: var(--wd-text-color-secondary, #909399); text-decoration: none; }
+  .login-icp a:hover { color: var(--el-color-primary, #3b82f6); text-decoration: underline; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<script type="text/x-template" id="login-tpl">
+  <div class="login-wrap">
+    <el-card class="login-card" shadow="always">
+      <div class="login-brand">
+        <img class="brand-logo" :src="brandLogo" :alt="siteName">
+      </div>
+      <div class="login-sub">{{ siteName }} · 登录</div>
+
+      <el-alert v-if="error" :title="error" type="error" show-icon :closable="false"
+                style="margin-bottom:16px" />
+
+      <el-form @keyup.enter="submit" size="large">
+        <el-form-item label="用户名">
+          <el-input v-model="username" placeholder="请输入用户名" autofocus />
+        </el-form-item>
+        <el-form-item label="密码">
+          <el-input v-model="password" type="password" placeholder="请输入密码" show-password />
+        </el-form-item>
+        <el-button type="primary" size="large" style="width:100%" :loading="loading" @click="submit">
+          登 录
+        </el-button>
+      </el-form>
+
+      <div class="login-hint">演示账号：demo-admin（密码任意）</div>
+
+      <div class="login-icp" v-if="siteIcp">
+        <a :href="siteIcpLink" target="_blank" rel="noopener">{{ siteIcp }}</a>
+      </div>
+    </el-card>
+  </div>
+</script>
+
+<script src="/static/vendor/vue/vue.global.prod.js"></script>
+<script src="/static/vendor/element-plus/index.full.min.js"></script>
+<script src="/static/vendor/icons/index.iife.min.js"></script>
+<script src="/static/vendor/workdesktop-ai/index.umd.js"></script>
+<script>
+  const { WorkDesktop } = window.WorkDesktop;
+  const ElementPlus = window.ElementPlus;
+
+  const app = Vue.createApp({
+    template: '#login-tpl',
+    setup() {
+      const username = Vue.ref({:json_encode($username, JSON_UNESCAPED_UNICODE)});
+      const password = Vue.ref('');
+      const error = Vue.ref({:json_encode($error, JSON_UNESCAPED_UNICODE)});
+      const loading = Vue.ref(false);
+      const redirect = Vue.ref({:json_encode($redirect, JSON_UNESCAPED_UNICODE)});
+      // 全局设置（登录页可见安全子集）：站点名 / 备案号 / logo
+      const siteName = Vue.ref({:json_encode($name, JSON_UNESCAPED_UNICODE)});
+      const siteIcp = Vue.ref({:json_encode($icp, JSON_UNESCAPED_UNICODE)});
+      const siteIcpLink = Vue.ref({:json_encode($icpLink, JSON_UNESCAPED_UNICODE)});
+      const siteLogoUrl = Vue.ref({:json_encode($logoUrl, JSON_UNESCAPED_UNICODE)});
+      const brandLogo = Vue.computed(() => siteLogoUrl.value || '/brand/logo.svg');
+      const action = '/admin/auth/doLogin';
+
+      function submit() {
+        if (loading.value) { return; }
+        loading.value = true;
+        // 原生 Form POST，触发浏览器 302 跟随，完整保留 UAIS 登录流程
+        const form = document.createElement('form');
+        form.method = 'post';
+        form.action = action;
+        const u = document.createElement('input'); u.type = 'hidden'; u.name = 'username'; u.value = username.value;
+        const p = document.createElement('input'); p.type = 'hidden'; p.name = 'password'; p.value = password.value;
+        form.appendChild(u); form.appendChild(p);
+        if (redirect.value) {
+          const r = document.createElement('input'); r.type = 'hidden'; r.name = 'redirect'; r.value = redirect.value;
+          form.appendChild(r);
+        }
+        document.body.appendChild(form);
+        form.submit();
+      }
+
+      return { username, password, error, loading, submit, siteName, siteIcp, siteIcpLink, brandLogo };
+    }
+  });
+
+  // 全局注册 ElementPlus 图标，供 WdStation 的 icon 名称字符串解析
+  for (const [name, comp] of Object.entries(window.ElementPlusIconsVue)) {
+    app.component(name, comp);
+  }
+
+  app.use(ElementPlus);
+  app.use(WorkDesktop);
+  app.mount('#app');
+</script>
+</body>
+</html>

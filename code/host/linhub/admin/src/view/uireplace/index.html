@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>界面替换管理 - LinHub 林枢</title>
+  <link rel="icon" type="image/svg+xml" href="/brand/favicon.svg">
+  <link rel="stylesheet" href="/static/vendor/element-plus/index.css">
+  <link rel="stylesheet" href="/static/vendor/workdesktop-ai/style.css">
+  <style>
+    html,
+    body,
+    #app {
+      height: 100%;
+      margin: 0;
+    }
+
+    .ur-page {
+      height: 100%;
+    }
+
+    .ur-body {
+      padding: 4px 0 24px;
+    }
+
+    .ur-title-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin: 0 0 12px;
+    }
+
+    .ur-card {
+      border: 1px solid var(--el-border-color-lighter, #e4e7ed);
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 18px;
+      background: #fff;
+    }
+
+    .ur-card h3 {
+      margin: 0 0 12px;
+      font-size: 15px;
+    }
+
+    .ur-mono {
+      font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+      font-size: 12px;
+    }
+
+    .ur-group-head {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .ur-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 2px 10px;
+      border-radius: 12px;
+      font-size: 12px;
+    }
+
+    .ur-chip-active {
+      background: #ecf5ff;
+      color: #409eff;
+    }
+
+    .ur-chip-default {
+      background: #f4f4f5;
+      color: #909399;
+    }
+
+    .ur-red {
+      color: #d03050;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="app"></div>
+
+  <script type="text/x-template" id="ur-tpl">
+          <wd-panel :border="true">
+            <wd-tips type="box" style="margin-bottom:12px">
+              查看并选择各功能包对平台页面的替换候选；超管选择生效，非法 target 自动标红。
+            </wd-tips>
+            <div style="margin-bottom:12px">
+              <el-tag type="info" effect="plain">可替换页面：{{ state.replaceablePages.join('、') || '（无）' }}</el-tag>
+            </div>
+
+          <!-- ── 候选分组 ── -->
+          <div v-loading="loading" element-loading-text="加载中...">
+          <template v-if="state.groups.length">
+            <div v-for="g in state.groups" :key="g.target" class="ur-card"
+                 :style="g.invalid ? { borderColor: '#fbc4c4', background: '#fff8f8' } : {}">
+              <div class="ur-group-head" style="margin-bottom:12px">
+                <h3 style="margin:0">{{ g.invalid ? '非法 target' : '可替换目标' }}</h3>
+                <span class="ur-mono ur-red" v-if="g.invalid">{{ g.target }}（不在平台清单，不可选择）</span>
+                <span class="ur-mono" v-else>{{ g.target }}</span>
+                <span class="ur-chip" :class="g.active.resolved ? 'ur-chip-active' : 'ur-chip-default'">
+                  生效：{{ g.active.resolved || '平台默认页' }}
+                </span>
+              </div>
+
+              <wd-data-grid :data-source="g.candidates" border stripe table-size="small" :with-index="false" :with-pager="false">
+                <el-table-column prop="short" label="功能包" min-width="120" />
+                <el-table-column prop="label" label="替换说明" min-width="180" />
+                <el-table-column prop="priority" label="优先级" width="90" />
+                <el-table-column prop="view" label="视图" min-width="160">
+                  <template #default="{ row }"><span class="ur-mono" style="color:#6b7280">{{ row.view }}</span></template>
+                </el-table-column>
+                <el-table-column label="状态" width="110">
+                  <template #default="{ row }">
+                    <el-tag v-if="g.active.chosen === row.short" type="success" size="small">已显式选择</el-tag>
+                    <el-tag v-else-if="g.active.resolved === row.short" type="warning" size="small">按优先级生效</el-tag>
+                    <span v-else style="color:#c0c4cc">—</span>
+                  </template>
+                </el-table-column>
+                <el-table-column label="操作" width="140" fixed="right">
+                  <template #default="{ row }">
+                    <el-button-group>
+                    <el-button size="small" type="primary" plain :disabled="g.invalid || g.active.chosen === row.short"
+                               @click="doChoose(g.target, row.short)">选择生效</el-button>
+                    </el-button-group>
+                  </template>
+                </el-table-column>
+                <template #empty><el-empty description="该目标暂无候选声明" :image-size="60" /></template>
+              </wd-data-grid>
+
+              <div style="margin-top:10px;display:flex;justify-content:flex-end">
+                <el-button v-if="g.active.chosen" size="small" :disabled="g.invalid" @click="doReset(g.target)">
+                  回退平台默认页
+                </el-button>
+              </div>
+            </div>
+          </template>
+          <el-empty v-else-if="!loading" description="当前没有任何功能包声明界面替换候选" :image-size="90" />
+          </div>
+          </wd-panel>
+</script>
+
+  <script src="/static/vendor/vue/vue.global.prod.js"></script>
+  <script src="/static/vendor/element-plus/index.full.min.js"></script>
+  <script src="/static/vendor/icons/index.iife.min.js"></script>
+  <script src="/static/vendor/workdesktop-ai/index.umd.js"></script>
+  <script>
+    const WD = window.WorkDesktop;
+    const ElementPlus = window.ElementPlus;
+    const { WorkDesktop } = WD;
+    const { ref, reactive } = Vue;
+
+    const app = Vue.createApp({
+      template: '#ur-tpl',
+      setup() {
+        const loading = ref(false);
+        const state = reactive({ groups: [], replaceablePages: [] });
+
+        async function loadData() {
+          loading.value = true;
+          try {
+            const res = await WD.request.get('/admin/uireplace/rows');
+            if (!res.success) {
+              ElementPlus.ElMessage.error(res.message || '加载失败');
+              return;
+            }
+            state.groups = res.data.groups || [];
+            state.replaceablePages = res.data.replaceablePages || [];
+          } finally {
+            loading.value = false;
+          }
+        }
+
+        async function doChoose(target, short) {
+          try {
+            await ElementPlus.ElMessageBox.confirm(
+              `确认选择功能包「${short}」替换目标页「${target}」？`,
+              '确认替换',
+              { confirmButtonText: '确认生效', cancelButtonText: '取消', type: 'info' }
+            );
+          } catch (_) {
+            return;
+          }
+          const res = await WD.request.post('/admin/uireplace/choose', { target, short });
+          if (res.success) {
+            ElementPlus.ElMessage.success(res.message);
+            await loadData();
+          } else {
+            ElementPlus.ElMessage.error(res.message || '操作失败');
+          }
+        }
+
+        async function doReset(target) {
+          try {
+            await ElementPlus.ElMessageBox.confirm(
+              `确认就目标页「${target}」回退平台默认页？`,
+              '回退默认页',
+              { confirmButtonText: '确认回退', cancelButtonText: '取消', type: 'warning' }
+            );
+          } catch (_) {
+            return;
+          }
+          const res = await WD.request.post('/admin/uireplace/choose', { target, short: '' });
+          if (res.success) {
+            ElementPlus.ElMessage.success(res.message);
+            await loadData();
+          } else {
+            ElementPlus.ElMessage.error(res.message || '操作失败');
+          }
+        }
+
+        loadData();
+
+        return { state, loading, doChoose, doReset };
+      }
+    });
+
+    for (const [name, comp] of Object.entries(window.ElementPlusIconsVue)) {
+      app.component(name, comp);
+    }
+    app.use(ElementPlus);
+    app.use(WorkDesktop);
+    app.mount('#app');
+  </script>
+</body>
+
+</html>

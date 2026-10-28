@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>登录态查看 - LinHub 林枢</title>
+  <link rel="icon" type="image/svg+xml" href="/brand/favicon.svg">
+  <link rel="stylesheet" href="/static/vendor/element-plus/index.css">
+  <link rel="stylesheet" href="/static/vendor/workdesktop-ai/style.css">
+  <style>
+    html, body, #app { height: 100%; margin: 0; }
+    body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif; }
+    .ls-page { height: 100%; padding: 16px 20px 24px; box-sizing: border-box; }
+    .ls-mono { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
+    .ls-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 14px; }
+    .ls-json { background: var(--el-fill-color-light, #f5f7fa); border-radius: 6px; padding: 12px; margin: 0; white-space: pre-wrap; word-break: break-all; font-size: 12px; line-height: 1.6; }
+  </style>
+</head>
+
+<body>
+  <div id="app"></div>
+
+  <script type="text/x-template" id="ls-tpl">
+    <div class="ls-page" v-loading="loading" element-loading-text="加载中...">
+      <wd-panel :border="true">
+        <wd-tips type="box" style="margin-bottom:12px">
+          登录状态服务（LS-6）实时只读快照：展示当前访问者在本次请求中被各功能包读取到的身份实际值。游客态同样可正常查看，不抛异常。
+        </wd-tips>
+
+        <div class="ls-grid">
+          <div>
+            <h3 style="margin:0 0 10px;font-size:15px">身份快照</h3>
+            <el-descriptions :column="1" border>
+              <el-descriptions-item label="登录状态">
+                <el-tag size="small" :type="snap.is_login ? 'success' : 'info'">
+                  {{ snap.is_login ? '已登录' : '游客' }}
+                </el-tag>
+              </el-descriptions-item>
+              <el-descriptions-item label="guest">{{ snap.guest ? 'true' : 'false' }}</el-descriptions-item>
+              <el-descriptions-item label="user_id">
+                <span class="ls-mono">{{ snap.user_id || '—' }}</span>
+              </el-descriptions-item>
+              <el-descriptions-item label="username">
+                <span class="ls-mono">{{ snap.username || '—' }}</span>
+              </el-descriptions-item>
+              <el-descriptions-item label="display_name">{{ snap.display_name || '—' }}</el-descriptions-item>
+              <el-descriptions-item label="最后登录时间">
+                <span v-if="snap.last_login_at" class="ls-mono">{{ snap.last_login_at }}</span>
+                <span v-else style="color:#bbb">还未登录</span>
+              </el-descriptions-item>
+              <el-descriptions-item label="is_super_admin">
+                <el-tag size="small" :type="snap.is_super_admin ? 'danger' : 'info'" effect="plain">
+                  {{ snap.is_super_admin ? '是' : '否' }}
+                </el-tag>
+              </el-descriptions-item>
+              <el-descriptions-item label="角色 tags">
+                <template v-if="snap.tags && snap.tags.length">
+                  <el-tag v-for="t in snap.tags" :key="t" size="small" style="margin:2px 4px 2px 0">{{ t }}</el-tag>
+                </template>
+                <span v-else style="color:#bbb">—</span>
+              </el-descriptions-item>
+              <el-descriptions-item label="角色 roles">
+                <template v-if="snap.roles && snap.roles.length">
+                  <el-tag v-for="r in snap.roles" :key="r" size="small" type="warning" effect="plain" style="margin:2px 4px 2px 0">{{ r }}</el-tag>
+                </template>
+                <span v-else style="color:#bbb">—</span>
+              </el-descriptions-item>
+            </el-descriptions>
+          </div>
+
+          <div>
+            <h3 style="margin:0 0 10px;font-size:15px">服务端环境</h3>
+            <el-descriptions :column="1" border>
+              <el-descriptions-item label="服务器时间">
+                <span class="ls-mono">{{ server.time || '—' }}</span>
+              </el-descriptions-item>
+              <el-descriptions-item label="PHP 版本">
+                <span class="ls-mono">{{ server.php || '—' }}</span>
+              </el-descriptions-item>
+            </el-descriptions>
+
+            <h3 style="margin:18px 0 10px;font-size:15px">原始 JSON</h3>
+            <pre class="ls-json">{{ raw }}</pre>
+            <div style="margin-top:10px">
+              <el-button size="small" :icon="Refresh" @click="load">刷新快照</el-button>
+            </div>
+          </div>
+        </div>
+      </wd-panel>
+    </div>
+  </script>
+
+  <script src="/static/vendor/vue/vue.global.prod.js"></script>
+  <script src="/static/vendor/element-plus/index.full.min.js"></script>
+  <script src="/static/vendor/icons/index.iife.min.js"></script>
+  <script src="/static/vendor/workdesktop-ai/index.umd.js"></script>
+  <script>
+    const WD = window.WorkDesktop;
+    const ElementPlus = window.ElementPlus;
+    const { WorkDesktop } = WD;
+    const { ref, reactive } = Vue;
+
+    const app = Vue.createApp({
+      template: '#ls-tpl',
+      setup() {
+        const loading = ref(false);
+        const snap = reactive({
+          is_login: false, guest: true, user_id: '', username: '',
+          display_name: '', last_login_at: '', is_super_admin: false, tags: [], roles: []
+        });
+        const server = reactive({ time: '', php: '' });
+        const raw = ref('');
+
+        async function load() {
+          loading.value = true;
+          try {
+            const res = await WD.request.get('/admin/login_state_admin/snapshot');
+            if (!res.success) {
+              ElementPlus.ElMessage.error(res.message || '加载失败');
+              return;
+            }
+            const data = res.data || {};
+            Object.assign(snap, data.snapshot || {});
+            Object.assign(server, data.server || {});
+            raw.value = JSON.stringify(data, null, 2);
+          } finally {
+            loading.value = false;
+          }
+        }
+
+        load();
+        return { loading, snap, server, raw, load };
+      }
+    });
+
+    for (const [name, comp] of Object.entries(window.ElementPlusIconsVue)) {
+      app.component(name, comp);
+    }
+    app.use(ElementPlus);
+    app.use(WorkDesktop);
+    app.mount('#app');
+  </script>
+</body>
+
+</html>

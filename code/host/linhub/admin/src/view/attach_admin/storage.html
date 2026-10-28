@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>存储配置 - LinHub 林枢</title>
+  <link rel="icon" type="image/svg+xml" href="/brand/favicon.svg">
+  <link rel="stylesheet" href="/static/vendor/element-plus/index.css">
+  <link rel="stylesheet" href="/static/vendor/workdesktop-ai/style.css">
+  <style>
+    html, body, #app { height: 100%; margin: 0; }
+    body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif; }
+    .st-page { height: 100%; padding: 16px 20px 24px; box-sizing: border-box; }
+    .st-mono { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
+    .st-card { border: 1px solid var(--el-border-color-light, #e4e7ed); border-radius: 8px; padding: 16px; background: var(--el-bg-color, #fff); margin-bottom: 14px; }
+    .st-card h3 { margin: 0 0 12px; font-size: 15px; }
+  </style>
+</head>
+
+<body>
+  <div id="app"></div>
+
+  <script type="text/x-template" id="st-tpl">
+    <div class="st-page" v-loading="loading" element-loading-text="加载中...">
+      <wd-panel :border="true">
+        <wd-tips type="box" style="margin-bottom:12px">
+          附件托管服务（AT-11）存储驱动与限制的只读运行态视图。存储密钥（七牛 AK/SK）与路径等配置统一由服务器 .env（ATTACH_*）管理，本页不回显任何密钥原文，仅展示是否已配置。
+        </wd-tips>
+
+        <!-- 当前驱动 -->
+        <div class="st-card">
+          <h3>当前生效驱动</h3>
+          <el-descriptions :column="3" border>
+            <el-descriptions-item label="驱动">
+              <el-tag size="small" type="primary" effect="dark">{{ cfg.driver }}</el-tag>
+            </el-descriptions-item>
+            <el-descriptions-item label="本地存储根目录">
+              <span class="st-mono">{{ cfg.local_root || '—' }}</span>
+            </el-descriptions-item>
+            <el-descriptions-item label="单文件大小上限">
+              {{ bytes(cfg.max_size_bytes) }}
+              <span class="st-mono" style="color:#909399">（{{ cfg.max_size_raw }}）</span>
+            </el-descriptions-item>
+            <el-descriptions-item label="允许的扩展名" :span="3">
+              <el-tag v-for="t in cfg.allow_types" :key="t" size="small" effect="plain" style="margin:2px 6px 2px 0">{{ t }}</el-tag>
+            </el-descriptions-item>
+          </el-descriptions>
+          <div style="margin-top:12px">
+            <el-button type="primary" plain :icon="Connection" :loading="testing.current"
+              @click="testDriver('')">测试当前驱动（{{ cfg.driver }}）</el-button>
+          </div>
+        </div>
+
+        <!-- 七牛云 -->
+        <div class="st-card">
+          <h3>七牛云对象存储</h3>
+          <el-descriptions :column="2" border>
+            <el-descriptions-item label="AK/SK 已配置">
+              <el-tag size="small" :type="cfg.qiniu && cfg.qiniu.configured ? 'success' : 'info'">
+                {{ cfg.qiniu && cfg.qiniu.configured ? '已配置' : '未配置' }}
+              </el-tag>
+            </el-descriptions-item>
+            <el-descriptions-item label="SDK 可用">
+              <el-tag size="small" :type="cfg.qiniu && cfg.qiniu.sdk_available ? 'success' : 'warning'">
+                {{ cfg.qiniu && cfg.qiniu.sdk_available ? '可用' : '不可用（缺少 qiniu/php-sdk）' }}
+              </el-tag>
+            </el-descriptions-item>
+            <el-descriptions-item label="Bucket">
+              <span class="st-mono">{{ (cfg.qiniu && cfg.qiniu.bucket) || '—' }}</span>
+            </el-descriptions-item>
+            <el-descriptions-item label="访问域名已设置">
+              <el-tag size="small" :type="cfg.qiniu && cfg.qiniu.domain_set ? 'success' : 'info'">
+                {{ cfg.qiniu && cfg.qiniu.domain_set ? '已设置' : '未设置' }}
+              </el-tag>
+            </el-descriptions-item>
+          </el-descriptions>
+          <div style="margin-top:12px">
+            <el-button plain :icon="Connection" :loading="testing.qiniu" @click="testDriver('qiniu')">测试七牛驱动</el-button>
+            <span style="margin-left:10px;font-size:12px;color:#909399">
+              切换驱动请修改 .env 的 ATTACH_DRIVER 后由部署生效；本页仅做连通性探测。
+            </span>
+          </div>
+        </div>
+
+        <!-- 托管默认值与清理 -->
+        <div class="st-card">
+          <h3>托管默认值 / 自动清理</h3>
+          <el-descriptions :column="3" border>
+            <el-descriptions-item label="新附件默认公开">{{ cfg.default_public ? '是' : '否' }}</el-descriptions-item>
+            <el-descriptions-item label="默认有效期">{{ cfg.default_expire_days > 0 ? cfg.default_expire_days + ' 天' : '永不过期' }}</el-descriptions-item>
+            <el-descriptions-item label="缺图兜底">{{ cfg.fallback_enabled ? '开启' : '关闭' }}（{{ cfg.fallback_configured ? '自定义图' : '内置图' }}）</el-descriptions-item>
+            <el-descriptions-item label="过期/孤儿自动清理">
+              <el-tag size="small" :type="cfg.clean_enabled ? 'success' : 'info'">
+                {{ cfg.clean_enabled ? '已启用' : '未启用' }}
+              </el-tag>
+            </el-descriptions-item>
+            <el-descriptions-item label="清理计划">
+              <span class="st-mono">{{ cfg.clean_cron || '—' }}</span>
+            </el-descriptions-item>
+            <el-descriptions-item label="手动清理">
+              <el-button size="small" text type="primary" @click="goClean">前往清理记录页</el-button>
+            </el-descriptions-item>
+          </el-descriptions>
+        </div>
+      </wd-panel>
+    </div>
+  </script>
+
+  <script src="/static/vendor/vue/vue.global.prod.js"></script>
+  <script src="/static/vendor/element-plus/index.full.min.js"></script>
+  <script src="/static/vendor/icons/index.iife.min.js"></script>
+  <script src="/static/vendor/workdesktop-ai/index.umd.js"></script>
+  <script>
+    const WD = window.WorkDesktop;
+    const ElementPlus = window.ElementPlus;
+    const { WorkDesktop } = WD;
+    const { ref, reactive } = Vue;
+
+    const app = Vue.createApp({
+      template: '#st-tpl',
+      setup() {
+        const loading = ref(false);
+        const testing = reactive({ current: false, qiniu: false });
+        const cfg = reactive({
+          driver: '', local_root: '', max_size_raw: '', max_size_bytes: 0, allow_types: [],
+          default_public: false, default_expire_days: 0,
+          fallback_enabled: true, fallback_configured: false,
+          clean_enabled: false, clean_cron: '',
+          qiniu: { configured: false, sdk_available: false, bucket: '', domain_set: false }
+        });
+
+        async function load() {
+          loading.value = true;
+          try {
+            const res = await WD.request.get('/admin/attach_admin/config');
+            if (!res.success) {
+              ElementPlus.ElMessage.error(res.message || '加载失败');
+              return;
+            }
+            Object.assign(cfg, res.data);
+          } finally {
+            loading.value = false;
+          }
+        }
+
+        async function testDriver(driver) {
+          const key = driver === 'qiniu' ? 'qiniu' : 'current';
+          testing[key] = true;
+          try {
+            const res = await WD.request.post('/admin/attach_admin/driverTest', { driver });
+            if (res.success && res.data && res.data.ok) {
+              ElementPlus.ElMessage.success(res.data.message || '驱动连通正常');
+            } else {
+              ElementPlus.ElMessage.warning((res.data && res.data.message) || res.message || '驱动测试未通过');
+            }
+          } finally {
+            testing[key] = false;
+          }
+        }
+
+        function bytes(n) {
+          n = Number(n) || 0;
+          if (n < 1024) return n + ' B';
+          if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+          return (n / 1024 / 1024).toFixed(2) + ' MB';
+        }
+        function goClean() { window.location.href = '/admin/attach_admin/clean'; }
+
+        load();
+        return { loading, testing, cfg, testDriver, bytes, goClean };
+      }
+    });
+
+    for (const [name, comp] of Object.entries(window.ElementPlusIconsVue)) {
+      app.component(name, comp);
+    }
+    app.use(ElementPlus);
+    app.use(WorkDesktop);
+    app.mount('#app');
+  </script>
+</body>
+
+</html>

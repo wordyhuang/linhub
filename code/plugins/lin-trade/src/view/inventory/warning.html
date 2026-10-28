@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>库存预警 - 林销</title>
+  <link rel="icon" type="image/svg+xml" href="/brand/favicon.svg">
+  <link rel="stylesheet" href="/static/vendor/element-plus/index.css">
+  <link rel="stylesheet" href="/static/vendor/workdesktop-ai/style.css">
+  <style>
+    html,
+    body,
+    #app {
+      height: 100%;
+      margin: 0;
+    }
+
+    body {
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+
+    .trade-page {
+      height: 100%;
+      padding: 16px 20px 24px;
+      box-sizing: border-box;
+    }
+
+    .trade-toolbar {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      margin-bottom: 14px;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .trade-low {
+      color: #f56c6c;
+      font-weight: 600;
+    }
+
+    .trade-gap {
+      color: #e6a23c;
+      font-weight: 600;
+    }
+
+    .trade-hint {
+      font-size: 12px;
+      color: #999;
+      margin-top: 4px;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="app"></div>
+
+  <script type="text/x-template" id="warning-tpl">
+  <div class="trade-page">
+    <wd-tips type="box" style="display:flex;margin-bottom:12px">
+      库存预警列出当前库存低于安全库存的商品，并给出建议补货数量（缺口 = 安全库存 − 当前库存）。
+      可逐项「加入建议」后一键生成采购订单，同商品跨仓库的缺货量会自动合并。
+    </wd-tips>
+
+    <wd-panel :border="true" title="低库存预警"
+              description="安全库存取自商品档案；缺口数量为建议补货量，实际采购量请结合在途订单与销售预测调整。生成采购建议后会跳转到采购订单页并预填明细。">
+      <wd-data-grid ref="grid" api="/trade/inventory/rows" api-method="get" :active="true" :api-param="apiParam" :with-index="false" :tools="{ refresh: true }">
+        <template #toolbar>
+          <div class="trade-toolbar">
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+              <el-select v-model="whId" placeholder="全部仓库" clearable filterable style="width:170px"
+                         @change="onWhChange">
+                <el-option v-for="w in warehouses" :key="w.id" :label="w.name" :value="w.id" />
+              </el-select>
+              <span class="trade-hint">当前库存低于安全库存的商品自动列出</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px">
+              <span style="font-size:13px;color:#606266">已选 <b style="color:#e6a23c">{{ suggests.length }}</b> 项</span>
+              <el-button size="small" @click="clearSuggests" :disabled="!suggests.length">清空</el-button>
+              <el-button size="small" type="warning" :icon="ShoppingCart" :disabled="!suggests.length" @click="generate">
+                生成采购建议
+              </el-button>
+            </div>
+          </div>
+        </template>
+
+        <el-table-column label="商品" min-width="160" show-overflow-tooltip>
+          <template #default="{ row }">{{ row.product_name || '-' }}</template>
+        </el-table-column>
+        <el-table-column label="编号" min-width="110">
+          <template #default="{ row }">{{ row.product_no || '-' }}</template>
+        </el-table-column>
+        <el-table-column label="仓库" min-width="120">
+          <template #default="{ row }">{{ row.warehouse_name || '-' }}</template>
+        </el-table-column>
+        <el-table-column label="当前库存" width="110" align="right">
+          <template #default="{ row }">
+            <span class="trade-low">{{ fmtNum(row.quantity, 0) }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="安全库存" width="110" align="right">
+          <template #default="{ row }">{{ fmtNum(row.safety_stock, 0) }}</template>
+        </el-table-column>
+        <el-table-column label="缺口数量" width="110" align="right">
+          <template #default="{ row }">
+            <span class="trade-gap">{{ fmtNum(row.suggest_qty, 0) }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="110" align="center" fixed="right">
+          <template #default="{ row }">
+            <el-button size="small" text type="warning" @click="addSuggest(row)">加入建议</el-button>
+          </template>
+        </el-table-column>
+        <template #empty><el-empty :image-size="80" description="暂无库存预警，库存均高于安全水位" /></template>
+      </wd-data-grid>
+    </wd-panel>
+  </div>
+</script>
+
+  <script src="/static/vendor/vue/vue.global.prod.js"></script>
+  <script src="/static/vendor/element-plus/index.full.min.js"></script>
+  <script src="/static/vendor/icons/index.iife.min.js"></script>
+  <script src="/static/vendor/workdesktop-ai/index.umd.js"></script>
+  <script>
+    const WD = window.WorkDesktop;
+    const ElementPlus = window.ElementPlus;
+    // 数字/金额格式化：千分位 + 指定小数位，空值显示 '-'
+    function fmtNum(v, dec) {
+      if (v === null || v === undefined || v === '') return '-';
+      const n = Number(v);
+      if (isNaN(n)) return '-';
+      return n.toLocaleString('zh-CN', { minimumFractionDigits: dec, maximumFractionDigits: dec });
+    }
+    const { WorkDesktop } = WD;
+    const Icons = window.ElementPlusIconsVue;
+    const { ref, reactive, onMounted } = Vue;
+
+    const app = Vue.createApp({
+      template: '#warning-tpl',
+      setup() {
+        const ShoppingCart = Icons.ShoppingCart;
+
+        const grid = ref(null);
+        const whId = ref(null);
+        const warehouses = ref([]);
+        // 固定查询参数：始终只取预警行（库存低于安全库存），仓库为空表示全部
+        // 交给 api-param 随首次自动请求一并下发，避免挂载后重复 search 造成请求竞态
+        const apiParam = reactive({ filter: 'low', warehouse_id: '' });
+        // 采购建议清单：[{ product_id, name, warehouse, quantity }]，同商品跨仓库合并缺口
+        const suggests = ref([]);
+
+        function onWhChange() {
+          apiParam.warehouse_id = whId.value || '';
+          grid.value && grid.value.requestApi();
+        }
+
+        function addSuggest(row) {
+          const pid = Number(row.product_id);
+          const qty = Number(row.suggest_qty) || 0;
+          if (!pid || qty <= 0) { ElementPlus.ElMessage.info('该商品暂无缺口'); return; }
+          const exist = suggests.value.find(s => s.product_id === pid);
+          if (exist) {
+            exist.quantity += qty;
+            ElementPlus.ElMessage.info('该商品已在建议清单，缺口数量已合并');
+          } else {
+            suggests.value.push({
+              product_id: pid,
+              name: row.product_name || ('商品#' + pid),
+              warehouse: row.warehouse_name || '-',
+              quantity: qty
+            });
+            ElementPlus.ElMessage.success('已加入采购建议');
+          }
+        }
+
+        function clearSuggests() {
+          suggests.value = [];
+        }
+
+        // 生成采购建议：跳转采购开单页，经 URL 参数带入缺口数量（PG-INV-05 → PG-PUR-02）
+        function generate() {
+          if (!suggests.value.length) { ElementPlus.ElMessage.warning('请先从列表加入需要补货的商品'); return; }
+          const items = suggests.value.map(s => ({ product_id: s.product_id, quantity: s.quantity }));
+          window.location.href = '/trade/purchase/index?create=1&items=' + encodeURIComponent(JSON.stringify(items));
+        }
+
+        async function loadWarehouses() {
+          const res = await WD.request.get('/trade/warehouse/options');
+          if (res.success) warehouses.value = res.data || [];
+        }
+
+        onMounted(() => {
+          loadWarehouses();
+        });
+
+        return {
+          grid, whId, warehouses, apiParam, suggests, ShoppingCart,
+          onWhChange, addSuggest, clearSuggests, generate, fmtNum
+        };
+      }
+    });
+
+    for (const [name, comp] of Object.entries(window.ElementPlusIconsVue)) {
+      app.component(name, comp);
+    }
+    app.use(ElementPlus);
+    app.use(WorkDesktop);
+    app.mount('#app');
+  </script>
+</body>
+
+</html>

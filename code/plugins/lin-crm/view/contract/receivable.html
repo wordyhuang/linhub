@@ -1,0 +1,58 @@
+{* 林客 · 回款计划页（PG-CON-02 子页；关联 FR-CON-03/04/05） *}
+{include file="common/head" /}
+<div id="app">
+  <el-card shadow="never">
+    <template #header>回款计划与登记（合同 id：{{ contractId }}）</template>
+    <el-form inline>
+      <el-form-item><el-input-number v-model="period" :min="1" placeholder="期次" /></el-form-item>
+      <el-form-item><el-input-number v-model="amount" :min="0" :precision="2" placeholder="计划金额" /></el-form-item>
+      <el-form-item><el-date-picker v-model="planDate" type="date" value-format="YYYY-MM-DD"
+          placeholder="计划收款日" /></el-form-item>
+      <el-button v-permission="'crm:receivable:plan'" type="primary" @click="addPlan">添加期次</el-button>
+    </el-form>
+    <el-table :data="plans" border stripe>
+      <el-table-column prop="period_no" label="期次" width="80" />
+      <el-table-column prop="amount" label="计划金额" width="130" align="right" />
+      <el-table-column prop="plan_date" label="计划收款日" width="130" />
+      <el-table-column prop="received_amount" label="已收" width="130" align="right" />
+      <el-table-column prop="status" label="状态" width="100" />
+      <el-table-column label="回款登记" width="180" fixed="right">
+        <template #default="{row}">
+          <el-button link v-permission="'crm:receivable:register'" v-if="row.status!=='settled'"
+            @click="register(row)">登记收款</el-button>
+        </template>
+      </el-table-column>
+    </el-table>
+  </el-card>
+</div>
+<script>
+  crmPage(function () {
+    const V = Vue;
+    const qs = new URLSearchParams(location.search);
+    const state = V.reactive({
+      contractId: Number(qs.get('contract_id') || 0), plans: [],
+      period: 1, amount: 0, planDate: ''
+    });
+    function load() {
+      return crmRequest('/crm/contract/index', { page_size: 100 }).then(function (res) {
+        const c = (res.data.data || res.data).find(function (x) { return x.id === state.contractId; });
+        return crmRequest('/crm/contract/index', { contract_id: state.contractId, page_size: 1 });
+      }).then(function () { }); // 期次清单经 /crm/contract/receivable 查询返回后填充（联调期占位）
+    }
+    function addPlan() {
+      crmRequest('/crm/contract/plan-save', {
+        contract_id: state.contractId,
+        plans: [{ period_no: state.period, amount: state.amount, plan_date: state.planDate }]
+      })
+        .then(function () { ElementPlus.ElMessage.success('期次已保存'); load(); });
+    }
+    function register(row) {
+      ElementPlus.ElMessageBox.prompt('本次实收金额（支持部分收款，外部流水号可选：金额|流水号）').then(function (r) {
+        const parts = String(r.value).split('|');
+        return crmRequest('/crm/contract/receivable', { plan_id: row.id, amount: Number(parts[0]), trade_no: parts[1] || '' });
+      }).then(function () { load(); }).catch(function () { });
+    }
+    load();
+    return Object.assign({}, V.toRefs(state), { load, addPlan, register });
+  });
+</script>

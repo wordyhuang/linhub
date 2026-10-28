@@ -1,0 +1,32 @@
+# ── 项目约定排除目录 ──
+/document/
+/log/
+/output/
+/temp/
+
+# ── 工具缓存 ──
+.trae-html-share-packages/
+
+# ── 安全：本地环境配置与凭证 ──
+.env
+*.env.local
+
+# ── 运行时产物、依赖与生成数据 ──
+/code/host/runtime/
+/code/host/vendor/
+/code/host/package/staging/
+/code/host/data/attach/
+/code/host/data/integration/
+/code/host/data/log/
+/code/host/data/metrics/
+/code/host/data/platform-backups/
+/code/host/data/plugin-backups/
+/code/host/data/plugin-packout/
+/code/host/data/plugin-staging/
+/code/host/data/plugin-disabled/
+
+# ── 编辑器与系统文件 ──
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

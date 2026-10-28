@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>权限组管理 - LinHub 林枢</title>
+  <link rel="icon" type="image/svg+xml" href="/brand/favicon.svg">
+  <link rel="stylesheet" href="/static/vendor/element-plus/index.css">
+  <link rel="stylesheet" href="/static/vendor/workdesktop-ai/style.css">
+  <style>
+    html,
+    body,
+    #app {
+      height: 100%;
+      margin: 0;
+    }
+
+    body {
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+
+    .group-page {
+      height: 100%;
+      padding: 16px 20px 24px;
+      box-sizing: border-box;
+    }
+
+    .group-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      margin-bottom: 14px;
+      gap: 12px;
+    }
+
+    .perm-count {
+      color: var(--wd-text-color-secondary, #6b7280);
+    }
+
+    .perm-group {
+      margin-bottom: 12px;
+    }
+
+    .perm-check {
+      margin-right: 10px;
+    }
+
+    .perm-title {
+      display: inline-block;
+      margin-right: 6px;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="app"></div>
+
+  <script type="text/x-template" id="group-tpl">
+  <div class="group-page">
+    <wd-panel :border="true">
+      <wd-tips type="box" style="margin-bottom:12px">
+        权限组聚合一批权限点（T5.3），挂接保存由后端校验权限码是否已登记。
+      </wd-tips>
+
+      <wd-data-grid ref="grid" api="/admin/group/rows" api-method="get" :active="true" filter="group" :with-index="false">
+        <template #toolbar>
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+            
+            <el-input v-model="keyword" placeholder="按权限组名称搜索" size="small" clearable style="width:200px" @keyup.enter="doSearch" @clear="doSearch" />
+            
+            <el-button size="small" type="primary" @click="doSearch">搜索</el-button>
+          <wd-drawer-button label="新增权限组" drawer-size="50%" size="small" title="新增权限组" type="primary" filter="group">
+            <template #default>
+              <el-form label-width="90px">
+                <el-form-item label="组名称" required>
+                  <el-input v-model="form.name" placeholder="输入权限组名称" maxlength="40" />
+                </el-form-item>
+                <el-form-item label="针对角色" :style="{ marginBottom: '2px' }">
+                  <el-select v-model="form.roles" multiple placeholder="不选=不限角色" clearable style="width:100%">
+                    <el-option v-for="o in roleOptions" :key="o.type" :label="o.name + '（' + o.type + '）'" :value="o.type" />
+                  </el-select>
+                </el-form-item>
+              </el-form>
+            </template>
+            <template #footer="f">
+              <el-button @click="f.close">取消</el-button>
+              <wd-api-button label="保存" type="primary" api="/admin/group/save"
+                             :api-param="{ mode: 'create', name: form.name, roles: form.roles }"
+                             head-refresh-datagrid="group" @api-success="f.close">保存</wd-api-button>
+            </template>
+          </wd-drawer-button>
+          </div>
+        </template>
+      <el-table-column prop="name" label="名称" min-width="200" />
+      <el-table-column label="针对角色" min-width="160">
+        <template #default="{ row }">
+          <template v-if="row.roles && row.roles.length">
+            <el-tag v-for="t in row.roles" :key="t" size="small" type="warning" effect="plain" style="margin-right:6px">{{ roleTypeName(t) }}</el-tag>
+          </template>
+          <el-tag v-else size="small" type="info" effect="plain">不限角色</el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column label="权限项数" width="140">
+        <template #default="{ row }">
+          <el-tooltip :content="(row.permMap && row.permMap.length ? row.permMap.join('、') : '未挂接任何权限项')" placement="top">
+            <el-tag size="small" :type="row.permCount > 0 ? 'success' : 'info'" effect="plain">{{ row.permCount }} 项</el-tag>
+          </el-tooltip>
+        </template>
+      </el-table-column>
+      <el-table-column label="用户数" width="120">
+        <template #default="{ row }">
+          <el-tag size="small" :type="row.userCount > 0 ? 'success' : 'info'" effect="plain">{{ row.userCount }} 人</el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column label="操作" width="230" fixed="right">
+        <template #default="{ row }">
+          <el-button-group size="small">
+          <wd-drawer-button label="权限项" title="权限项挂接" type="primary" size="small" filter="group" @open="openPerms(row)">
+            <template #default="{ close }">
+              <div v-if="permDlg.row && permDlg.loaded">
+                <wd-tips type="box" style="margin-bottom:12px">
+                  将鼠标悬停在权限项名称上，可查看该权限项的简介。
+                </wd-tips>
+                <div style="margin-bottom:12px">
+                  <span style="color:var(--wd-text-color-secondary,#6b7280);font-size:13px">本组针对角色：</span>
+                  <template v-if="permDlg.row.roles && permDlg.row.roles.length">
+                    <el-tag v-for="t in permDlg.row.roles" :key="t" size="small" type="warning" effect="plain" style="margin-right:6px">{{ roleTypeName(t) }}</el-tag>
+                  </template>
+                  <el-tag v-else size="small" type="info" effect="plain">不限角色</el-tag>
+                  <span style="margin-left:8px;color:var(--wd-text-color-secondary,#6b7280);font-size:13px">
+                    仅展示对以上角色并集可见的权限项{{ (permDlg.row.roles && permDlg.row.roles.length) ? '' : '（全部可见）' }}，已选 {{ permDlg.selected.length }} 项。
+                  </span>
+                </div>
+                <div class="perm-group" v-for="(list, gname) in visibleGrouped" :key="gname">
+                  <div style="font-weight:600;margin-bottom:6px;font-size:13px">{{ gname }}</div>
+                  <el-checkbox-group v-model="permDlg.selected">
+                    <el-checkbox class="perm-check" v-for="p in list" :key="p.code" :value="p.code">
+                      <el-tooltip :content="p.description || '暂无简介'" placement="top">
+                        <span class="perm-title">{{ p.title }}</span>
+                      </el-tooltip>
+                      <el-tooltip v-if="!p.open" :content="'仅可见角色：' + p.roles.join('、')" placement="top">
+                        <el-tag size="small" type="info" effect="plain">{{ p.roles.length }} 角色</el-tag>
+                      </el-tooltip>
+                    </el-checkbox>
+                  </el-checkbox-group>
+                </div>
+                <div v-if="!visiblePermissionCount" style="color:var(--wd-text-color-secondary,#6b7280);font-size:13px">
+                  当前针对角色下无可见权限项。
+                </div>
+              </div>
+            </template>
+            <template #footer="f">
+              <el-button @click="f.close">关闭</el-button>
+              <wd-api-button label="保存权限项" type="primary" api="/admin/group/perms"
+                             :api-param="{ id: permDlg.row && permDlg.row.id, codes: permDlg.selected }"
+                             @api-success="onPermsSaved(f)">保存权限项</wd-api-button>
+            </template>
+          </wd-drawer-button>
+
+          <wd-drawer-button label="用户" title="权限组用户" type="success" size="small" filter="group" @open="openUsers(row)">
+            <template #default="{ close }">
+              <div v-if="userDlg.row">
+                <wd-data-grid ref="userGrid"
+                              :active="userDlg.active"
+                              api="/admin/group/users"
+                              api-method="get"
+                              :api-param="{ group_id: userDlg.row.id }"
+                              row-key="id"
+                              :with-index="false"
+                              :border="true"
+                              with-selection
+                              selection-key="id"
+                              :model-value="userDlg.selected"
+                              @update:model-value="onUserSelect"
+                              @loaded="onUserGridLoaded"
+                              with-selection-cart>
+                  <el-table-column prop="name" label="姓名" min-width="160" />
+                  <el-table-column prop="refId" label="用户账户" min-width="200" />
+                </wd-data-grid>
+                <div style="margin-top:10px;color:var(--wd-text-color-secondary,#6b7280);font-size:13px">
+                  已选 <b>{{ userDlg.selected.length }}</b> 名用户，可点右上角「已选数据」查看/清理勾选。
+                  <span style="margin-left:8px">用户也可在「用户管理」中分配权限组。</span>
+                </div>
+              </div>
+            </template>
+            <template #footer="f">
+              <el-button @click="f.close">关闭</el-button>
+              <wd-api-button label="保存用户" type="primary" api="/admin/group/usersSave"
+                             :api-param="{ id: userDlg.row && userDlg.row.id, users: userDlg.selected }"
+                             head-refresh-datagrid="group" @api-success="f.close">保存用户</wd-api-button>
+            </template>
+          </wd-drawer-button>
+
+          <wd-drawer-button label="改名" title="改名权限组" type="warning" size="small" filter="group" @open="openEdit(row)">
+            <template #default>
+              <el-form label-width="90px">
+                <el-form-item label="组名称" required>
+                  <el-input v-model="form.name" placeholder="输入权限组名称" maxlength="40" />
+                </el-form-item>
+                <el-form-item label="针对角色" style="margin-bottom:2px">
+                  <el-select v-model="form.roles" multiple placeholder="不选=不限角色" clearable style="width:100%">
+                    <el-option v-for="o in roleOptions" :key="o.type" :label="o.name + '（' + o.type + '）'" :value="o.type" />
+                  </el-select>
+                </el-form-item>
+              </el-form>
+            </template>
+            <template #footer="f">
+              <el-button @click="f.close">取消</el-button>
+              <wd-api-button label="保存" type="primary" api="/admin/group/save"
+                             :api-param="{ mode: 'update', id: form.id, name: form.name, roles: form.roles }"
+                             head-refresh-datagrid="group" @api-success="f.close">保存</wd-api-button>
+            </template>
+          </wd-drawer-button>
+
+          <wd-popconfirm-button title="确认删除权限组？" api="/admin/group/delete" :api-param="{ id: row.id }"
+                                tip="删除后对该组已授权的用户将同步解除关联" type="danger" size="small" head-refresh-datagrid>删除</wd-popconfirm-button>
+          </el-button-group>
+        </template>
+      </el-table-column>
+      <template #empty><el-empty :image-size="80" description="暂无权限组" /></template>
+      </wd-data-grid>
+    </wd-panel>
+  </div>
+</script>
+
+  <script src="/static/vendor/vue/vue.global.prod.js"></script>
+  <script src="/static/vendor/element-plus/index.full.min.js"></script>
+  <script src="/static/vendor/icons/index.iife.min.js"></script>
+  <script src="/static/vendor/workdesktop-ai/index.umd.js"></script>
+  <script>
+    const WD = window.WorkDesktop;
+    const ElementPlus = window.ElementPlus;
+    const { WorkDesktop } = WD;
+    const { ref, reactive, computed } = Vue;
+
+    // 角色类型(键) → 显示名（与后端 RbacRoles::TYPE_NAMES 一致，作为列表展示的兜底映射）
+    const ROLE_TYPE_NAMES = {
+      'WORKER': '工作者',
+      'FUNCTIONAL_ADMIN': '功能管理员',
+      'SYSTEM_ADMIN': '系统管理员',
+      'SUPER_ADMIN': '超级管理员'
+    };
+
+    const app = Vue.createApp({
+      template: '#group-tpl',
+      setup() {
+        const grid = ref(null);
+        const keyword = ref('');
+        const userGrid = ref(null);
+        const form = reactive({ id: '', name: '', roles: [] });
+        const roleOptions = ref([]);
+        const permDlg = reactive({ row: null, loaded: false, selected: [], roleOptions: [], permissions: [], permMap: {} });
+        const userDlg = reactive({ row: null, active: false, selected: [] });
+
+        // 关键词搜索：携带 keyword 参数重新拉取列表（data-grid 重置到第一页）
+        function doSearch() {
+          grid.value && grid.value.search({ keyword: keyword.value.trim() });
+        }
+
+        // 角色类型键 → 显示名（优先 options 接口，兜底本地常量）
+        function roleTypeName(key) {
+          const opt = roleOptions.value.find(o => o.type === key);
+          return opt ? opt.name : (ROLE_TYPE_NAMES[key] || key);
+        }
+        // 该权限点对权限组针对角色并集是否可见（组未设角色=不限）
+        function visibleForGroup(p, roleKeys) {
+          if (p.open) return true;
+          if (!roleKeys || roleKeys.length === 0) return true;
+          return roleKeys.some(k => p.visibleFor?.[k] === true);
+        }
+
+        // 按权限点所属集群分组
+        const grouped = computed(() => {
+          const map = {};
+          for (const p of (permDlg.permissions || [])) {
+            const gname = p.group || '未分组';
+            (map[gname] = map[gname] || []).push(p);
+          }
+          for (const k in map) map[k].sort((a, b) => (a.title || '').localeCompare(b.title || ''));
+          return map;
+        });
+
+        // 仅保留对当前权限组针对角色并集可见的非空分组（组未设角色=不限）
+        const visibleGrouped = computed(() => {
+          const roleKeys = permDlg.row && Array.isArray(permDlg.row.roles) ? permDlg.row.roles : [];
+          const out = {};
+          for (const [g, lst] of Object.entries(grouped.value)) {
+            const vis = lst.filter(p => visibleForGroup(p, roleKeys));
+            if (vis.length) out[g] = vis;
+          }
+          return out;
+        });
+
+        function openCreate() {
+          loadRoleOptions();
+          form.id = '';
+          form.name = '';
+          form.roles = [];
+        }
+        function openEdit(row) {
+          loadRoleOptions();
+          form.id = row.id;
+          form.name = row.name;
+          form.roles = Array.isArray(row.roles) ? row.roles.slice() : [];
+        }
+        function loadRoleOptions() {
+          if (roleOptions.value.length) return;
+          WD.request.get('/admin/group/options').then(res => {
+            if (res.success) roleOptions.value = res.data.roleOptions || [];
+          });
+        }
+
+        // 该行的可见权限点总数（用于占位提示）
+        const visiblePermissionCount = computed(() => {
+          const roleKeys = permDlg.row && Array.isArray(permDlg.row.roles) ? permDlg.row.roles : [];
+          return (permDlg.permissions || []).filter(p => visibleForGroup(p, roleKeys)).length;
+        });
+
+        function openPerms(row) {
+          permDlg.row = row;
+          if (!permDlg.loaded) {
+            WD.request.get('/admin/group/options').then(res => {
+              if (!res.success) return;
+              permDlg.permissions = res.data.permissions || [];
+              permDlg.roleOptions = res.data.roleOptions || [];
+              permDlg.permMap = res.data.permMap || {};
+              permDlg.loaded = true;
+              initPermSelection();
+            });
+          } else {
+            initPermSelection();
+          }
+        }
+        // 仅展示对该权限组针对角色并集可见的权限项；已挂但不可见的不带入
+        function initPermSelection() {
+          const roleKeys = Array.isArray(permDlg.row.roles) ? permDlg.row.roles : [];
+          permDlg.selected = (permDlg.permMap[permDlg.row.id] || []).filter(code => {
+            const p = permDlg.permissions.find(x => x.code === code);
+            return p ? visibleForGroup(p, roleKeys) : false;
+          });
+        }
+        // wd-api-button 保存权限项成功后：同步本地快照避免回显陈旧，并关闭抽屉
+        function onPermsSaved(scope) {
+          permDlg.permMap[permDlg.row.id] = permDlg.selected.slice();
+          scope && scope.close && scope.close();
+        }
+
+        function onUserSelect(rows) {
+          userDlg.selected = (rows || []).slice();
+        }
+
+        function onUserGridLoaded(res) {
+          // 后端接口返回已属于该组的用户 id 列表，回填为初始勾选（data-grid 自动回显）
+          const payload = (res && res.data) ? res.data : res;
+          const sel = payload && payload.selected;
+          if (Array.isArray(sel)) {
+            userDlg.selected = sel.slice();
+          }
+        }
+
+        function openUsers(row) {
+          userDlg.row = row;
+          userDlg.selected = [];
+          userDlg.active = true;
+          const grid = userGrid.value;
+          if (grid && grid.requestApi) {
+            grid.requestApi({ group_id: row.id });
+          }
+        }
+
+        return { grid, keyword, doSearch, form, userGrid, permDlg, userDlg, grouped, visibleGrouped, visiblePermissionCount, roleOptions, roleTypeName, openCreate, openEdit, openPerms, onPermsSaved, openUsers, onUserSelect, onUserGridLoaded };
+      }
+    });
+
+    for (const [name, comp] of Object.entries(window.ElementPlusIconsVue)) {
+      app.component(name, comp);
+    }
+    app.use(ElementPlus);
+    app.use(WorkDesktop);
+    app.mount('#app');
+  </script>
+</body>
+
+</html>

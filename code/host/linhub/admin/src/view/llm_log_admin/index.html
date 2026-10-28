@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LLM 调用日志 - LinHub 林枢</title>
+  <link rel="icon" type="image/svg+xml" href="/brand/favicon.svg">
+  <link rel="stylesheet" href="/static/vendor/element-plus/index.css">
+  <link rel="stylesheet" href="/static/vendor/workdesktop-ai/style.css">
+  <style>
+    html, body, #app { height: 100%; margin: 0; }
+    body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif; }
+    .md-page { height: 100%; padding: 16px 20px 24px; box-sizing: border-box; overflow: auto; }
+    .md-mono { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
+    .md-filter { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; align-items: center; }
+    .md-pager { display: flex; justify-content: flex-end; margin-top: 12px; }
+    .md-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 12px; }
+    .md-stat-card { padding: 12px 16px; background: #f8fafc; border: 1px solid #e5e7eb; border-radius: 6px; }
+    .md-stat-label { color: #6b7280; font-size: 12px; margin-bottom: 4px; }
+    .md-stat-value { color: #111827; font-size: 20px; font-weight: 600; }
+    .md-text-block { background: #f8fafc; padding: 10px; border-radius: 4px; white-space: pre-wrap; word-break: break-all; max-height: 320px; overflow: auto; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
+  </style>
+</head>
+
+<body>
+  <div id="app"></div>
+
+  <script type="text/x-template" id="md-tpl">
+    <div class="md-page">
+      <wd-panel :border="true">
+        <wd-tips type="box" style="margin-bottom:12px">
+          LLM 网关调用日志（T10）：所有走 llmgateway 的调用都会落库 <span class="md-mono">lg_mgt_llm_call_log</span>，列表默认不返回 prompt_text / completion_text 大字段，点击行查看详情。
+        </wd-tips>
+
+        <div class="md-stats">
+          <div class="md-stat-card">
+            <div class="md-stat-label">今日总调用</div>
+            <div class="md-stat-value md-mono">{{ stats.total || 0 }}</div>
+          </div>
+          <div class="md-stat-card">
+            <div class="md-stat-label">今日成功</div>
+            <div class="md-stat-value md-mono" style="color:#16a34a">{{ stats.success || 0 }}</div>
+          </div>
+          <div class="md-stat-card">
+            <div class="md-stat-label">今日失败</div>
+            <div class="md-stat-value md-mono" style="color:#dc2626">{{ stats.failed || 0 }}</div>
+          </div>
+          <div class="md-stat-card">
+            <div class="md-stat-label">今日 token 消耗</div>
+            <div class="md-stat-value md-mono">{{ formatNumber(stats.tokens || 0) }}</div>
+          </div>
+        </div>
+
+        <form class="md-filter" @submit.prevent="search">
+          <el-input v-model="filters.caller" placeholder="caller（模糊）" style="width:180px" clearable @keyup.enter="search" />
+          <el-input v-model="filters.model_code" placeholder="model_code（模糊）" style="width:180px" clearable @keyup.enter="search" />
+          <el-select v-model="filters.status" placeholder="状态" style="width:120px" clearable>
+            <el-option label="成功" value="success" />
+            <el-option label="失败" value="failed" />
+          </el-select>
+          <el-select v-model="filters.call_type" placeholder="类型" style="width:140px" clearable>
+            <el-option label="chat" value="chat" />
+            <el-option label="chat_stream" value="chat_stream" />
+            <el-option label="embedding" value="embedding" />
+          </el-select>
+          <el-date-picker v-model="filters.date_range" type="daterange" range-separator="至" start-placeholder="开始日期" end-placeholder="结束日期" value-format="YYYY-MM-DD" style="width:280px" />
+          <el-button native-type="submit" type="primary" :icon="Search" :loading="loading">检索</el-button>
+          <el-button :icon="RefreshLeft" @click="reset">重置</el-button>
+        </form>
+
+        <wd-data-grid :data-source="rows" border stripe :with-index="false" :with-pager="false" v-loading="loading">
+          <el-table-column prop="created_at" label="发起时间" width="170" />
+          <el-table-column prop="caller_effective" label="实际 caller" min-width="150">
+            <template #default="{ row }"><span class="md-mono">{{ row.caller_effective }}</span></template>
+          </el-table-column>
+          <el-table-column prop="caller_declared" label="声明 caller" min-width="150">
+            <template #default="{ row }"><span class="md-mono">{{ row.caller_declared }}</span></template>
+          </el-table-column>
+          <el-table-column prop="model_code" label="模型" width="160">
+            <template #default="{ row }"><span class="md-mono">{{ row.model_code }}</span></template>
+          </el-table-column>
+          <el-table-column prop="call_type" label="类型" width="110">
+            <template #default="{ row }"><el-tag size="small">{{ row.call_type }}</el-tag></template>
+          </el-table-column>
+          <el-table-column label="状态" width="90">
+            <template #default="{ row }">
+              <el-tag size="small" :type="row.status === 'success' ? 'success' : 'danger'">{{ row.status }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="耗时" width="90">
+            <template #default="{ row }"><span class="md-mono">{{ row.cost_ms ? row.cost_ms + 'ms' : '-' }}</span></template>
+          </el-table-column>
+          <el-table-column label="tokens" width="100">
+            <template #default="{ row }"><span class="md-mono">{{ row.total_tokens || '-' }}</span></template>
+          </el-table-column>
+          <el-table-column label="错误" min-width="180" show-overflow-tooltip>
+            <template #default="{ row }">
+              <span v-if="row.error_code" class="md-mono" style="color:#dc2626">{{ row.error_code }}: {{ row.error_message }}</span>
+              <span v-else style="color:#9ca3af">-</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="80" fixed="right">
+            <template #default="{ row }">
+              <el-button size="small" text type="primary" @click="openDetail(row)">详情</el-button>
+            </template>
+          </el-table-column>
+          <template #empty><el-empty description="暂无调用日志" :image-size="80" /></template>
+        </wd-data-grid>
+
+        <div class="md-pager">
+          <el-pagination
+            v-model:current-page="page" v-model:page-size="size"
+            :total="total" :page-sizes="[20, 50, 100]"
+            layout="total, sizes, prev, pager, next, jumper"
+            @current-change="load" @size-change="onSizeChange" />
+        </div>
+      </wd-panel>
+
+      <el-drawer v-model="detailVisible" title="调用详情" size="60%">
+        <el-descriptions :column="2" border v-if="detail" size="small">
+          <el-descriptions-item label="ID">{{ detail.id }}</el-descriptions-item>
+          <el-descriptions-item label="发起时间">{{ detail.created_at }}</el-descriptions-item>
+          <el-descriptions-item label="实际 caller">{{ detail.caller_effective }}</el-descriptions-item>
+          <el-descriptions-item label="声明 caller">{{ detail.caller_declared }}</el-descriptions-item>
+          <el-descriptions-item label="模型 code">{{ detail.model_code }}</el-descriptions-item>
+          <el-descriptions-item label="类型">{{ detail.call_type }}</el-descriptions-item>
+          <el-descriptions-item label="状态">
+            <el-tag size="small" :type="detail.status === 'success' ? 'success' : 'danger'">{{ detail.status }}</el-tag>
+          </el-descriptions-item>
+          <el-descriptions-item label="耗时">{{ detail.cost_ms ? detail.cost_ms + ' ms' : '-' }}</el-descriptions-item>
+          <el-descriptions-item label="prompt_tokens">{{ detail.prompt_tokens || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="completion_tokens">{{ detail.completion_tokens || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="total_tokens">{{ detail.total_tokens || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="error_code">{{ detail.error_code || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="error_message" :span="2">{{ detail.error_message || '-' }}</el-descriptions-item>
+        </el-descriptions>
+
+        <h4 style="margin:16px 0 6px">Prompt</h4>
+        <div class="md-text-block">{{ detail.prompt_text || '(空)' }}</div>
+
+        <h4 style="margin:16px 0 6px">Completion</h4>
+        <div class="md-text-block">{{ detail.completion_text || '(空)' }}</div>
+      </el-drawer>
+    </div>
+  </script>
+
+  <script src="/static/vendor/vue/vue.global.prod.js"></script>
+  <script src="/static/vendor/element-plus/index.full.min.js"></script>
+  <script src="/static/vendor/icons/index.iife.min.js"></script>
+  <script src="/static/vendor/workdesktop-ai/index.umd.js"></script>
+  <script>
+    const WD = window.WorkDesktop;
+    const ElementPlus = window.ElementPlus;
+    const { WorkDesktop } = WD;
+    const { ref, reactive } = Vue;
+    const { Search, RefreshLeft } = window.ElementPlusIconsVue || {};
+
+    const app = Vue.createApp({
+      template: '#md-tpl',
+      setup() {
+        const loading = ref(false);
+        const rows = ref([]);
+        const total = ref(0);
+        const page = ref(1);
+        const size = ref(20);
+        const filters = reactive({ caller: '', model_code: '', status: '', call_type: '', date_range: null });
+        const stats = ref({});
+        const detailVisible = ref(false);
+        const detail = ref(null);
+
+        function qs(obj) {
+          const p = new URLSearchParams();
+          for (const [k, v] of Object.entries(obj)) {
+            if (v === '' || v == null) continue;
+            if (Array.isArray(v)) { p.append(k, v.join(',')); continue; }
+            p.append(k, v);
+          }
+          const s = p.toString();
+          return s ? '?' + s : '';
+        }
+
+        function formatNumber(n) {
+          if (n == null) return '-';
+          return Number(n).toLocaleString();
+        }
+
+        async function loadStats() {
+          try {
+            const res = await WD.request.get('/admin/llm_log_admin/stats');
+            if (res.success) stats.value = res.data || {};
+          } catch (e) { /* 静默 */ }
+        }
+
+        async function load() {
+          loading.value = true;
+          try {
+            const res = await WD.request.get('/admin/llm_log_admin/rows' + qs({
+              ...filters,
+              date_from: filters.date_range && filters.date_range[0] || '',
+              date_to: filters.date_range && filters.date_range[1] || '',
+              page: page.value, size: size.value
+            }));
+            if (!res.success) {
+              ElementPlus.ElMessage.error(res.message || '加载失败');
+              return;
+            }
+            rows.value = res.data.list || [];
+            total.value = res.data.total || 0;
+          } finally {
+            loading.value = false;
+          }
+        }
+
+        function search() { page.value = 1; load(); }
+        function reset() {
+          filters.caller = ''; filters.model_code = ''; filters.status = '';
+          filters.call_type = ''; filters.date_range = null;
+          page.value = 1; load();
+        }
+        function onSizeChange() { page.value = 1; load(); }
+
+        async function openDetail(row) {
+          try {
+            const res = await WD.request.get('/admin/llm_log_admin/detail?id=' + row.id);
+            if (!res.success) {
+              ElementPlus.ElMessage.error(res.message || '加载详情失败');
+              return;
+            }
+            detail.value = res.data;
+            detailVisible.value = true;
+          } catch (e) {
+            ElementPlus.ElMessage.error('加载详情失败');
+          }
+        }
+
+        loadStats();
+        load();
+
+        return {
+          loading, rows, total, page, size, filters, stats, detailVisible, detail,
+          load, search, reset, onSizeChange, openDetail, formatNumber,
+          Search, RefreshLeft
+        };
+      }
+    });
+
+    for (const [name, comp] of Object.entries(window.ElementPlusIconsVue)) {
+      app.component(name, comp);
+    }
+    app.use(ElementPlus);
+    app.use(WorkDesktop);
+    app.mount('#app');
+  </script>
+</body>
+
+</html>

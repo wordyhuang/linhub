@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>全局数据字典检索 - LinHub 林枢</title>
+  <link rel="icon" type="image/svg+xml" href="/brand/favicon.svg">
+  <link rel="stylesheet" href="/static/vendor/element-plus/index.css">
+  <link rel="stylesheet" href="/static/vendor/workdesktop-ai/style.css">
+  <style>
+    html, body, #app { height: 100%; margin: 0; }
+    body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif; }
+    .dd-page { height: 100%; padding: 16px 20px 24px; box-sizing: border-box; }
+    .dd-mono { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
+    .dd-filter { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+    .dd-pager { display: flex; justify-content: flex-end; margin-top: 12px; }
+    .dd-json { margin: 0; white-space: pre-wrap; word-break: break-all; font-size: 12px; line-height: 1.6; }
+    .dd-edit-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+    .dd-edit-title { font-weight: 600; font-size: 13px; color: #374151; }
+    .dd-edit-row { display: flex; gap: 8px; margin-bottom: 8px; align-items: center; }
+    .dd-edit-key { width: 180px; flex: none; }
+    .dd-edit-val { flex: 1; }
+  </style>
+</head>
+
+<body>
+  <div id="app"></div>
+
+  <script type="text/x-template" id="dd-tpl">
+    <div class="dd-page">
+      <wd-panel :border="true">
+        <wd-tips type="box" style="margin-bottom:12px">
+          数据字典服务（DD-9）超管全局视图：可跨所有功能包命名空间检索，含私有项。支持按值类型（单文本/对象/数组）差异化编辑修改字典值，修改操作留痕。
+        </wd-tips>
+
+        <form class="dd-filter" @submit.prevent="search">
+          <el-select v-model="filters.namespace" placeholder="命名空间" size="default" style="width:200px" clearable filterable>
+            <el-option v-for="ns in namespaces" :key="ns.namespace"
+              :label="ns.namespace + '（' + ns.count + '）'" :value="ns.namespace" />
+          </el-select>
+          <el-input v-model="filters.keyword" placeholder="键名关键字" style="width:220px" clearable @keyup.enter="search" />
+          <el-select v-model="filters.is_public" placeholder="公开性" style="width:130px" clearable>
+            <el-option label="公开" value="1" />
+            <el-option label="私有" value="0" />
+          </el-select>
+          <el-button native-type="submit" type="primary" :icon="Search" :loading="loading">检索</el-button>
+          <el-button :icon="RefreshLeft" @click="reset">重置</el-button>
+          <div style="flex:1"></div>
+          <el-tag type="info" effect="plain">总条目 {{ stats.total }}</el-tag>
+        </form>
+
+        <wd-data-grid :data-source="rows" border stripe :with-index="false" :with-pager="false" v-loading="loading">
+          <el-table-column prop="namespace" label="命名空间" min-width="140">
+            <template #default="{ row }"><span class="dd-mono">{{ row.namespace }}</span></template>
+          </el-table-column>
+          <el-table-column prop="dict_key" label="键名" min-width="200">
+            <template #default="{ row }"><span class="dd-mono">{{ row.dict_key }}</span></template>
+          </el-table-column>
+          <el-table-column label="值" min-width="180">
+            <template #default="{ row }">
+              <span class="dd-mono" style="word-break:break-all">{{ displayValue(row) }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="value_type" label="类型" width="90">
+            <template #default="{ row }"><el-tag size="small" effect="plain">{{ row.value_type }}</el-tag></template>
+          </el-table-column>
+          <el-table-column label="公开" width="80">
+            <template #default="{ row }">
+              <el-tag size="small" :type="row.is_public ? 'success' : 'info'">{{ row.is_public ? '公开' : '私有' }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="owner_pkg" label="托管方" width="120">
+            <template #default="{ row }"><span class="dd-mono">{{ row.owner_pkg || '—' }}</span></template>
+          </el-table-column>
+          <el-table-column prop="updated_at" label="更新时间" width="200" />
+          <el-table-column label="操作" width="150" fixed="right">
+            <template #default="{ row }">
+              <el-button size="small" text type="primary" @click="openDetail(row)">详情</el-button>
+              <el-button size="small" text type="primary" @click="openEdit(row)">修改</el-button>
+            </template>
+          </el-table-column>
+          <template #empty><el-empty description="暂无匹配的字典项" :image-size="80" /></template>
+        </wd-data-grid>
+
+        <div class="dd-pager">
+          <el-pagination
+            v-model:current-page="page" v-model:page-size="size"
+            :total="total" :page-sizes="[20, 50, 100]"
+            layout="total, sizes, prev, pager, next, jumper"
+            @current-change="load" @size-change="onSizeChange" />
+        </div>
+      </wd-panel>
+
+      <!-- 详情抽屉 -->
+      <el-drawer v-model="detailVisible" title="字典项详情" size="46%">
+        <div v-loading="detailLoading">
+          <el-descriptions :column="1" border>
+            <el-descriptions-item label="命名空间"><span class="dd-mono">{{ detail.namespace }}</span></el-descriptions-item>
+            <el-descriptions-item label="键名"><span class="dd-mono">{{ detail.dict_key }}</span></el-descriptions-item>
+            <el-descriptions-item label="值类型">{{ detail.value_type }}</el-descriptions-item>
+            <el-descriptions-item label="公开性">{{ detail.is_public ? '公开（只读）' : '私有' }}</el-descriptions-item>
+            <el-descriptions-item label="托管功能包"><span class="dd-mono">{{ detail.owner_pkg || '—' }}</span></el-descriptions-item>
+            <el-descriptions-item label="备注">{{ detail.remark || '—' }}</el-descriptions-item>
+            <el-descriptions-item label="创建时间">{{ detail.created_at }}</el-descriptions-item>
+            <el-descriptions-item label="更新时间">{{ detail.updated_at }}</el-descriptions-item>
+          </el-descriptions>
+
+          <h4 style="margin:16px 0 8px">解析值 value_parsed</h4>
+          <pre class="dd-json dd-mono" style="background:var(--el-fill-color-light,#f5f7fa);padding:10px;border-radius:6px">{{ prettyParsed(detail.value_parsed) }}</pre>
+
+          <h4 style="margin:16px 0 8px">原始值 value</h4>
+          <pre class="dd-json dd-mono" style="background:var(--el-fill-color-light,#f5f7fa);padding:10px;border-radius:6px">{{ detail.value }}</pre>
+        </div>
+      </el-drawer>
+
+      <!-- 修改抽屉：按值类型差异化编辑 -->
+      <el-drawer v-model="editVisible" title="修改字典项" size="54%">
+        <div v-loading="editLoading">
+          <el-descriptions :column="2" border size="small" style="margin-bottom:14px">
+            <el-descriptions-item label="命名空间"><span class="dd-mono">{{ editForm.namespace }}</span></el-descriptions-item>
+            <el-descriptions-item label="键名"><span class="dd-mono">{{ editForm.key }}</span></el-descriptions-item>
+            <el-descriptions-item label="值类型">
+              <el-tag size="small" effect="plain">{{ editForm.value_type }}</el-tag>
+            </el-descriptions-item>
+            <el-descriptions-item label="托管方"><span class="dd-mono">{{ editForm.owner_pkg || '—' }}</span></el-descriptions-item>
+          </el-descriptions>
+
+          <!-- 单文本 / 数字 / 布尔 / 空 -->
+          <template v-if="isScalar">
+            <el-form label-width="70px">
+              <el-form-item v-if="editForm.value_type === 'string'" label="值">
+                <el-input v-model="editForm.value" type="textarea" :rows="3" placeholder="单行/多行文本" />
+              </el-form-item>
+              <el-form-item v-else-if="editForm.value_type === 'int' || editForm.value_type === 'float'" label="值">
+                <el-input-number v-model="editForm.numValue"
+                  :precision="editForm.value_type === 'float' ? 4 : 0" :step="1" style="width:260px" />
+              </el-form-item>
+              <el-form-item v-else-if="editForm.value_type === 'bool'" label="值">
+                <el-switch v-model="editForm.boolValue" active-text="true" inactive-text="false" />
+              </el-form-item>
+              <el-form-item v-else label="值">
+                <el-tag type="info" effect="plain">空值（null）</el-tag>
+              </el-form-item>
+            </el-form>
+          </template>
+
+          <!-- JSON 对象：键值对编辑器 -->
+          <template v-else-if="isObjectJson">
+            <div class="dd-edit-head">
+              <span class="dd-edit-title">JSON 对象（键值对）</span>
+              <el-button size="small" :icon="Plus" @click="addObjRow">添加键</el-button>
+            </div>
+            <div v-for="(r, i) in objRows" :key="i" class="dd-edit-row">
+              <el-input v-model="r.k" placeholder="键名" class="dd-edit-key" />
+              <el-input v-model="r.v" placeholder="值：对象/数组可填 JSON（如 {\"a\":1} 或 [1,2]）" class="dd-edit-val" />
+              <el-button :icon="Delete" circle text type="danger" @click="objRows.splice(i, 1)" />
+            </div>
+            <el-empty v-if="!objRows.length" description="暂无键值，点击「添加键」开始" :image-size="50" />
+          </template>
+
+          <!-- JSON 数组：元素列表编辑器 -->
+          <template v-else-if="isArrayJson">
+            <div class="dd-edit-head">
+              <span class="dd-edit-title">JSON 数组（元素列表）</span>
+              <el-button size="small" :icon="Plus" @click="arrRows.push({ v: '' })">添加元素</el-button>
+            </div>
+            <div v-for="(r, i) in arrRows" :key="i" class="dd-edit-row">
+              <el-input v-model="r.v" placeholder="元素值：对象/数组可填 JSON" class="dd-edit-val" />
+              <el-button :icon="Delete" circle text type="danger" @click="arrRows.splice(i, 1)" />
+            </div>
+            <el-empty v-if="!arrRows.length" description="暂无元素，点击「添加元素」开始" :image-size="50" />
+          </template>
+
+          <el-form label-width="70px" style="margin-top:12px">
+            <el-form-item label="备注">
+              <el-input v-model="editForm.remark" placeholder="备注说明（可选）" />
+            </el-form-item>
+          </el-form>
+
+          <div style="margin-top:16px;text-align:right">
+            <el-button @click="editVisible = false">取消</el-button>
+            <el-button type="primary" :loading="saving" @click="saveEdit">保存修改</el-button>
+          </div>
+        </div>
+      </el-drawer>
+    </div>
+  </script>
+
+  <script src="/static/vendor/vue/vue.global.prod.js"></script>
+  <script src="/static/vendor/element-plus/index.full.min.js"></script>
+  <script src="/static/vendor/icons/index.iife.min.js"></script>
+  <script src="/static/vendor/workdesktop-ai/index.umd.js"></script>
+  <script>
+    const WD = window.WorkDesktop;
+    const ElementPlus = window.ElementPlus;
+    const { WorkDesktop } = WD;
+    const { ref, reactive, computed } = Vue;
+    const { Plus, Delete } = window.ElementPlusIconsVue || {};
+
+    const app = Vue.createApp({
+      template: '#dd-tpl',
+      setup() {
+        const loading = ref(false);
+        const detailLoading = ref(false);
+        const rows = ref([]);
+        const total = ref(0);
+        const page = ref(1);
+        const size = ref(20);
+        const filters = reactive({ namespace: '', keyword: '', is_public: '' });
+        const stats = reactive({ total: 0 });
+        const namespaces = ref([]);
+        const detailVisible = ref(false);
+        const detail = reactive({});
+
+        // —— 修改抽屉状态 ——
+        const editVisible = ref(false);
+        const editLoading = ref(false);
+        const saving = ref(false);
+        const editForm = reactive({
+          namespace: '', key: '', value_type: '', value: '', numValue: 0,
+          boolValue: false, remark: '', owner_pkg: '', parsed: null
+        });
+        const objRows = ref([]); // JSON 对象编辑行 [{k, v}]
+        const arrRows = ref([]); // JSON 数组编辑行 [{v}]
+        const isScalar = computed(() =>
+          ['string', 'int', 'float', 'bool', 'null'].includes(editForm.value_type));
+        const isObjectJson = computed(() =>
+          editForm.value_type === 'json' && editForm.parsed !== null
+          && typeof editForm.parsed === 'object' && !Array.isArray(editForm.parsed));
+        const isArrayJson = computed(() =>
+          editForm.value_type === 'json' && Array.isArray(editForm.parsed));
+
+        function qs(obj) {
+          const p = new URLSearchParams();
+          for (const [k, v] of Object.entries(obj)) { if (v !== '' && v != null) p.append(k, v); }
+          const s = p.toString();
+          return s ? '?' + s : '';
+        }
+
+        async function load() {
+          loading.value = true;
+          try {
+            const res = await WD.request.get('/admin/dict_admin/rows' + qs({
+              ...filters, page: page.value, size: size.value
+            }));
+            if (!res.success) {
+              ElementPlus.ElMessage.error(res.message || '加载失败');
+              return;
+            }
+            rows.value = res.data.list || [];
+            total.value = res.data.total || 0;
+            Object.assign(stats, res.data.stats || { total: 0 });
+          } finally {
+            loading.value = false;
+          }
+        }
+
+        async function loadOptions() {
+          const res = await WD.request.get('/admin/dict_admin/options');
+          if (!res.success) return;
+          namespaces.value = res.data.namespaces || [];
+          if (!stats.total) stats.total = res.data.total || 0;
+        }
+
+        function search() { page.value = 1; load(); }
+        function reset() {
+          filters.namespace = ''; filters.keyword = ''; filters.is_public = '';
+          page.value = 1; load();
+        }
+        function onSizeChange() { page.value = 1; load(); }
+
+        function displayValue(row) {
+          const v = row.value_parsed;
+          if (v === null || v === undefined) return row.value;
+          if (typeof v === 'object') {
+            const s = JSON.stringify(v);
+            return s.length > 60 ? s.slice(0, 60) + '…' : s;
+          }
+          const s = String(v);
+          return s.length > 60 ? s.slice(0, 60) + '…' : s;
+        }
+        function prettyParsed(v) {
+          if (v !== null && typeof v === 'object') {
+            try { return JSON.stringify(v, null, 2); } catch (e) { return String(v); }
+          }
+          return v === null || v === undefined ? 'null' : String(v);
+        }
+
+        async function openDetail(row) {
+          detailVisible.value = true;
+          detailLoading.value = true;
+          Object.keys(detail).forEach(k => delete detail[k]);
+          try {
+            const res = await WD.request.get('/admin/dict_admin/detail' + qs({
+              namespace: row.namespace, key: row.dict_key
+            }));
+            if (!res.success) {
+              ElementPlus.ElMessage.error(res.message || '详情加载失败');
+              return;
+            }
+            Object.assign(detail, res.data);
+          } finally {
+            detailLoading.value = false;
+          }
+        }
+
+        // —— 修改 ——
+        function addObjRow() { objRows.value.push({ k: '', v: '' }); }
+
+        /** 把编辑输入解析为 JSON 值：合法 JSON 文本解析（数字/布尔/对象/数组），否则保持字符串。 */
+        function parseVal(v) {
+          if (typeof v !== 'string') return v;
+          if (!v.trim()) return v;
+          try { return JSON.parse(v); } catch (e) { return v; }
+        }
+
+        async function openEdit(row) {
+          editVisible.value = true;
+          editLoading.value = true;
+          try {
+            const res = await WD.request.get('/admin/dict_admin/detail' + qs({
+              namespace: row.namespace, key: row.dict_key
+            }));
+            if (!res.success) {
+              ElementPlus.ElMessage.error(res.message || '详情加载失败');
+              return;
+            }
+            const d = res.data;
+            Object.assign(editForm, {
+              namespace: d.namespace, key: d.dict_key, value_type: d.value_type,
+              value: d.value_type === 'string' ? String(d.value_parsed ?? '') : '',
+              numValue: Number(d.value_parsed) || 0,
+              boolValue: !!d.value_parsed,
+              remark: d.remark || '', owner_pkg: d.owner_pkg || '',
+              parsed: d.value_parsed
+            });
+            // 按类型初始化编辑行
+            if (Array.isArray(d.value_parsed)) {
+              arrRows.value = d.value_parsed.map(v => ({ v: JSON.stringify(v) }));
+              objRows.value = [];
+            } else if (d.value_parsed !== null && typeof d.value_parsed === 'object') {
+              objRows.value = Object.entries(d.value_parsed).map(([k, v]) => ({ k, v: JSON.stringify(v) }));
+              arrRows.value = [];
+            } else {
+              objRows.value = []; arrRows.value = [];
+            }
+          } finally {
+            editLoading.value = false;
+          }
+        }
+
+        async function saveEdit() {
+          let value;
+          if (editForm.value_type === 'json') {
+            let built;
+            if (isArrayJson.value) {
+              built = arrRows.value.map(r => parseVal(r.v));
+            } else {
+              built = {};
+              for (const r of objRows.value) {
+                const k = (r.k || '').trim();
+                if (!k) continue;
+                if (Object.prototype.hasOwnProperty.call(built, k)) {
+                  ElementPlus.ElMessage.error('存在重复键名：' + k);
+                  return;
+                }
+                built[k] = parseVal(r.v);
+              }
+            }
+            value = JSON.stringify(built);
+          } else if (editForm.value_type === 'int') {
+            value = String(Math.trunc(Number(editForm.numValue) || 0));
+          } else if (editForm.value_type === 'float') {
+            value = String(Number(editForm.numValue) || 0);
+          } else if (editForm.value_type === 'bool') {
+            value = editForm.boolValue ? '1' : '0';
+          } else if (editForm.value_type === 'null') {
+            value = '';
+          } else {
+            value = editForm.value; // string
+          }
+
+          saving.value = true;
+          try {
+            const res = await WD.request.post('/admin/dict_admin/save', {
+              namespace: editForm.namespace, key: editForm.key,
+              value_type: editForm.value_type, value, remark: editForm.remark
+            });
+            ElementPlus.ElMessage[res.success ? 'success' : 'error'](
+              res.message || (res.success ? '字典项已更新' : '保存失败'));
+            if (res.success) {
+              editVisible.value = false;
+              load();
+            }
+          } finally {
+            saving.value = false;
+          }
+        }
+
+        loadOptions();
+        load();
+
+        return {
+          loading, detailLoading, rows, total, page, size, filters, stats, namespaces,
+          detailVisible, detail,
+          editVisible, editLoading, saving, editForm, objRows, arrRows, isScalar, isObjectJson, isArrayJson,
+          load, search, reset, onSizeChange, displayValue, prettyParsed, openDetail,
+          openEdit, saveEdit, addObjRow, Plus, Delete
+        };
+      }
+    });
+
+    for (const [name, comp] of Object.entries(window.ElementPlusIconsVue)) {
+      app.component(name, comp);
+    }
+    app.use(ElementPlus);
+    app.use(WorkDesktop);
+    app.mount('#app');
+  </script>
+</body>
+
+</html>

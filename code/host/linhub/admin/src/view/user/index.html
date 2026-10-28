@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>用户管理 - LinHub 林枢</title>
+<link rel="icon" type="image/svg+xml" href="/brand/favicon.svg">
+<link rel="stylesheet" href="/static/vendor/element-plus/index.css">
+<link rel="stylesheet" href="/static/vendor/workdesktop-ai/style.css">
+<style>
+  html, body, #app { height: 100%; margin: 0; }
+  body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif; }
+  .user-page { height: 100%; padding: 16px 20px 24px; box-sizing: border-box; }
+  .user-head { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 14px; gap: 12px; }
+  .role-tag { margin-right: 4px; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<script type="text/x-template" id="user-tpl">
+  <div class="user-page">
+    <wd-panel :border="true">
+      <wd-tips type="box" style="margin-bottom:12px">
+        OpenId 取自 UAIS；可点击「同步 UAIS 用户」从远端全量建档/改名，也可手工录入唯一 OpenId（姓名可任取）。
+      </wd-tips>
+
+    <wd-data-grid ref="grid" api="/admin/user/rows" api-method="get" :active="true" filter="user" :with-index="false">
+      <template #toolbar>
+       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <el-input v-model="keyword" placeholder="按姓名 / OpenId 搜索" size="small" clearable style="width:220px" @keyup.enter="doSearch" @clear="doSearch" />
+        <el-button size="small" type="primary" @click="doSearch">搜索</el-button>
+        <el-tooltip :content="syncHint" placement="top" effect="dark">
+          <el-select v-model="syncMode" size="small" style="width:132px" @change="syncHint = syncModeTips[syncMode]">
+            <el-option v-for="(tip, key) in syncModeTips" :key="key" :label="key === 'diff_add' ? '差异添加' : (key === 'diff_overwrite' ? '差异覆盖' : '完全覆盖')" :value="key" />
+          </el-select>
+        </el-tooltip>
+        <el-button size="small" :loading="syncing" @click="syncRemote">同步 UAIS 用户</el-button>
+       <el-button-group>
+        <wd-drawer-button label="新增用户" title="新增用户" drawer-size="460px" size="small" type="primary" filter="user" @open="openCreate">
+          <template #default>
+          <el-form label-width="110px">
+            <el-form-item label="昵称" required>
+              <el-input v-model="form.name" placeholder="输入昵称（UAIS 同步）" maxlength="40" />
+            </el-form-item>
+            <el-form-item label="OpenId" required>
+              <el-input v-model="form.refId" :disabled="editing" placeholder="输入 OpenId（取自 UAIS，唯一）" maxlength="64" />
+            </el-form-item>
+            <div style="color:var(--wd-text-color-secondary,#6b7280);font-size:12px;padding:0 4px 8px">
+              OpenId 取自 UAIS，当前不支持远端检索（O-1）；编辑时不可改。
+            </div>
+          </el-form>
+        </template>
+        <template #footer="f">
+          <el-button @click="f.close">取消</el-button>
+          <wd-api-button label="保存" type="primary" api="/admin/user/save"
+                         :api-param="{ mode: 'create', name: form.name, refId: form.refId }"
+                         head-refresh-datagrid="user" @api-success="f.close">保存</wd-api-button>
+        </template>
+      </wd-drawer-button>
+       </el-button-group>
+       </div>
+      </template>
+
+      <el-table-column prop="refId" label="OpenId" min-width="180" />
+      <el-table-column label="昵称 / 用户名" min-width="220">
+        <template #default="{ row }">
+          <div style="line-height:1.5">
+            <div>{{ row.name || '—' }}</div>
+            <div v-if="row.username" style="font-size:12px;color:var(--wd-text-color-secondary,#6b7280)">
+              用户名：{{ row.username }}
+            </div>
+          </div>
+        </template>
+      </el-table-column>
+      <el-table-column prop="email" label="邮箱" min-width="180">
+        <template #default="{ row }">
+          <span v-if="row.email">{{ row.email }}</span>
+          <span v-else style="color:var(--wd-text-color-secondary,#6b7280)">—</span>
+        </template>
+      </el-table-column>
+      <el-table-column prop="department" label="部门" min-width="120">
+        <template #default="{ row }">
+          <span v-if="row.department">{{ row.department }}</span>
+          <span v-else style="color:var(--wd-text-color-secondary,#6b7280)">—</span>
+        </template>
+      </el-table-column>
+      <el-table-column label="最后登录" min-width="160">
+        <template #default="{ row }">
+          <span v-if="row.lastLoginAt">{{ row.lastLoginAt }}</span>
+          <span v-else style="color:var(--wd-text-color-secondary,#6b7280)">还未登录</span>
+        </template>
+      </el-table-column>
+      <el-table-column label="角色" min-width="180">
+        <template #default="{ row }">
+          <template v-if="row.roles.length">
+            <el-tag class="role-tag" v-for="r in row.roles" :key="r.id" size="small" effect="plain">{{ r.name }}</el-tag>
+          </template>
+          <span v-else style="color:var(--wd-text-color-secondary,#6b7280)">未分配</span>
+        </template>
+      </el-table-column>
+      <el-table-column label="权限组" min-width="180">
+        <template #default="{ row }">
+          <template v-if="row.groups.length">
+            <el-tag class="role-tag" v-for="g in row.groups" :key="g.id" size="small" type="success" effect="plain">{{ g.name }}</el-tag>
+          </template>
+          <span v-else style="color:var(--wd-text-color-secondary,#6b7280)">未分配</span>
+        </template>
+      </el-table-column>
+      <el-table-column label="操作" width="240" fixed="right">
+        <template #default="{ row }">
+          <el-button-group>
+          <wd-drawer-button label="分配" title="分配角色与权限组" drawer-size="520px" size="small" type="primary" filter="user" @open="openAssign(row)">
+            <template #default>
+              <p style="margin:0 0 12px;color:var(--wd-text-color-secondary,#6b7280);font-size:13px">
+                用户「{{ assignDlg.name }}」：角色与权限组均支持多对多（J1/J5），保存会整体替换现有选择。
+              </p>
+              <el-form label-width="90px">
+                <el-form-item label="角色">
+                  <el-select v-model="assignDlg.roles" multiple placeholder="选择角色" style="width:100%">
+                    <el-option v-for="r in options.roleOptions" :key="r.id" :label="r.name" :value="r.id" />
+                  </el-select>
+                </el-form-item>
+                <el-form-item label="权限组">
+                  <el-select v-model="assignDlg.groups" multiple placeholder="选择权限组" style="width:100%">
+                    <el-option v-for="g in options.groupOptions" :key="g.id" :label="g.name" :value="g.id" />
+                  </el-select>
+                </el-form-item>
+              </el-form>
+            </template>
+            <template #footer="f">
+              <el-button @click="f.close">取消</el-button>
+              <wd-api-button label="保存" type="primary" api="/admin/user/assign"
+                             :api-param="{ id: assignDlg.id, roles: assignDlg.roles, groups: assignDlg.groups }"
+                             head-refresh-datagrid="user" @api-success="f.close">保存</wd-api-button>
+            </template>
+          </wd-drawer-button>
+
+          <wd-drawer-button label="预览" title="最终权限预览" drawer-size="560px" size="small" type="primary" filter="user" @open="openPerms(row)">
+            <template #default="{ close }">
+              <div>
+                <p style="margin:0 0 8px;color:var(--wd-text-color-secondary,#6b7280);font-size:13px">
+                  {{ permDlg.name }}：{{ permDlg.codes.length === 0 ? '尚无任何权限组，权限码为空（J6 并集）。' : '最终有效权限码如下（J6 并集）：' }}
+                </p>
+                <template v-if="permDlg.codes.length">
+                  <el-tag v-for="c in permDlg.codes" :key="c" style="margin:0 6px 8px 0;max-width:100%" effect="plain">
+                    {{ options.permTitles[c] || c }}
+                  </el-tag>
+                </template>
+              </div>
+            </template>
+            <template #footer="f">
+              <el-button @click="f.close">关闭</el-button>
+            </template>
+          </wd-drawer-button>
+
+          <wd-drawer-button label="编辑" title="编辑用户" drawer-size="520px" size="small" type="primary" filter="user" @open="openEdit(row)">
+            <template #default>
+              <el-form label-width="110px">
+                <el-form-item label="用户名">
+                  <el-input v-model="form.username" disabled placeholder="由 UAIS 同步，不可改" />
+                </el-form-item>
+                <el-form-item label="昵称" required>
+                  <el-input v-model="form.name" placeholder="输入昵称（UAIS 同步）" maxlength="40" />
+                </el-form-item>
+                <el-form-item label="OpenId" required>
+                  <el-input v-model="form.refId" :disabled="editing" placeholder="输入 OpenId（取自 UAIS，唯一）" maxlength="64" />
+                </el-form-item>
+                <el-form-item label="备注">
+                  <el-input v-model="form.remark" type="textarea" :rows="3" placeholder="本地备注（不影响 UAIS，仅超管可见）" maxlength="200" show-word-limit />
+                </el-form-item>
+
+                <el-divider content-position="left">UAIS 同步信息（只读）</el-divider>
+                <el-form-item label="邮箱">
+                  <el-input :model-value="form.email" disabled placeholder="—" />
+                </el-form-item>
+                <el-form-item label="手机">
+                  <el-input :model-value="form.phone" disabled placeholder="—" />
+                </el-form-item>
+                <el-form-item label="部门">
+                  <el-input :model-value="form.department" disabled placeholder="—" />
+                </el-form-item>
+                <el-form-item label="公司">
+                  <el-input :model-value="form.company" disabled placeholder="—" />
+                </el-form-item>
+                <el-form-item label="职位">
+                  <el-input :model-value="form.title" disabled placeholder="—" />
+                </el-form-item>
+                <el-form-item label="用户类型">
+                  <el-input :model-value="form.userType" disabled placeholder="—" />
+                </el-form-item>
+                <el-form-item label="标签">
+                  <el-tag v-for="t in form.tags" :key="t" style="margin-right:6px" effect="plain">{{ t }}</el-tag>
+                  <span v-if="!form.tags || !form.tags.length" style="color:var(--wd-text-color-secondary,#6b7280)">—</span>
+                </el-form-item>
+              </el-form>
+            </template>
+            <template #footer="f">
+              <el-button @click="f.close">取消</el-button>
+              <wd-api-button label="保存" type="primary" api="/admin/user/save"
+                             :api-param="{ mode: 'update', id: form.id, name: form.name, refId: form.refId, remark: form.remark }"
+                             head-refresh-datagrid="user" @api-success="f.close">保存</wd-api-button>
+            </template>
+          </wd-drawer-button>
+
+          <wd-popconfirm-button :title="`确认删除用户「${row.name}」？`"
+                                api="/admin/user/delete" :api-param="{ id: row.id }"
+                                tip="仅删除本地映射，不影响 UAIS 账号（无远端调用）"
+                                size="small"
+                                type="danger" head-refresh-datagrid>删除</wd-popconfirm-button>
+          </el-button-group>
+        </template>
+      </el-table-column>
+      <template #empty><el-empty :image-size="80" description="暂无用户" /></template>
+    </wd-data-grid>
+    </wd-panel>
+  </div>
+</script>
+
+<script src="/static/vendor/vue/vue.global.prod.js"></script>
+<script src="/static/vendor/element-plus/index.full.min.js"></script>
+<script src="/static/vendor/icons/index.iife.min.js"></script>
+<script src="/static/vendor/workdesktop-ai/index.umd.js"></script>
+<script>
+  const WD = window.WorkDesktop;
+  const ElementPlus = window.ElementPlus;
+  const { WorkDesktop } = WD;
+  const { ref, reactive } = Vue;
+
+  const app = Vue.createApp({
+    template: '#user-tpl',
+    setup() {
+      const grid = ref(null);
+      const editing = ref(false);
+      const keyword = ref('');
+      const syncing = ref(false);
+      const syncMode = ref('diff_overwrite');
+      const syncModeTips = {
+        diff_add: '仅对本地缺失的启用账号建档；已存在账号完全不动，本地改动不受影响。',
+        diff_overwrite: '只同步 UAIS 返回的账号（新建 + 按最新信息更新）；系统单独添加的账号不动；不删除任何账号。',
+        overwrite: '以 UAIS 为唯一权威全量对齐：多余的本地账号将被删除，UAIS 禁用账号本地置为禁用。',
+      };
+      const syncHint = ref(syncModeTips.diff_overwrite);
+      const form = reactive({
+        id: '', name: '', refId: '', remark: '',
+        username: '', email: '', phone: '', department: '', company: '', title: '', userType: '', tags: [],
+      });
+      const assignDlg = reactive({ id: '', name: '', roles: [], groups: [] });
+      const permDlg = reactive({ name: '', codes: [] });
+      const options = reactive({ roleOptions: [], groupOptions: [], permTitles: {} });
+      let optsLoaded = false;
+
+      // 关键词搜索：携带 keyword 参数重新拉取列表（data-grid 重置到第一页）
+      function doSearch() {
+        grid.value && grid.value.search({ keyword: keyword.value.trim() });
+      }
+
+      // 手动同步 UAIS 用户：按所选策略确认后调后端 /admin/user/sync，完成后展示统计并刷新列表
+      async function syncRemote() {
+        const mode = syncMode.value;
+        const modeLabel = mode === 'diff_add' ? '差异添加' : (mode === 'diff_overwrite' ? '差异覆盖' : '完全覆盖');
+        const common = '\n以上操作在三种模式下均：不覆盖本地角色/权限组授权，不刷新任何登录时间。';
+        const tips = {
+          diff_add: '将从 UAIS 拉取用户，仅对新出现的启用账号建档：',
+          diff_overwrite: '将从 UAIS 拉取全部用户并同步本地映射：',
+          overwrite: '将以 UAIS 为唯一权威，完全覆盖对齐本地账号：',
+        };
+        const detail = {
+          diff_add: '· 本地缺失的启用账号自动建档，默认授予「工作者」角色；\n' + '· 已存在的账号（含本地手工新增）完全不动。',
+          diff_overwrite: '· 启用的新用户自动建档，默认授予「工作者」角色；\n' + '· 已建档的 UAIS 账号按最新信息改名/更新字段；\n' + '· 系统单独添加的账号不动；不删除任何账号。',
+          overwrite: '· 启用的新用户自动建档，默认授予「工作者」角色；\n' + '· 已建档账号按最新信息改名/更新字段；\n' + '· UAIS 禁用账号本地置为禁用；\n' + '· UAIS 不再返回的本地账号将被删除。',
+        };
+        try {
+          await ElementPlus.ElMessageBox.confirm(
+            tips[mode] + '\n' + detail[mode] + common,
+            `确认${modeLabel}同步 UAIS 用户？`,
+            { type: 'warning', confirmButtonText: '开始同步', cancelButtonText: '取消' }
+          );
+        } catch (e) {
+          return; // 用户取消
+        }
+        syncing.value = true;
+        try {
+          const res = await WD.request.post('/admin/user/sync', { mode });
+          if (!res.success) { ElementPlus.ElMessage.error(res.message || '同步失败'); return; }
+          const d = res.data || {};
+          let msg = `同步完成（${modeLabel}）：共 ${d.total ?? 0} 位，新增 ${d.created ?? 0}，更新 ${d.updated ?? 0}，未变 ${d.unchanged ?? 0}`;
+          if (d.disabled > 0) msg += `，禁用跳过 ${d.disabled ?? 0}`;
+          if (d.removed > 0) msg += `，删除多余 ${d.removed ?? 0}`;
+          ElementPlus.ElMessage.success(msg);
+          doSearch();
+        } finally {
+          syncing.value = false;
+        }
+      }
+
+      function ensureOptions(cb) {
+        if (optsLoaded) { cb && cb(); return; }
+        WD.request.get('/admin/user/options').then(res => {
+          if (!res.success) return;
+          options.roleOptions = res.data.roleOptions || [];
+          options.groupOptions = res.data.groupOptions || [];
+          options.permTitles = res.data.permTitles || {};
+          optsLoaded = true;
+          cb && cb();
+        });
+      }
+
+      function openCreate() {
+        editing.value = false;
+        form.id = '';
+        form.name = '';
+        form.refId = '';
+        form.remark = '';
+        form.username = '';
+        form.email = '';
+        form.phone = '';
+        form.department = '';
+        form.company = '';
+        form.title = '';
+        form.userType = '';
+        form.tags = [];
+      }
+      function openEdit(row) {
+        editing.value = true;
+        form.id = row.id;
+        form.name = row.name;
+        form.refId = row.refId;
+        form.remark = row.remark || '';
+        form.username = row.username || '';
+        form.email = row.email || '';
+        form.phone = row.phone || '';
+        form.department = row.department || '';
+        form.company = row.company || '';
+        form.title = row.title || '';
+        form.userType = row.userType || '';
+        form.tags = row.tags || [];
+      }
+
+      function openAssign(row) {
+        ensureOptions(() => {
+          assignDlg.id = row.id;
+          assignDlg.name = row.name;
+          assignDlg.roles = row.roles.map(r => r.id);
+          assignDlg.groups = row.groups.map(g => g.id);
+        });
+      }
+
+      function openPerms(row) {
+        ensureOptions();
+        permDlg.name = row.name;
+        permDlg.codes = row.permCodes || [];
+      }
+
+      return { grid, editing, keyword, syncing, syncRemote, doSearch, form, assignDlg, permDlg, options, openCreate, openEdit, openAssign, openPerms };
+    }
+  });
+
+  for (const [name, comp] of Object.entries(window.ElementPlusIconsVue)) {
+    app.component(name, comp);
+  }
+  app.use(ElementPlus);
+  app.use(WorkDesktop);
+  app.mount('#app');
+</script>
+</body>
+</html>

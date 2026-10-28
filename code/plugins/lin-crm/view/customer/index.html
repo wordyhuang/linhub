@@ -1,0 +1,81 @@
+{* 林客 · 客户列表页（PG-CUS-01；关联 FR-CUS-01/03/05） *}
+{include file="common/head" /}
+<div id="app">
+  <el-card shadow="never">
+    <el-form inline>
+      <el-form-item><el-input v-model="keyword" placeholder="名称/手机号" clearable style="width:200px"/></el-form-item>
+      <el-form-item>
+        <el-select v-model="pool" placeholder="全部/公海/私海" clearable style="width:140px">
+          <el-option label="私海" value="private_pool"/><el-option label="公海" value="public_pool"/>
+        </el-select>
+      </el-form-item>
+      <el-button type="primary" @click="load(1)">查询</el-button>
+      <el-button v-permission="'crm:customer:create'" type="success" @click="openForm()">新建客户</el-button>
+      <el-button v-permission="'crm:config:manage'" @click="goImport">批量导入</el-button>
+    </el-form>
+    <el-table :data="rows" border stripe>
+      <el-table-column prop="code" label="编码" width="150"/>
+      <el-table-column prop="name" label="客户名称" min-width="160"/>
+      <el-table-column prop="phone" label="手机号" width="130"/>
+      <el-table-column prop="level" label="等级" width="90"/>
+      <el-table-column prop="pool_status" label="池归属" width="90">
+        <template #default="{row}"><el-tag :type="row.pool_status==='private_pool'?'success':'info'">{{ row.pool_status==='private_pool'?'私海':'公海' }}</el-tag></template>
+      </el-table-column>
+      <el-table-column prop="protect_until" label="保护期截止" width="160"/>
+      <el-table-column label="操作" width="230" fixed="right">
+        <template #default="{row}">
+          <el-button link type="primary" @click="detail(row)">360</el-button>
+          <el-button link v-permission="'crm:customer:edit'" @click="openForm(row)">编辑</el-button>
+          <el-button link v-permission="'crm:customer:transfer'" @click="transfer(row)">转移</el-button>
+          <el-button link v-permission="'crm:customer:release'" v-if="row.pool_status==='private_pool'" @click="release(row)">收回</el-button>
+        </template>
+      </el-table-column>
+    </el-table>
+    <el-pagination layout="total, prev, pager, next" :total="total" :page-size="pageSize" v-model:current-page="cur" @current-change="load"/>
+  </el-card>
+
+  <el-drawer v-model="drawer" :title="form.id ? '编辑客户' : '新建客户'" size="420px">
+    <el-form label-width="90px">
+      <el-form-item label="客户名称" required><el-input v-model="form.name"/></el-form-item>
+      <el-form-item label="手机号" required><el-input v-model="form.phone"/></el-form-item>
+      <el-form-item label="主联系人"><el-input v-model="form.contact_name"/></el-form-item>
+      <el-form-item label="行业"><el-input v-model="form.industry"/></el-form-item>
+      <el-form-item label="等级"><el-input v-model="form.level"/></el-form-item>
+      <el-form-item label="备注"><el-input v-model="form.remark" type="textarea"/></el-form-item>
+      <el-button type="primary" @click="submit" style="width:100%">保存</el-button>
+    </el-form>
+  </el-drawer>
+</div>
+<script>
+crmPage(function () {
+  const V = Vue;
+  const state = V.reactive({ rows: [], total: 0, cur: 1, pageSize: 20, keyword: '', pool: '', drawer: false,
+    form: { id: 0, name: '', phone: '', contact_name: '', industry: '', level: '', remark: '' } });
+  function load(page) {
+    state.cur = page || state.cur;
+    return crmRequest('/crm/customer/index', { page: state.cur, page_size: state.pageSize, keyword: state.keyword, pool_status: state.pool })
+      .then(function (res) { state.rows = res.data.data || res.data; state.total = res.data.total || state.rows.length; });
+  }
+  function submit() {
+    crmRequest('/crm/customer/save', state.form).then(function (res) {
+      ElementPlus.ElMessage.success('已保存');
+      state.drawer = false; load(1);
+    });
+  }
+  function openForm(row) { state.form = row ? Object.assign({}, row) : { id: 0, name: '', phone: '', contact_name: '', industry: '', level: '', remark: '' }; state.drawer = true; }
+  function detail(row) { location.href = '/crm/customer/detail?id=' + row.id; }
+  function transfer(row) {
+    ElementPlus.ElMessageBox.prompt('输入目标负责人用户 id').then(function (r) {
+      crmRequest('/crm/customer/transfer', { id: row.id, to_user_id: Number(r.value) }).then(function () { load(); });
+    }).catch(function () {});
+  }
+  function release(row) {
+    ElementPlus.ElMessageBox.confirm('收回该客户回公海？').then(function () {
+      crmRequest('/crm/customer/release', { id: row.id }).then(function () { load(); });
+    }).catch(function () {});
+  }
+  function goImport() { location.href = '/crm/setting/import'; }
+  load(1);
+  return Object.assign({}, V.toRefs(state), { load, submit, openForm, detail, transfer, release, goImport });
+});
+</script>

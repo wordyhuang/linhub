@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>日志审计 - LinHub 林枢</title>
+<link rel="icon" type="image/svg+xml" href="/brand/favicon.svg">
+  <link rel="stylesheet" href="/static/vendor/element-plus/index.css">
+  <link rel="stylesheet" href="/static/vendor/workdesktop-ai/style.css">
+  <style>
+    html,
+    body,
+    #app {
+      height: 100%;
+      margin: 0;
+    }
+
+    body {
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+
+    .aud-page {
+      height: 100%;
+      padding: 16px 20px 24px;
+      box-sizing: border-box;
+    }
+
+    .aud-mono {
+      font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+      font-size: 12px;
+    }
+
+    .aud-filter {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 12px;
+      flex-wrap: wrap;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="app"></div>
+
+  <script type="text/x-template" id="aud-tpl">
+  <div class="aud-page">
+    <wd-panel :border="true">
+      <wd-tips type="box" style="margin-bottom:12px">
+        统一检索操作日志、管控审计轨迹与迁移审计记录。
+      </wd-tips>
+
+      <el-tabs v-model="tab">
+      <!-- ── Tab1 操作日志 ── -->
+      <el-tab-pane label="操作日志" name="logs">
+        <form class="aud-filter" @submit.prevent="submitLogs">
+          <el-input v-model="filters.kw" placeholder="关键词（匹配 message）" size="small" style="width:200px" clearable />
+          <el-select v-model="filters.package" placeholder="来源包" size="small" style="width:150px" clearable>
+            <el-option v-for="p in options.logPackages" :key="p" :label="p" :value="p" />
+          </el-select>
+          <el-select v-model="filters.level" placeholder="级别" size="small" style="width:110px" clearable>
+            <el-option v-for="l in options.levelOptions" :key="l" :label="l" :value="l" />
+          </el-select>
+          <el-date-picker v-model="range.from" type="datetime" placeholder="起始时间" size="small"
+            value-format="YYYY-MM-DD HH:mm:ss" />
+          <el-date-picker v-model="range.to" type="datetime" placeholder="结束时间" size="small"
+            value-format="YYYY-MM-DD HH:mm:ss" />
+          <el-button native-type="submit" type="primary" size="small" :loading="loading">检索</el-button>
+          <el-button size="small" @click="resetLogs">重置</el-button>
+        </form>
+
+        <wd-data-grid :data-source="logs" border stripe :with-index="false">
+          <el-table-column prop="created_at" label="时间" width="170" />
+          <el-table-column label="级别" width="90">
+            <template #default="{ row }">
+              <el-tag size="small" :type="levelTag(row.level)" effect="light">{{ row.level }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="package_id" label="来源包" width="130">
+            <template #default="{ row }">
+              <span v-if="row.package_id">{{ row.package_id }}</span>
+              <span v-else style="color:#bbb">—</span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="message" label="消息" min-width="220" />
+          <el-table-column prop="operator" label="执行人" width="120" />
+          <el-table-column label="上下文" min-width="120">
+            <template #default="{ row }">
+              <el-popover v-if="hasCtx(row)" width="320" trigger="click">
+                <pre class="aud-mono" style="margin:0;white-space:pre-wrap">{{ pretty(row.context) }}</pre>
+                <template #reference><el-button size="small" text type="primary">查看</el-button></template>
+              </el-popover>
+              <span v-else style="color:#bbb">—</span>
+            </template>
+          </el-table-column>
+          <template #empty><el-empty description="暂无匹配的操作日志" :image-size="80" /></template>
+        </wd-data-grid>
+      </el-tab-pane>
+
+      <!-- ── Tab2 管控轨迹 ── -->
+      <el-tab-pane label="管控轨迹" name="trail">
+        <form class="aud-filter" @submit.prevent="submitTrail">
+          <el-select v-model="tFilters.act" placeholder="动作" size="small" style="width:180px" clearable filterable allow-create>
+            <el-option v-for="a in options.trailActions" :key="a" :label="a" :value="a" />
+          </el-select>
+          <el-select v-model="tFilters.operator" placeholder="执行人" size="small" style="width:150px" clearable allow-create>
+            <el-option v-for="o in options.trailOperators" :key="o" :label="o" :value="o" />
+          </el-select>
+          <el-date-picker v-model="trange.from" type="datetime" placeholder="起始时间" size="small"
+            value-format="YYYY-MM-DD HH:mm:ss" />
+          <el-date-picker v-model="trange.to" type="datetime" placeholder="结束时间" size="small"
+            value-format="YYYY-MM-DD HH:mm:ss" />
+          <el-button native-type="submit" type="primary" size="small" :loading="trailLoading">检索</el-button>
+          <el-button size="small" @click="resetTrail">重置</el-button>
+        </form>
+
+        <wd-data-grid :data-source="trail" border stripe :with-index="false">
+          <el-table-column prop="created_at" label="时间" width="170" />
+          <el-table-column prop="action" label="动作" min-width="150">
+            <template #default="{ row }">
+              <span class="aud-mono">{{ row.action }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="target" label="对象" min-width="150" />
+          <el-table-column prop="operator" label="执行人" width="130" />
+          <el-table-column label="上下文" min-width="120">
+            <template #default="{ row }">
+              <el-popover v-if="hasCtx(row)" width="320" trigger="click">
+                <pre class="aud-mono" style="margin:0;white-space:pre-wrap">{{ pretty(row.context) }}</pre>
+                <template #reference><el-button size="small" text type="primary">查看</el-button></template>
+              </el-popover>
+              <span v-else style="color:#bbb">—</span>
+            </template>
+          </el-table-column>
+          <template #empty><el-empty description="暂无匹配的管控轨迹" :image-size="80" /></template>
+        </wd-data-grid>
+      </el-tab-pane>
+
+      <!-- ── Tab3 迁移审计 ── -->
+      <el-tab-pane label="迁移审计" name="migration">
+        <template v-if="migration.status === 'ok'">
+          <form class="aud-filter" @submit.prevent="submitMigration">
+            <el-input v-model="mFilters.package" placeholder="包名" size="small" style="width:160px" clearable />
+            <el-input v-model="mFilters.version" placeholder="版本" size="small" style="width:130px" clearable />
+            <el-select v-model="mFilters.direction" placeholder="方向" size="small" style="width:110px" clearable>
+              <el-option label="upgrade" value="upgrade" />
+              <el-option label="rollback" value="rollback" />
+            </el-select>
+            <el-input v-model="mFilters.operator" placeholder="执行人" size="small" style="width:130px" clearable />
+            <el-button native-type="submit" type="primary" size="small" :loading="migLoading">检索</el-button>
+            <el-button size="small" @click="resetMigration">重置</el-button>
+          </form>
+
+          <wd-data-grid :data-source="migration.items" border stripe :with-index="false">
+            <el-table-column prop="id" label="ID" width="70" />
+            <el-table-column prop="package" label="包" min-width="130" />
+            <el-table-column prop="version" label="版本" width="100" />
+            <el-table-column label="方向" width="100">
+              <template #default="{ row }">
+                <el-tag size="small" :type="row.direction === 'rollback' ? 'warning' : 'success'" effect="light">{{ row.direction }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="sql_summary" label="SQL 摘要" min-width="180" />
+            <el-table-column prop="operator" label="执行人" width="120" />
+            <el-table-column prop="executed_at" label="执行时间" width="180" />
+            <template #empty><el-empty description="暂无迁移审计记录" :image-size="80" /></template>
+          </wd-data-grid>
+        </template>
+
+        <el-result v-else icon="warning" title="迁移审计暂不可用" style="padding-top:24px">
+          <template #sub-title>
+            <p style="color:var(--wd-text-color-secondary,#6b7280);max-width:560px;margin:0 auto">
+              迁移审计依赖 MySQL 迁移数据库。{{ migration.reason || '未配置或连接失败' }}，不影响其余检索。
+            </p>
+          </template>
+        </el-result>
+      </el-tab-pane>
+    </el-tabs>
+    </wd-panel>
+  </div>
+</script>
+
+  <script src="/static/vendor/vue/vue.global.prod.js"></script>
+  <script src="/static/vendor/element-plus/index.full.min.js"></script>
+  <script src="/static/vendor/icons/index.iife.min.js"></script>
+  <script src="/static/vendor/workdesktop-ai/index.umd.js"></script>
+  <script>
+    const WD = window.WorkDesktop;
+    const ElementPlus = window.ElementPlus;
+    const { WorkDesktop } = WD;
+    const { ref, reactive } = Vue;
+
+    const app = Vue.createApp({
+      template: '#aud-tpl',
+      setup() {
+        const tab = ref('logs');
+        const loading = ref(false);
+        const trailLoading = ref(false);
+        const migLoading = ref(false);
+        const options = reactive({ levelOptions: [], logPackages: [], trailActions: [], trailOperators: [] });
+        const filters = reactive({ kw: '', package: '', level: '', from: '', to: '' });
+        const tFilters = reactive({ act: '', operator: '' });
+        const mFilters = reactive({ package: '', version: '', direction: '', operator: '' });
+        const range = reactive({ from: '', to: '' });
+        const trange = reactive({ from: '', to: '' });
+
+        const logs = ref([]);
+        const trail = ref([]);
+        const migration = reactive({ status: 'unavailable', items: [], reason: '' });
+
+        WD.request.get('/admin/audit/options').then(res => {
+          if (!res.success) return;
+          options.levelOptions = res.data.levelOptions || [];
+          options.logPackages = res.data.logPackages || [];
+          options.trailActions = res.data.trailActions || [];
+          options.trailOperators = res.data.trailOperators || [];
+          loadMigration();
+        });
+        loadLogs();
+        loadTrail();
+
+        function qs(obj) {
+          const p = new URLSearchParams();
+          for (const [k, v] of Object.entries(obj)) { if (v !== '' && v != null) p.append(k, v); }
+          const s = p.toString();
+          return s ? '?' + s : '';
+        }
+
+        function loadLogs() {
+          loading.value = true;
+          WD.request.get('/admin/audit/logs' + qs({ ...filters, from: range.from, to: range.to })).then(res => {
+            loading.value = false;
+            if (!res.success) return;
+            logs.value = res.data.list || [];
+          });
+        }
+        function submitLogs() { loadLogs(); }
+        function resetLogs() {
+          ['kw', 'package', 'level'].forEach(k => filters[k] = '');
+          range.from = ''; range.to = '';
+          loadLogs();
+        }
+
+        function loadTrail() {
+          trailLoading.value = true;
+          WD.request.get('/admin/audit/trail' + qs({ act: tFilters.act, operator: tFilters.operator, from: trange.from, to: trange.to })).then(res => {
+            trailLoading.value = false;
+            if (!res.success) return;
+            trail.value = res.data.list || [];
+          });
+        }
+        function submitTrail() { loadTrail(); }
+        function resetTrail() {
+          ['act', 'operator'].forEach(k => tFilters[k] = '');
+          trange.from = ''; trange.to = '';
+          loadTrail();
+        }
+
+        function loadMigration() {
+          migLoading.value = true;
+          WD.request.get('/admin/audit/migration' + qs({ ...mFilters })).then(res => {
+            migLoading.value = false;
+            if (!res.success) return;
+            migration.status = res.data.status || 'unavailable';
+            migration.items = res.data.items || [];
+            migration.reason = res.data.reason || '';
+          });
+        }
+        function submitMigration() { loadMigration(); }
+        function resetMigration() {
+          Object.keys(mFilters).forEach(k => mFilters[k] = '');
+          loadMigration();
+        }
+
+        function levelTag(lv) {
+          const m = { info: 'info', warning: 'warning', error: 'danger', debug: '' };
+          return m[lv] !== undefined ? m[lv] : '';
+        }
+        function hasCtx(row) { return row.context && Object.keys(row.context).length > 0; }
+        function pretty(ctx) { try { return JSON.stringify(ctx, null, 2); } catch (e) { return String(ctx); } }
+
+        return {
+          tab, loading, trailLoading, migLoading, options, filters, tFilters, mFilters, range, trange,
+          logs, trail, migration, submitLogs, resetLogs, submitTrail, resetTrail, submitMigration, resetMigration,
+          levelTag, hasCtx, pretty
+        };
+      }
+    });
+
+    for (const [name, comp] of Object.entries(window.ElementPlusIconsVue)) {
+      app.component(name, comp);
+    }
+    app.use(ElementPlus);
+    app.use(WorkDesktop);
+    app.mount('#app');
+  </script>
+</body>
+
+</html>

@@ -1,0 +1,29 @@
+{* 林客 · 工作台（PG-DASH-01；FR-RPT-01 四卡；F-05 首屏注入无二次请求） *}
+{include file="common/head" /}
+<div id="app">
+  <el-row :gutter="16">
+    <el-col :span="6"><el-card shadow="never"><el-statistic title="今日新增线索" :value="d.lead_today"/></el-card></el-col>
+    <el-col :span="6"><el-card shadow="never"><el-statistic title="今日新增客户" :value="d.customer_today"/></el-card></el-col>
+    <el-col :span="6"><el-card shadow="never"><el-statistic title="本月加权预测（元）" :value="d.forecast_month"/></el-card></el-col>
+    <el-col :span="6"><el-card shadow="never"><el-statistic title="应收逾期合计（元）" :value="d.receivable_overdue_total"/></el-card></el-col>
+  </el-row>
+  <el-card shadow="never" style="margin-top:16px">
+    <template #header>超期未跟进 TOP5（保护期口径）</template>
+    <el-table :data="d.overdue_followup_top5" border>
+      <el-table-column prop="name" label="客户" min-width="160"/>
+      <el-table-column prop="owner_id" label="负责人" width="100"/>
+      <el-table-column prop="last_followup_at" label="最近跟进" width="180"/>
+    </el-table>
+  </el-card>
+</div>
+<script>
+crmPage(function () {
+  const V = Vue;
+  // F-05：工作台数据由服务端注入 __INITIAL_DATA__，禁止二次请求同批数据
+  const d = V.reactive(window.__INITIAL_DATA__ && window.__INITIAL_DATA__.dashboard ? window.__INITIAL_DATA__.dashboard : {});
+  if (!d.lead_today && d.lead_today !== 0) {
+    crmRequest('/crm/report/dashboard').then(function (res) { Object.assign(d, res.data); });
+  }
+  return { d: d };
+});
+</script>

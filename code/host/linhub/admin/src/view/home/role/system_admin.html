@@ -1,0 +1,727 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{$roleLabel}首页 - {:htmlspecialchars($siteName)}</title>
+  <link rel="icon" type="image/svg+xml" href="/brand/favicon.svg">
+  <link rel="stylesheet" href="/static/vendor/element-plus/index.css">
+  <link rel="stylesheet" href="/static/vendor/workdesktop-ai/style.css">
+  <style>
+    html,
+    body {
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--wd-bg-color, #f5f7fa);
+      color: var(--wd-text-color, #1f2937);
+    }
+
+    .home {
+      padding: 24px;
+      max-width: 1080px;
+      margin: 0 auto;
+    }
+
+    .hero {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      background: linear-gradient(135deg, #0A3D6B 0%, #0066CC 100%);
+      color: #fff;
+      border-radius: 12px;
+      padding: 28px;
+      margin-bottom: 20px;
+    }
+
+    .hero img {
+      width: 52px;
+      height: 52px;
+      flex: none;
+    }
+
+    .hero h1 {
+      margin: 0 0 6px;
+      font-size: 22px;
+      font-weight: 700;
+    }
+
+    .hero p {
+      margin: 0;
+      font-size: 14px;
+      opacity: .9;
+    }
+
+    .role-tag {
+      margin-left: auto;
+      flex: none;
+      font-size: 13px;
+      font-weight: 600;
+      background: rgba(255, 255, 255, .18);
+      padding: 6px 14px;
+      border-radius: 999px;
+    }
+
+    .section-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin: 4px 0 12px;
+    }
+
+    .section-title {
+      font-size: 15px;
+      font-weight: 600;
+    }
+
+    .user-info {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      background: #fff;
+      border: 1px solid #e5e7eb;
+      border-radius: 12px;
+      padding: 14px 18px;
+      margin-bottom: 20px;
+    }
+
+    .user-info .uavatar {
+      background: rgba(0, 102, 204, .1);
+      color: #0066CC;
+      flex: none;
+    }
+
+    .user-info .uname {
+      font-size: 15px;
+      font-weight: 600;
+      margin-bottom: 2px;
+    }
+
+    .user-info .umeta {
+      font-size: 13px;
+      color: var(--wd-text-color-secondary, #6b7280);
+      display: flex;
+      align-items: center;
+    }
+
+    .user-info .uactions {
+      margin-left: auto;
+      flex: none;
+      display: flex;
+      gap: 8px;
+    }
+
+    .perm-summary {
+      font-size: 13px;
+      color: var(--wd-text-color-secondary, #6b7280);
+      margin-bottom: 10px;
+    }
+
+    .perm-code {
+      font-family: ui-monospace, Consolas, monospace;
+      font-size: 12px;
+      color: #0066CC;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+      gap: 16px;
+    }
+
+    .entry {
+      text-decoration: none;
+      color: inherit;
+    }
+
+    .entry .el-card {
+      transition: transform .15s ease, box-shadow .15s ease;
+      cursor: pointer;
+    }
+
+    .entry:hover .el-card {
+      transform: translateY(-2px);
+    }
+
+    .entry .ico {
+      width: 40px;
+      height: 40px;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+      background: rgba(0, 102, 204, .1);
+      color: #0066CC;
+      margin-bottom: 12px;
+    }
+
+    .entry h3 {
+      margin: 0 0 6px;
+      font-size: 15px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .entry p {
+      margin: 0;
+      font-size: 13px;
+      color: var(--wd-text-color-secondary, #6b7280);
+      line-height: 1.6;
+    }
+
+    .empty {
+      grid-column: 1 / -1;
+      text-align: center;
+      padding: 48px 0;
+      color: var(--wd-text-color-secondary, #6b7280);
+      font-size: 14px;
+    }
+
+    /* 工作台插入锚点（功能包插槽） */
+    .slot-zone {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .slot-zone-top {
+      margin-bottom: 24px;
+    }
+
+    .slot-zone-bottom {
+      margin-top: 24px;
+    }
+
+    .slot-card {
+      border: 1px solid #e5e7eb;
+      border-radius: 10px;
+      background: #fff;
+      overflow: hidden;
+    }
+
+    .slot-head {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 14px;
+      border-bottom: 1px solid #f1f3f5;
+    }
+
+    .slot-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--wd-text-color, #1f2329);
+    }
+
+    .slot-frame {
+      width: 100%;
+      height: 180px;
+      border: 0;
+      display: block;
+      background: #fafafa;
+    }
+
+    /* 定制抽屉：已选入口拖拽排序 */
+    .pick-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 12px;
+      margin-bottom: 8px;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      background: #fff;
+      cursor: move;
+      user-select: none;
+    }
+
+    .pick-item.dragging {
+      opacity: .5;
+      border-style: dashed;
+    }
+
+    .pick-item .handle {
+      color: #9ca3af;
+      cursor: grab;
+      font-size: 16px;
+    }
+
+    .pick-item .pico {
+      width: 30px;
+      height: 30px;
+      border-radius: 7px;
+      flex: none;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 15px;
+      background: rgba(0, 102, 204, .1);
+      color: #0066CC;
+    }
+
+    .pick-item .pname {
+      flex: 1;
+      font-size: 14px;
+    }
+
+    .pick-item .pkg {
+      font-size: 12px;
+      color: #0066CC;
+    }
+
+    .avail-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 10px;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      margin-bottom: 8px;
+      background: #fff;
+    }
+
+    .avail-item .pico {
+      width: 28px;
+      height: 28px;
+      border-radius: 7px;
+      flex: none;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+      background: rgba(0, 102, 204, .1);
+      color: #0066CC;
+    }
+
+    .avail-item .pname {
+      flex: 1;
+      font-size: 14px;
+    }
+
+    .drawer-sub {
+      font-size: 13px;
+      font-weight: 600;
+      margin: 16px 0 8px;
+      color: #374151;
+    }
+
+    .drawer-hint {
+      font-size: 12px;
+      color: #9ca3af;
+      margin-bottom: 8px;
+    }
+
+    .perm-search {
+      margin-bottom: 10px;
+    }
+
+    .perm-group-name {
+      font-weight: 600;
+    }
+
+    .perm-group-desc {
+      font-size: 12px;
+      color: var(--wd-text-color-secondary, #6b7280);
+    }
+  </style>
+</head>
+
+<body>
+  <div class="home"></div>
+
+  <script type="text/x-template" id="super-admin-tpl">
+  <div class="hero">
+    <img src="/brand/mark.svg" alt="林枢">
+    <div>
+      <h1>你好，{{ name }}</h1>
+      <p>平台最高权限入口，统筹功能包、权限、审计与运维。</p>
+    </div>
+    <span class="role-tag">{{ roleLabel }}</span>
+  </div>
+
+  <div class="user-info">
+    <el-avatar :size="40" class="uavatar">
+      <el-icon :size="22"><UserFilled /></el-icon>
+    </el-avatar>
+    <div class="udesc">
+      <div class="uname">{{ name }}</div>
+      <div class="umeta">
+        <span>账号：{{ userId }}</span>
+        <el-divider direction="vertical" />
+        <span>角色：{{ roleLabel }}</span>
+      </div>
+    </div>
+    <div class="uactions">
+      <el-button size="small" :icon="Key" @click="openPerms">查看权限</el-button>
+      <el-button size="small" :icon="Edit" @click="openProfile">修改</el-button>
+    </div>
+  </div>
+
+  <el-dialog v-model="permDlg" title="我的权限清单" width="640px">
+    <div class="perm-summary">
+      当前拥有 <strong>{{ permTotal }}</strong> 项权限。
+    </div>
+    <el-input
+      v-model="permKeyword"
+      placeholder="输入权限名称或简介关键字搜索"
+      clearable
+      class="perm-search"
+    >
+      <template #prefix><el-icon><Search /></el-icon></template>
+    </el-input>
+    <el-table
+      :data="permTree"
+      row-key="code"
+      :tree-props="{ children: 'children' }"
+      height="380"
+      size="small"
+      stripe
+      default-expand-all
+    >
+      <el-table-column prop="title" label="权限名称" min-width="180">
+        <template #default="{ row }">
+          <span v-if="row.__group" class="perm-group-name">{{ row.title }}（{{ row.children.length }}）</span>
+          <span v-else>{{ row.title }}</span>
+        </template>
+      </el-table-column>
+      <el-table-column prop="description" label="权限简介" min-width="280">
+        <template #default="{ row }">
+          <span v-if="row.__group" class="perm-group-desc">权限点分组</span>
+          <span v-else>{{ row.description || '—' }}</span>
+        </template>
+      </el-table-column>
+    </el-table>
+    <template #footer>
+      <el-button type="primary" @click="permDlg = false">关闭</el-button>
+    </template>
+  </el-dialog>
+
+  <el-dialog v-model="profileDlg" title="修改用户信息" width="420px">
+    <el-form label-width="72px" @submit.prevent>
+      <el-form-item label="账号">
+        <el-input :model-value="userId" disabled />
+      </el-form-item>
+      <el-form-item label="显示名称">
+        <el-input v-model="profileName" maxlength="30" show-word-limit placeholder="请输入显示名称" />
+      </el-form-item>
+    </el-form>
+    <template #footer>
+      <el-button @click="profileDlg = false">取消</el-button>
+      <el-button type="primary" :loading="saving" @click="saveProfile">保存</el-button>
+    </template>
+  </el-dialog>
+
+  <div v-if="zones['home.top'].length" class="slot-zone slot-zone-top">
+    <div v-for="s in zones['home.top']" :key="s.id" class="slot-card">
+      <div class="slot-head">
+        <span class="slot-title">{{ s.title }}</span>
+      </div>
+      <iframe
+        :src="s.render"
+        class="slot-frame"
+        loading="lazy"
+        @load="onSlotFrameLoad($event, s.id)"
+      ></iframe>
+    </div>
+  </div>
+
+  <div class="section-head">
+    <span class="section-title">超管功能入口</span>
+    <el-button size="small" :icon="Setting" @click="openCustom">定制</el-button>
+  </div>
+
+  <div class="grid">
+    <div class="entry" v-for="m in entries" :key="m.id" @click="openTab(m.path, m.title)">
+      <el-card shadow="hover">
+        <div class="ico"><el-icon><component :is="iconOf(m.icon)" /></el-icon></div>
+        <h3>
+          {{ m.title }}
+        </h3>
+        <p>{{ isPkg(m) ? '来自功能包「' + m.short + '」的功能入口。' : '平台内置超管功能入口。' }}</p>
+      </el-card>
+    </div>
+    <div v-if="entries.length === 0" class="empty">
+      暂无功能入口，点击右上角「定制」添加。
+    </div>
+  </div>
+
+  <div v-if="zones['home.bottom'].length" class="slot-zone slot-zone-bottom">
+    <div v-for="s in zones['home.bottom']" :key="s.id" class="slot-card">
+      <div class="slot-head">
+        <span class="slot-title">{{ s.title }}</span>
+      </div>
+      <iframe
+        :src="s.render"
+        class="slot-frame"
+        loading="lazy"
+        @load="onSlotFrameLoad($event, s.id)"
+      ></iframe>
+    </div>
+  </div>
+
+  <el-drawer v-model="drawer" title="定制功能入口" size="380px" :destroy-on-close="false">
+    <div class="drawer-sub">已选入口（拖拽可排序）</div>
+    <div class="drawer-hint">拖动左侧手柄调整首页展示顺序，取消勾选即从首页移除。</div>
+
+    <div
+      v-for="(m, idx) in chosen"
+      :key="m.id"
+      class="pick-item"
+      :class="{ dragging: dragIndex === idx }"
+      draggable="true"
+      @dragstart="onDragStart(idx, $event)"
+      @dragover.prevent="onDragOver(idx)"
+      @dragend="dragIndex = -1"
+      @drop.prevent="onDrop(idx)"
+    >
+      <span class="handle"><el-icon><Rank /></el-icon></span>
+      <span class="pico"><el-icon><component :is="iconOf(m.icon)" /></el-icon></span>
+      <span class="pname">{{ m.title }}</span>
+      <span v-if="isPkg(m)" class="pkg">{{ m.short }}</span>
+      <el-button size="small" text type="danger" @click="removeChosen(idx)">移除</el-button>
+    </div>
+    <div v-if="chosen.length === 0" class="drawer-hint">尚未选择任何入口，可从下方添加。</div>
+
+    <div class="drawer-sub">可添加的菜单</div>
+    <div
+      v-for="m in available"
+      :key="m.id"
+      class="avail-item"
+    >
+      <span class="pico"><el-icon><component :is="iconOf(m.icon)" /></el-icon></span>
+      <span class="pname">{{ m.title }}<span v-if="isPkg(m)" style="color:#0066CC;font-size:12px;">（{{ m.short }}）</span></span>
+      <el-button size="small" type="primary" plain @click="addChosen(m)">添加</el-button>
+    </div>
+    <div v-if="available.length === 0" class="drawer-hint">全部可用菜单均已添加。</div>
+
+    <template #footer>
+      <div style="display:flex; justify-content:space-between; gap:8px;">
+        <el-button @click="resetDefault" :loading="saving">恢复默认</el-button>
+        <div style="display:flex; gap:8px;">
+          <el-button @click="drawer = false">取消</el-button>
+          <el-button type="primary" :loading="saving" @click="save">保存</el-button>
+        </div>
+      </div>
+    </template>
+  </el-drawer>
+</script>
+
+  <script src="/static/vendor/vue/vue.global.prod.js"></script>
+  <script src="/static/vendor/element-plus/index.full.min.js"></script>
+  <script src="/static/vendor/icons/index.iife.min.js"></script>
+  <script src="/static/linhub/home-link.js?v=2"></script>
+  <script>
+    const SERVER_OPTIONS = {$optionsJson|raw};
+    const SERVER_DEFAULT = {$defaultJson|raw};
+    const SERVER_SELECTED = {$selectedJson|raw};
+    const SERVER_SLOTS = {$slotsJson|raw};
+
+    const app = Vue.createApp({
+      template: '#super-admin-tpl',
+      setup() {
+        const { ref, computed } = Vue;
+        const icons = window.ElementPlusIconsVue || {};
+
+        const nameRef = ref('{$displayName}');
+        const userId = '{$identity->id}';
+        const roleLabel = '{$roleLabel}';
+        const homeKey = '{$homeKey}';
+
+        const entries = ref(SERVER_SELECTED);
+        const zones = Vue.reactive({
+          'home.top': SERVER_SLOTS['home.top'] || [],
+          'home.bottom': SERVER_SLOTS['home.bottom'] || [],
+        });
+        const drawer = ref(false);
+        const profileDlg = ref(false);
+        const profileName = ref(nameRef.value);
+        const permDlg = ref(false);
+        const permRows = ref([]);
+        const permTotal = ref(0);
+        const permKeyword = ref('');
+        const saving = ref(false);
+        const draft = ref([]);
+        const dragIndex = ref(-1);
+
+        const iconOf = (icon) => icons[icon] || icons.Menu;
+        // 第三方功能包入口（平台内置菜单不标来源）
+        const isPkg = (m) => !m.builtin && !!m.short;
+
+        // 锚点 iframe 高度自适应（同源可直读子文档高度）
+        function onSlotFrameLoad(e, id) {
+          const frame = e.target;
+          try {
+            const h = frame.contentDocument && frame.contentDocument.body
+              ? frame.contentDocument.body.scrollHeight : 0;
+            if (h > 0) frame.style.height = h + 'px';
+          } catch (err) {
+            /* 跨域或空文档时保持默认高度 */
+          }
+        }
+
+        const chosen = computed(() => draft.value);
+        const available = computed(() => {
+          const ids = new Set(draft.value.map((m) => m.id));
+          return SERVER_OPTIONS.filter((m) => !ids.has(m.id));
+        });
+
+        // 权限清单树：按分组（groupTitle）分组，关键字过滤名称/简介，空分组不显示
+        const permTree = computed(() => {
+          const kw = (permKeyword.value || '').trim().toLowerCase();
+          const groups = [];
+          const index = {};
+          for (const p of permRows.value) {
+            if (kw) {
+              const hit = (p.title || '').toLowerCase().includes(kw)
+                || (p.description || '').toLowerCase().includes(kw);
+              if (!hit) continue;
+            }
+            const g = p.groupTitle || p.group || '其他';
+            if (!index[g]) {
+              index[g] = { code: `__group__${g}`, title: g, __group: true, children: [] };
+              groups.push(index[g]);
+            }
+            index[g].children.push(p);
+          }
+          return groups;
+        });
+
+        function openCustom() {
+          // 拷贝当前入口为草稿
+          draft.value = entries.value.map((m) => ({ ...m }));
+          drawer.value = true;
+        }
+        function addChosen(m) {
+          draft.value.push({ ...m });
+        }
+        function removeChosen(idx) {
+          draft.value.splice(idx, 1);
+        }
+
+        // —— HTML5 拖拽排序 ——
+        function onDragStart(idx, e) {
+          dragIndex.value = idx;
+          e.dataTransfer.effectAllowed = 'move';
+        }
+        function onDragOver(idx) {
+          const from = dragIndex.value;
+          if (from === -1 || from === idx) return;
+          const list = draft.value;
+          const moved = list.splice(from, 1)[0];
+          list.splice(idx, 0, moved);
+          dragIndex.value = idx;
+        }
+        function onDrop(idx) {
+          dragIndex.value = -1;
+        }
+
+        function post(body, url = '/admin/home/customSave') {
+          return fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+          }).then((r) => r.json());
+        }
+
+        async function save() {
+          saving.value = true;
+          try {
+            const res = await post({
+              homeKey,
+              menuIds: draft.value.map((m) => m.id),
+            });
+            if (res.code !== 0) throw new Error(res.message || '保存失败');
+            entries.value = draft.value.map((m) => ({ ...m }));
+            drawer.value = false;
+            window.ElementPlus.ElMessage.success('已保存定制');
+          } catch (e) {
+            window.ElementPlus.ElMessage.error(e.message);
+          } finally {
+            saving.value = false;
+          }
+        }
+
+        async function resetDefault() {
+          saving.value = true;
+          try {
+            const res = await post({ homeKey, reset: 1 });
+            if (res.code !== 0) throw new Error(res.message || '重置失败');
+            entries.value = SERVER_DEFAULT.map((m) => ({ ...m }));
+            draft.value = SERVER_DEFAULT.map((m) => ({ ...m }));
+            window.ElementPlus.ElMessage.success('已恢复默认');
+          } catch (e) {
+            window.ElementPlus.ElMessage.error(e.message);
+          } finally {
+            saving.value = false;
+          }
+        }
+
+        function openProfile() {
+          profileName.value = nameRef.value;
+          profileDlg.value = true;
+        }
+
+        async function openPerms() {
+          permDlg.value = true;
+          permRows.value = [];
+          permTotal.value = 0;
+          permKeyword.value = '';
+          try {
+            const res = await fetch('/admin/home/myPerms').then((r) => r.json());
+            if (res.code !== 0) throw new Error(res.message || '加载失败');
+            permRows.value = res.data.perms;
+            permTotal.value = res.data.total;
+          } catch (e) {
+            permDlg.value = false;
+            window.ElementPlus.ElMessage.error(e.message);
+          }
+        }
+
+        async function saveProfile() {
+          const value = profileName.value.trim();
+          if (value === '') {
+            window.ElementPlus.ElMessage.error('显示名称不能为空');
+            return;
+          }
+          saving.value = true;
+          try {
+            const res = await post({ name: value }, '/admin/home/profileSave');
+            if (res.code !== 0) throw new Error(res.message || '保存失败');
+            nameRef.value = res.data.name;
+            profileDlg.value = false;
+            window.ElementPlus.ElMessage.success('已更新用户信息');
+          } catch (e) {
+            window.ElementPlus.ElMessage.error(e.message);
+          } finally {
+            saving.value = false;
+          }
+        }
+
+        return {
+          name: nameRef, userId, roleLabel,
+          entries, zones, drawer, saving, chosen, available, draft, dragIndex,
+          profileDlg, profileName, permDlg, permRows, permTotal, permKeyword, permTree,
+          Setting: icons.Setting, Rank: icons.Rank, Edit: icons.Edit, Key: icons.Key, Search: icons.Search,
+          iconOf, isPkg, openCustom, addChosen, removeChosen,
+          onDragStart, onDragOver, onDrop, onDragEnd: () => { dragIndex.value = -1; },
+          onSlotFrameLoad,
+          save, resetDefault, openProfile, saveProfile, openPerms,
+          openTab: window.linhubOpenTab,
+        };
+      }
+    });
+    for (const [cname, comp] of Object.entries(window.ElementPlusIconsVue)) {
+      app.component(cname, comp);
+    }
+    app.use(window.ElementPlus);
+    app.mount('.home');
+  </script>
+</body>
+
+</html>
