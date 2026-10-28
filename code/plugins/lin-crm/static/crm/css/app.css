@@ -1,5 +1,0 @@
-/* 林客功能包样式（发布到 public/lgg/crm/css/app.css；F-10 统一宿主主题，此处仅本包极少量补充） */
-.funnel-row { display: flex; align-items: center; margin: 8px 0; }
-.funnel-label { width: 180px; color: inherit; font-size: 13px; }
-.funnel-bar { height: 22px; background: var(--el-color-primary, #409eff); color: #fff;
-  border-radius: 4px; font-size: 12px; line-height: 22px; padding-left: 8px; min-width: 60px; }

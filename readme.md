@@ -41,16 +41,15 @@
 │  │  ├─ data/              # 持久业务数据区与 JSON 状态文件
 │  │  ├─ .example.env       # 环境变量模板（复制为 .env 后填写）
 │  │  └─ think              # CLI 入口
-│  └─ plugins/              # 功能包源码
-│     ├─ lin-crm/           # 林客 CRM 功能包
-│     ├─ lin-trade/         # 林销 进销存功能包
-│     └─ linhub-guide/      # 平台使用引导功能包
+│  └─ plugins/              # 功能包源码落地根（本地安装生成，不随仓库分发）
 ├─ coding-guide/            # 编码指引手册（开发第一必读）
 ├─ data/                    # 示例数据（lin-trade 测试数据 SQL）
 ├─ AGENTS.md                # 智能体与协作约定
 ├─ memory.md                # 开发经验沉淀
 └─ readme.md                # 本文
 ```
+
+> 功能包（`code/plugins/`）与打包暂存区（`code/host/package/`）属于本地安装与运行产物，不在仓库中分发；克隆后用平台「功能包管理」安装取得。
 
 ## 快速开始
 

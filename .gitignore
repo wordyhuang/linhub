@@ -12,9 +12,10 @@
 *.env.local
 
 # ── 运行时产物、依赖与生成数据 ──
+/code/plugins/
 /code/host/runtime/
 /code/host/vendor/
-/code/host/package/staging/
+/code/host/package/
 /code/host/data/attach/
 /code/host/data/integration/
 /code/host/data/log/
