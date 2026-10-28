@@ -44,6 +44,10 @@ return [
     ['code' => 'host:recyclebin:view',    'title' => '查看回收站',     'description' => '允许浏览全部功能包与宿主命名空间的回收站托管条目（含孤儿态）与用量统计。', 'group' => 'platform', 'roles' => []],
     ['code' => 'host:recyclebin:manage',  'title' => '管理回收站',     'description' => '允许跨功能包命名空间查看条目载荷、延长保留期、彻底删除（单条/批量）并手动触发到期清理。', 'group' => 'platform', 'roles' => []],
 
+    // 平台公共服务：AP 审批服务（审批中心）
+    ['code' => 'host:approval:view',      'title' => '查看审批单据',   'description' => '允许浏览本人待办、本人已办与审批单详情，并在详情页处理待办。', 'group' => 'platform', 'roles' => []],
+    ['code' => 'host:approval:manage',    'title' => '管理审批单据',   'description' => '允许跨功能包查看全部审批单据与审批服务用量统计，并撤回在办单据。', 'group' => 'platform', 'roles' => []],
+
     // 全局设置（站点名称 / 网络备案号 / logo）
     ['code' => 'host:setting:manage',     'title' => '全局设置',       'description' => '允许维护平台全局设置：站点名称、网络备案号（ICP）与站点 logo。', 'group' => 'platform', 'roles' => []],
 

@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>我的待办 - LinHub 林枢</title>
+  <link rel="icon" type="image/svg+xml" href="/brand/favicon.svg">
+  <link rel="stylesheet" href="/static/vendor/element-plus/index.css">
+  <link rel="stylesheet" href="/static/vendor/workdesktop-ai/style.css">
+  <style>
+    html, body, #app { height: 100%; margin: 0; }
+    body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif; }
+    .ap-page { height: 100%; padding: 16px 20px 24px; box-sizing: border-box; }
+    .ap-mono { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
+    .ap-filter { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; align-items: center; }
+    .ap-pager { display: flex; justify-content: flex-end; margin-top: 12px; }
+    .ap-ops { display: flex; gap: 4px; }
+  </style>
+</head>
+
+<body>
+  <div id="app"></div>
+
+  <script type="text/x-template" id="ap-todo-tpl">
+    <div class="ap-page">
+      <wd-panel :border="true">
+        <wd-tips type="box" style="margin-bottom:12px">
+          我的待办：按审批人快照跨功能包检索当前登录用户需要处理的审批节点。同意按节点口径推进（或签任一人通过 / 会签需全体通过），驳回为整单驳回。
+        </wd-tips>
+
+        <form class="ap-filter" @submit.prevent="search">
+          <el-input v-model="keyword" placeholder="按标题 / 单据编号过滤" style="width:240px" clearable @keyup.enter="search" />
+          <el-button native-type="submit" type="primary" :icon="Search" :loading="loading">检索</el-button>
+          <el-button :icon="RefreshLeft" @click="reload">刷新</el-button>
+        </form>
+
+        <wd-data-grid :data-source="rows" border stripe :with-index="false" :with-pager="false" v-loading="loading">
+          <el-table-column prop="approval_no" label="单据编号" min-width="200">
+            <template #default="{ row }">
+              <a class="ap-mono" :href="'/admin/ApprovalAdmin/detail?no=' + row.approval_no">{{ row.approval_no }}</a>
+            </template>
+          </el-table-column>
+          <el-table-column prop="package" label="功能包" min-width="120">
+            <template #default="{ row }"><span class="ap-mono">{{ row.package }}</span></template>
+          </el-table-column>
+          <el-table-column prop="title" label="标题" min-width="180" show-overflow-tooltip />
+          <el-table-column prop="flow_key" label="流程" min-width="140">
+            <template #default="{ row }"><span class="ap-mono">{{ row.flow_key }}</span></template>
+          </el-table-column>
+          <el-table-column label="提交人" min-width="120">
+            <template #default="{ row }">{{ row.submitter_name || row.submitter_id }}</template>
+          </el-table-column>
+          <el-table-column label="当前节点" min-width="140">
+            <template #default="{ row }">
+              <el-tag size="small" effect="plain">{{ row.node_id }}</el-tag>
+              <el-tag size="small" type="info" style="margin-left:4px">{{ row.node_mode === 'all' ? '会签' : '或签' }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="等待时长" width="120">
+            <template #default="{ row }">{{ formatWait(row.waiting_seconds) }}</template>
+          </el-table-column>
+          <el-table-column prop="submitted_at" label="提交时间" width="180" />
+          <el-table-column label="操作" width="200" fixed="right">
+            <template #default="{ row }">
+              <el-button-group>
+                <el-button size="small" type="success" @click="openAct(row, 'approve')">同意</el-button>
+                <el-button size="small" type="danger" @click="openAct(row, 'reject')">驳回</el-button>
+                <el-button size="small" @click="openDetail(row)">详情</el-button>
+              </el-button-group>
+            </template>
+          </el-table-column>
+          <template #empty><el-empty description="暂无待办审批" :image-size="80" /></template>
+        </wd-data-grid>
+
+        <div class="ap-pager">
+          <el-pagination
+            v-model:current-page="page" v-model:page-size="size"
+            :total="total" :page-sizes="[20, 50, 100]"
+            layout="total, sizes, prev, pager, next, jumper"
+            @current-change="load" @size-change="onSizeChange" />
+        </div>
+      </wd-panel>
+
+      <!-- 审批意见弹窗 -->
+      <el-dialog v-model="actVisible" :title="actMode === 'approve' ? '同意审批' : '驳回审批'" width="480px">
+        <el-form label-width="80px">
+          <el-form-item label="单据">
+            <span class="ap-mono">{{ actRow.approval_no }}</span>
+          </el-form-item>
+          <el-form-item label="标题">{{ actRow.title }}</el-form-item>
+          <el-form-item :label="actMode === 'approve' ? '意见' : '驳回意见'">
+            <el-input v-model="actComment" type="textarea" :rows="4"
+              :placeholder="actMode === 'approve' ? '选填' : '必填：请说明驳回原因'" maxlength="2000" show-word-limit />
+          </el-form-item>
+        </el-form>
+        <template #footer>
+          <el-button @click="actVisible = false">取消</el-button>
+          <el-button :type="actMode === 'approve' ? 'success' : 'danger'" :loading="acting" @click="submitAct">
+            {{ actMode === 'approve' ? '确认同意' : '确认驳回' }}
+          </el-button>
+        </template>
+      </el-dialog>
+    </div>
+  </script>
+
+  <script src="/static/vendor/vue/vue.global.prod.js"></script>
+  <script src="/static/vendor/element-plus/index.full.min.js"></script>
+  <script src="/static/vendor/icons/index.iife.min.js"></script>
+  <script src="/static/vendor/workdesktop-ai/index.umd.js"></script>
+  <script>
+    const WD = window.WorkDesktop;
+    const ElementPlus = window.ElementPlus;
+    const { WorkDesktop } = WD;
+    const { ref } = Vue;
+    const { Search, RefreshLeft } = window.ElementPlusIconsVue || {};
+
+    const app = Vue.createApp({
+      template: '#ap-todo-tpl',
+      setup() {
+        const loading = ref(false);
+        const acting = ref(false);
+        const rows = ref([]);
+        const total = ref(0);
+        const page = ref(1);
+        const size = ref(20);
+        const keyword = ref('');
+        const actVisible = ref(false);
+        const actMode = ref('approve');
+        const actRow = ref({});
+        const actComment = ref('');
+
+        function formatWait(seconds) {
+          const n = Number(seconds) || 0;
+          if (n < 60) return n + ' 秒';
+          if (n < 3600) return Math.floor(n / 60) + ' 分钟';
+          if (n < 86400) return (n / 3600).toFixed(1) + ' 小时';
+          return (n / 86400).toFixed(1) + ' 天';
+        }
+
+        async function load() {
+          loading.value = true;
+          try {
+            const res = await WD.request.get('/admin/approval_admin/pendingRows?page=' + page.value + '&size=' + size.value);
+            if (!res.success) {
+              ElementPlus.ElMessage.error(res.message || '加载失败');
+              return;
+            }
+            const list = res.data.list || [];
+            rows.value = keyword.value
+              ? list.filter(r => (r.title || '').includes(keyword.value) || (r.approval_no || '').includes(keyword.value))
+              : list;
+            total.value = res.data.total || 0;
+          } finally {
+            loading.value = false;
+          }
+        }
+
+        function search() { page.value = 1; load(); }
+        function reload() { keyword.value = ''; page.value = 1; load(); }
+        function onSizeChange() { page.value = 1; load(); }
+        function openDetail(row) { location.href = '/admin/ApprovalAdmin/detail?no=' + row.approval_no; }
+
+        function openAct(row, mode) {
+          actRow.value = row;
+          actMode.value = mode;
+          actComment.value = '';
+          actVisible.value = true;
+        }
+
+        async function submitAct() {
+          if (actMode.value === 'reject' && actComment.value.trim() === '') {
+            ElementPlus.ElMessage.warning('驳回必须填写审批意见');
+            return;
+          }
+          acting.value = true;
+          try {
+            const url = actMode.value === 'approve' ? '/admin/approval_admin/approve' : '/admin/approval_admin/reject';
+            const res = await WD.request.post(url, { no: actRow.value.approval_no, comment: actComment.value });
+            ElementPlus.ElMessage[res.success ? 'success' : 'error'](res.message || (res.success ? '已提交' : '提交失败'));
+            if (res.success) {
+              actVisible.value = false;
+              load();
+            }
+          } finally {
+            acting.value = false;
+          }
+        }
+
+        load();
+
+        return {
+          loading, acting, rows, total, page, size, keyword,
+          actVisible, actMode, actRow, actComment,
+          load, search, reload, onSizeChange, openDetail, openAct, submitAct, formatWait,
+          Search, RefreshLeft
+        };
+      }
+    });
+
+    for (const [name, comp] of Object.entries(window.ElementPlusIconsVue)) {
+      app.component(name, comp);
+    }
+    app.use(ElementPlus);
+    app.use(WorkDesktop);
+    app.mount('#app');
+  </script>
+</body>
+
+</html>

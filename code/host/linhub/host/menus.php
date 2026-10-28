@@ -62,6 +62,12 @@ return [
     ['id' => 'menu.superadmin.backup',      'parent' => 'menu.superadmin.datasec', 'title' => '归档备份', 'route' => '/admin/backup/index',   'icon' => 'FolderOpened',  'order' => 10, 'perms' => ['host:backup:view']],
     ['id' => 'menu.superadmin.schema',      'parent' => 'menu.superadmin.datasec', 'title' => 'Schema 看板','route' => '/admin/schema/diff',    'icon' => 'Coin',          'order' => 20, 'perms' => ['host:schema:view']],
 
+    // 审批中心：平台审批服务（AP）的审批人视角入口（D11 一级菜单）
+    ['id' => 'menu.superadmin.approval',        'parent' => 'menu.superadmin',   'title' => '审批中心',   'route' => '',                                    'icon' => 'Finished',      'order' => 50, 'perms' => []],
+    ['id' => 'menu.superadmin.approval.todo',   'parent' => 'menu.superadmin.approval', 'title' => '我的待办', 'route' => '/admin/ApprovalAdmin/todo',   'icon' => 'AlarmClock',    'order' => 10, 'perms' => ['host:approval:view']],
+    ['id' => 'menu.superadmin.approval.done',   'parent' => 'menu.superadmin.approval', 'title' => '我的已办', 'route' => '/admin/ApprovalAdmin/done',   'icon' => 'CircleCheck',   'order' => 20, 'perms' => ['host:approval:view']],
+    ['id' => 'menu.superadmin.approval.all',    'parent' => 'menu.superadmin.approval', 'title' => '全部单据', 'route' => '/admin/ApprovalAdmin/index',  'icon' => 'Document',      'order' => 30, 'perms' => ['host:approval:manage']],
+
     ['id' => 'menu.superadmin.audit',       'parent' => 'menu.superadmin',   'title' => '日志审计',   'route' => '/admin/audit/index',      'icon' => 'Document',      'order' => 100, 'perms' => ['host:audit:view']],
     ['id' => 'menu.superadmin.site',        'parent' => 'menu.superadmin',   'title' => '全局设置',   'route' => '/admin/site_admin/index',   'icon' => 'Setting',       'order' => 110, 'perms' => ['host:setting:manage']],
 ];

@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>审批单详情 - LinHub 林枢</title>
+  <link rel="icon" type="image/svg+xml" href="/brand/favicon.svg">
+  <link rel="stylesheet" href="/static/vendor/element-plus/index.css">
+  <link rel="stylesheet" href="/static/vendor/workdesktop-ai/style.css">
+  <style>
+    html, body, #app { height: 100%; margin: 0; }
+    body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif; }
+    .ap-page { height: 100%; padding: 16px 20px 24px; box-sizing: border-box; overflow: auto; }
+    .ap-mono { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
+    .ap-block { margin-top: 16px; }
+    .ap-block h4 { margin: 0 0 8px; font-size: 14px; font-weight: 600; }
+    .ap-payload { background: #0f172a; color: #e2e8f0; border-radius: 6px; padding: 12px; margin: 0; overflow: auto; max-height: 320px; font-size: 12px; line-height: 1.6; }
+    .ap-ops { display: flex; gap: 8px; }
+    .ap-empty { color: #94a3b8; font-size: 13px; padding: 8px 0; }
+  </style>
+</head>
+
+<body>
+  <div id="app"></div>
+
+  <script type="text/x-template" id="ap-detail-tpl">
+    <div class="ap-page" v-loading="loading">
+      <wd-panel :border="true">
+        <template #title>
+          <div style="display:flex;align-items:center;gap:8px">
+            <span>审批单详情</span>
+            <span class="ap-mono" v-if="detail.approval_no">{{ detail.approval_no }}</span>
+            <el-tag size="small" :type="statusType(detail.status)">{{ statusText(detail.status) }}</el-tag>
+            <el-tag v-if="detail.orphaned" size="small" type="warning" effect="dark">包已卸载（冻结）</el-tag>
+          </div>
+        </template>
+        <template #toolbar>
+          <div class="ap-ops">
+            <el-button size="small" :icon="Back" @click="goBack">返回</el-button>
+            <el-button size="small" @click="load">刷新</el-button>
+            <el-button v-if="detail.can_act" size="small" type="success" @click="openAct('approve')">同意</el-button>
+            <el-button v-if="detail.can_act" size="small" type="danger" @click="openAct('reject')">驳回</el-button>
+            <el-button v-if="detail.status === 'pending' && !detail.orphaned" size="small" type="warning" @click="openAct('cancel')">撤回</el-button>
+          </div>
+        </template>
+
+        <template v-if="detail.approval_no">
+          <el-descriptions :column="3" border size="small">
+            <el-descriptions-item label="功能包"><span class="ap-mono">{{ detail.package }}</span></el-descriptions-item>
+            <el-descriptions-item label="流程"><span class="ap-mono">{{ detail.flow_key }}@v{{ detail.flow_version }}</span></el-descriptions-item>
+            <el-descriptions-item label="提交人">{{ detail.submitter_name || detail.submitter_id }}</el-descriptions-item>
+            <el-descriptions-item label="标题" :span="2">{{ detail.title }}</el-descriptions-item>
+            <el-descriptions-item label="提交时间">{{ detail.submitted_at }}</el-descriptions-item>
+            <el-descriptions-item label="摘要" :span="2">{{ detail.summary || '—' }}</el-descriptions-item>
+            <el-descriptions-item label="结束时间">{{ detail.finished_at || '—' }}</el-descriptions-item>
+            <el-descriptions-item label="结束意见" :span="3">{{ detail.finish_comment || '—' }}</el-descriptions-item>
+            <el-descriptions-item label="当前节点" :span="3">
+              <template v-if="detail.current_nodes && detail.current_nodes.length">
+                <el-tag v-for="n in detail.current_nodes" :key="n" size="small" type="warning" style="margin-right:4px">{{ n }}</el-tag>
+              </template>
+              <span v-else>—</span>
+            </el-descriptions-item>
+          </el-descriptions>
+
+          <div class="ap-block">
+            <h4>提交内容（payload 快照）</h4>
+            <pre class="ap-payload">{{ payloadText }}</pre>
+          </div>
+
+          <div class="ap-block">
+            <h4>节点实例链</h4>
+            <el-table :data="detail.nodes" border size="small" empty-text="暂无节点实例">
+              <el-table-column prop="node_id" label="节点" width="130">
+                <template #default="{ row }"><span class="ap-mono">{{ row.node_id }}</span></template>
+              </el-table-column>
+              <el-table-column label="类型" width="90">
+                <template #default="{ row }">{{ row.node_type === 'approval' ? '审批' : row.node_type }}</template>
+              </el-table-column>
+              <el-table-column label="模式" width="80">
+                <template #default="{ row }">{{ row.mode === 'all' ? '会签' : '或签' }}</template>
+              </el-table-column>
+              <el-table-column label="审批人快照" min-width="220">
+                <template #default="{ row }">
+                  <span class="ap-mono">{{ (row.approvers || []).join(', ') || '—' }}</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="状态" width="100">
+                <template #default="{ row }">
+                  <el-tag size="small" :type="nodeType(row.status)">{{ nodeText(row.status) }}</el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="分支路径" min-width="120">
+                <template #default="{ row }"><span class="ap-mono">{{ (row.branch_path || []).join(' / ') || '—' }}</span></template>
+              </el-table-column>
+              <el-table-column prop="activated_at" label="激活时间" width="180" />
+              <el-table-column prop="finished_at" label="结束时间" width="180">
+                <template #default="{ row }">{{ row.finished_at || '—' }}</template>
+              </el-table-column>
+            </el-table>
+          </div>
+
+          <div class="ap-block">
+            <h4>动作时间线</h4>
+            <el-timeline v-if="detail.actions && detail.actions.length">
+              <el-timeline-item v-for="a in detail.actions" :key="a.id"
+                :timestamp="a.acted_at" :type="actionType(a.action)" placement="top">
+                <b>{{ actionText(a.action) }}</b>
+                <span style="margin-left:8px">{{ a.actor_name || a.actor_id }}</span>
+                <span v-if="a.comment" style="margin-left:8px;color:#64748b">{{ a.comment }}</span>
+              </el-timeline-item>
+            </el-timeline>
+            <div v-else class="ap-empty">暂无动作记录</div>
+          </div>
+        </template>
+        <template v-else>
+          <el-empty description="单据不存在或已被清理" :image-size="90" />
+        </template>
+      </wd-panel>
+
+      <el-dialog v-model="actVisible" :title="actTitle" width="480px">
+        <el-form label-width="80px">
+          <el-form-item :label="actMode === 'cancel' ? '撤回说明' : (actMode === 'approve' ? '意见' : '驳回意见')">
+            <el-input v-model="actComment" type="textarea" :rows="4" maxlength="2000" show-word-limit
+              :placeholder="actMode === 'reject' ? '必填：请说明驳回原因' : '选填'" />
+          </el-form-item>
+        </el-form>
+        <template #footer>
+          <el-button @click="actVisible = false">取消</el-button>
+          <el-button :type="actMode === 'approve' ? 'success' : (actMode === 'reject' ? 'danger' : 'warning')"
+            :loading="acting" @click="submitAct">确认</el-button>
+        </template>
+      </el-dialog>
+    </div>
+  </script>
+
+  <script src="/static/vendor/vue/vue.global.prod.js"></script>
+  <script src="/static/vendor/element-plus/index.full.min.js"></script>
+  <script src="/static/vendor/icons/index.iife.min.js"></script>
+  <script src="/static/vendor/workdesktop-ai/index.umd.js"></script>
+  <script>
+    const WD = window.WorkDesktop;
+    const ElementPlus = window.ElementPlus;
+    const { WorkDesktop } = WD;
+    const { ref, computed } = Vue;
+    const { Back } = window.ElementPlusIconsVue || {};
+
+    const STATUS_TEXT = { pending: '在办', approved: '已通过', rejected: '已驳回', cancelled: '已撤回' };
+    const STATUS_TYPE = { pending: 'warning', approved: 'success', rejected: 'danger', cancelled: 'info' };
+    const NODE_TEXT = { waiting: '等待', active: '待审批', approved: '已通过', rejected: '已驳回', skipped: '已终止', error: '异常' };
+    const NODE_TYPE = { waiting: 'info', active: 'warning', approved: 'success', rejected: 'danger', skipped: 'info', error: 'danger' };
+    const ACTION_TEXT = { submit: '提交', approve: '同意', reject: '驳回', cancel: '撤回' };
+    const ACTION_TYPE = { submit: 'primary', approve: 'success', reject: 'danger', cancel: 'warning' };
+
+    const app = Vue.createApp({
+      template: '#ap-detail-tpl',
+      setup() {
+        const loading = ref(false);
+        const acting = ref(false);
+        const detail = ref({});
+        const actVisible = ref(false);
+        const actMode = ref('approve');
+        const actComment = ref('');
+        const approvalNo = new URLSearchParams(location.search).get('no') || '';
+
+        const payloadText = computed(() => JSON.stringify(detail.value.payload || {}, null, 2));
+        const actTitle = computed(() => ({ approve: '同意审批', reject: '驳回审批', cancel: '撤回单据' }[actMode.value] || '审批操作'));
+
+        function statusText(s) { return STATUS_TEXT[s] || s || '—'; }
+        function statusType(s) { return STATUS_TYPE[s] || 'info'; }
+        function nodeText(s) { return NODE_TEXT[s] || s || '—'; }
+        function nodeType(s) { return NODE_TYPE[s] || 'info'; }
+        function actionText(s) { return ACTION_TEXT[s] || s; }
+        function actionType(s) { return ACTION_TYPE[s] || 'primary'; }
+
+        async function load() {
+          if (!approvalNo) { detail.value = {}; return; }
+          loading.value = true;
+          try {
+            const res = await WD.request.get('/admin/approval_admin/detailData?no=' + encodeURIComponent(approvalNo));
+            if (!res.success) {
+              ElementPlus.ElMessage.error(res.message || '加载失败');
+              detail.value = {};
+              return;
+            }
+            detail.value = res.data || {};
+          } finally {
+            loading.value = false;
+          }
+        }
+
+        function goBack() { history.length > 1 ? history.back() : (location.href = '/admin/ApprovalAdmin/index'); }
+
+        function openAct(mode) {
+          actMode.value = mode;
+          actComment.value = '';
+          actVisible.value = true;
+        }
+
+        async function submitAct() {
+          if (actMode.value === 'reject' && actComment.value.trim() === '') {
+            ElementPlus.ElMessage.warning('驳回必须填写审批意见');
+            return;
+          }
+          acting.value = true;
+          try {
+            const url = '/admin/approval_admin/' + actMode.value;
+            const res = await WD.request.post(url, { no: approvalNo, comment: actComment.value });
+            ElementPlus.ElMessage[res.success ? 'success' : 'error'](res.message || (res.success ? '已提交' : '提交失败'));
+            if (res.success) {
+              actVisible.value = false;
+              load();
+            }
+          } finally {
+            acting.value = false;
+          }
+        }
+
+        load();
+
+        return {
+          loading, acting, detail, actVisible, actMode, actComment, actTitle, payloadText,
+          load, goBack, openAct, submitAct,
+          statusText, statusType, nodeText, nodeType, actionText, actionType,
+          Back
+        };
+      }
+    });
+
+    for (const [name, comp] of Object.entries(window.ElementPlusIconsVue)) {
+      app.component(name, comp);
+    }
+    app.use(ElementPlus);
+    app.use(WorkDesktop);
+    app.mount('#app');
+  </script>
+</body>
+
+</html>

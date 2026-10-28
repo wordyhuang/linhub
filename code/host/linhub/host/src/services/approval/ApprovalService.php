@@ -64,7 +64,7 @@ final class ApprovalService implements Approval
 
     private PlatformStore $store;
 
-    private ?RbacStorage $rbac;
+    private ?RbacStorage $rbac = null;
 
     /** 自定义审批人解析器：name => handler class（进程内静态注册表，同名覆盖）。 */
     private static array $resolvers = [];
@@ -240,6 +240,8 @@ final class ApprovalService implements Approval
 
         $this->collectActivated = false;
         $instance = $this->instanceById($instanceId);
+        // 解析器失败记录须在 flushNotifications（内部 resetQueues）之前取走
+        $resolverErrors = $this->resolverErrors;
 
         $this->queueEvent(self::EVENT_SUBMITTED, [
             'approval_no' => $approvalNo,
@@ -258,11 +260,9 @@ final class ApprovalService implements Approval
             'submitter_id' => $submitterId,
         ]);
 
-        if ($this->resolverErrors !== []) {
-            $errors = $this->resolverErrors;
-            $this->resetQueues();
+        if ($resolverErrors !== []) {
             throw new ApprovalResolverError(
-                "单据 {$approvalNo} 部分节点审批人解析失败：" . implode('；', $errors)
+                "单据 {$approvalNo} 部分节点审批人解析失败：" . implode('；', $resolverErrors)
             );
         }
 
@@ -294,6 +294,12 @@ final class ApprovalService implements Approval
         $where = [];
         if ($scope !== '') {
             $where[] = 'package=' . $this->store->quote($scope);
+        } else {
+            // 跨包全量视图（审批中心「全部单据」）允许再按包名收窄
+            $pkg = trim((string) ($filter['package'] ?? ''));
+            if ($pkg !== '') {
+                $where[] = 'package=' . $this->store->quote($pkg);
+            }
         }
         $status = trim((string) ($filter['status'] ?? ''));
         if ($status !== '') {

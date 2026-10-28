@@ -22,6 +22,7 @@ use linhub\host\migration\PdoGateway;
 use linhub\host\package\PackageIntegrity;
 use linhub\host\package\PackagePacker;
 use linhub\host\package\PackageScaffold;
+use linhub\host\services\approval\ApprovalService;
 use linhub\host\services\messaging\MessagingService;
 use linhub\host\services\recyclebin\RecycleBinService;
 use linhub\host\support\HostBootstrap;
@@ -1063,13 +1064,20 @@ class Package extends AdminController
             // 回收站条目打孤儿态（数据保留，重装同名包自动接管）；DB 不可用时容忍失败，不阻断卸载
             $orphaned = 0;
             $orphanError = '';
+            $approvalOrphaned = 0;
+            $approvalOrphanError = '';
             try {
                 $conn = $this->connect();
                 if ($conn['ok']) {
                     $orphaned = (new RecycleBinService(new PlatformStore($conn['gateway'])))->orphanPackage($short);
+                    // 审批单据打孤儿态：pending 单据冻结，已终态单据与动作流水永久保留
+                    $approvalOrphaned = (new ApprovalService(
+                        new PlatformStore($conn['gateway'])
+                    ))->orphanPackage($short);
                 }
             } catch (\Throwable $e) {
                 $orphanError = $e->getMessage();
+                $approvalOrphanError = $e->getMessage();
             }
 
             MessagingService::broadcastLifecycle(MessagingService::EVENT_REMOVED, $short, ['name' => $name]);
@@ -1080,9 +1088,12 @@ class Package extends AdminController
                 'translation_error' => $purgeError,
                 'recycle_bin_orphaned' => $orphaned,
                 'recycle_bin_error' => $orphanError,
+                'approval_orphaned' => $approvalOrphaned,
+                'approval_error' => $approvalOrphanError,
             ], '功能包已卸载' . ($handle === 'drop' ? '，数据表已回滚删除' : '，数据表已保留')
                 . ($purged > 0 ? "，已清除 {$purged} 条翻译词条" : '')
-                . ($orphaned > 0 ? "，回收站 {$orphaned} 条数据已转托管" : ''));
+                . ($orphaned > 0 ? "，回收站 {$orphaned} 条数据已转托管" : '')
+                . ($approvalOrphaned > 0 ? "，审批单据 {$approvalOrphaned} 条已冻结" : ''));
         } catch (\Throwable $e) {
             return $this->jsonFail($e->getMessage());
         }

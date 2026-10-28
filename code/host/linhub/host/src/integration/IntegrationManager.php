@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace linhub\host\integration;
 
 use linhub\host\migration\DbGateway;
+use linhub\host\services\approval\ApprovalService;
 use linhub\host\services\recyclebin\RecycleBinService;
 use linhub\host\services\support\PlatformStore;
 use linhub\host\services\translation\TranslationSeeder;
@@ -110,6 +111,12 @@ final class IntegrationManager
                 (new RecycleBinService(new PlatformStore($this->db)))->adoptPackage($short);
             } catch (\Throwable $e) {
                 $this->warnings[] = '回收站接管失败：' . $e->getMessage();
+            }
+            // 审批单据接管：清孤儿态并按 flow 定义重新解析在途节点审批人快照
+            try {
+                (new ApprovalService(new PlatformStore($this->db)))->adoptPackage($short);
+            } catch (\Throwable $e) {
+                $this->warnings[] = '审批单据接管失败：' . $e->getMessage();
             }
         }
     }

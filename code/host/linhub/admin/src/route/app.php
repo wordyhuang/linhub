@@ -161,6 +161,19 @@ Route::post('recyclebin_admin/purge', 'recyclebin_admin/purge');
 Route::post('recyclebin_admin/purgeBatch', 'recyclebin_admin/purgeBatch');
 Route::post('recyclebin_admin/cleanExpired', 'recyclebin_admin/cleanExpired');
 
+// —— 平台公共服务：AP 审批中心（我的待办 / 我的已办 / 全部单据 / 详情 / 审批动作） ——
+Route::get('approval_admin/index', 'approval_admin/index');
+Route::get('approval_admin/todo', 'approval_admin/todo');
+Route::get('approval_admin/done', 'approval_admin/done');
+Route::get('approval_admin/detail', 'approval_admin/detail');
+Route::get('approval_admin/rows', 'approval_admin/rows');
+Route::get('approval_admin/pendingRows', 'approval_admin/pendingRows');
+Route::get('approval_admin/handledRows', 'approval_admin/handledRows');
+Route::get('approval_admin/detailData', 'approval_admin/detailData');
+Route::post('approval_admin/approve', 'approval_admin/approve');
+Route::post('approval_admin/reject', 'approval_admin/reject');
+Route::post('approval_admin/cancel', 'approval_admin/cancel');
+
 // —— 平台公共服务：LS-6 登录态查看（只读） ——
 Route::get('login_state_admin/index', 'login_state_admin/index');
 Route::get('login_state_admin/snapshot', 'login_state_admin/snapshot');

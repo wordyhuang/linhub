@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>我的已办 - LinHub 林枢</title>
+  <link rel="icon" type="image/svg+xml" href="/brand/favicon.svg">
+  <link rel="stylesheet" href="/static/vendor/element-plus/index.css">
+  <link rel="stylesheet" href="/static/vendor/workdesktop-ai/style.css">
+  <style>
+    html, body, #app { height: 100%; margin: 0; }
+    body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif; }
+    .ap-page { height: 100%; padding: 16px 20px 24px; box-sizing: border-box; }
+    .ap-mono { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
+    .ap-pager { display: flex; justify-content: flex-end; margin-top: 12px; }
+  </style>
+</head>
+
+<body>
+  <div id="app"></div>
+
+  <script type="text/x-template" id="ap-done-tpl">
+    <div class="ap-page">
+      <wd-panel :border="true">
+        <wd-tips type="box" style="margin-bottom:12px">
+          我的已办：当前登录用户同意或驳回过的审批单（按单据去重，展示我最近一次动作）。
+        </wd-tips>
+
+        <wd-data-grid :data-source="rows" border stripe :with-index="false" :with-pager="false" v-loading="loading">
+          <el-table-column prop="approval_no" label="单据编号" min-width="200">
+            <template #default="{ row }">
+              <a class="ap-mono" :href="'/admin/ApprovalAdmin/detail?no=' + row.approval_no">{{ row.approval_no }}</a>
+            </template>
+          </el-table-column>
+          <el-table-column prop="package" label="功能包" min-width="120">
+            <template #default="{ row }"><span class="ap-mono">{{ row.package }}</span></template>
+          </el-table-column>
+          <el-table-column prop="title" label="标题" min-width="180" show-overflow-tooltip />
+          <el-table-column label="我的动作" width="110">
+            <template #default="{ row }">
+              <el-tag size="small" :type="row.my_action === 'approve' ? 'success' : 'danger'">
+                {{ row.my_action === 'approve' ? '同意' : '驳回' }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="my_comment" label="我的意见" min-width="180" show-overflow-tooltip>
+            <template #default="{ row }">{{ row.my_comment || '—' }}</template>
+          </el-table-column>
+          <el-table-column label="单据状态" width="110">
+            <template #default="{ row }">
+              <el-tag size="small" :type="statusType(row.status)">{{ statusText(row.status) }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="my_acted_at" label="操作时间" width="180" />
+          <el-table-column label="操作" width="90" fixed="right">
+            <template #default="{ row }">
+              <el-button size="small" text type="primary" @click="openDetail(row)">详情</el-button>
+            </template>
+          </el-table-column>
+          <template #empty><el-empty description="暂无已办记录" :image-size="80" /></template>
+        </wd-data-grid>
+
+        <div class="ap-pager">
+          <el-pagination
+            v-model:current-page="page" v-model:page-size="size"
+            :total="total" :page-sizes="[20, 50, 100]"
+            layout="total, sizes, prev, pager, next, jumper"
+            @current-change="load" @size-change="onSizeChange" />
+        </div>
+      </wd-panel>
+    </div>
+  </script>
+
+  <script src="/static/vendor/vue/vue.global.prod.js"></script>
+  <script src="/static/vendor/element-plus/index.full.min.js"></script>
+  <script src="/static/vendor/icons/index.iife.min.js"></script>
+  <script src="/static/vendor/workdesktop-ai/index.umd.js"></script>
+  <script>
+    const WD = window.WorkDesktop;
+    const ElementPlus = window.ElementPlus;
+    const { WorkDesktop } = WD;
+    const { ref } = Vue;
+
+    const STATUS_TEXT = { pending: '在办', approved: '已通过', rejected: '已驳回', cancelled: '已撤回' };
+    const STATUS_TYPE = { pending: 'warning', approved: 'success', rejected: 'danger', cancelled: 'info' };
+
+    const app = Vue.createApp({
+      template: '#ap-done-tpl',
+      setup() {
+        const loading = ref(false);
+        const rows = ref([]);
+        const total = ref(0);
+        const page = ref(1);
+        const size = ref(20);
+
+        function statusText(s) { return STATUS_TEXT[s] || s || '—'; }
+        function statusType(s) { return STATUS_TYPE[s] || 'info'; }
+
+        async function load() {
+          loading.value = true;
+          try {
+            const res = await WD.request.get('/admin/approval_admin/handledRows?page=' + page.value + '&size=' + size.value);
+            if (!res.success) {
+              ElementPlus.ElMessage.error(res.message || '加载失败');
+              return;
+            }
+            rows.value = res.data.list || [];
+            total.value = res.data.total || 0;
+          } finally {
+            loading.value = false;
+          }
+        }
+
+        function onSizeChange() { page.value = 1; load(); }
+        function openDetail(row) { location.href = '/admin/ApprovalAdmin/detail?no=' + row.approval_no; }
+
+        load();
+
+        return { loading, rows, total, page, size, load, onSizeChange, openDetail, statusText, statusType };
+      }
+    });
+
+    for (const [name, comp] of Object.entries(window.ElementPlusIconsVue)) {
+      app.component(name, comp);
+    }
+    app.use(ElementPlus);
+    app.use(WorkDesktop);
+    app.mount('#app');
+  </script>
+</body>
+
+</html>
