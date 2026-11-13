@@ -4,11 +4,12 @@ declare(strict_types=1);
 
 /*
  * 文档创建时间：2026-10-20
- * 最后修改时间：2026-10-21
- * 当前版本：V1.1
+ * 最后修改时间：2026-11-10
+ * 当前版本：V1.2
  * 适用对象：功能包开发者
- * 核心目标：向功能包开放「用户 / 角色 / 权限 / 权限组」查询能力 + 功能包接入角色（幂等，无则创建、有则跳过）
- * 文档简略描述：聚合宿主 RBAC 数据源（RbacUser / RbacRoles / RbacPermissionGroup / PermissionRegistry / RbacPermissionCalculator）。以只读为主；V1.1 新增 ensureRole 写方法供功能包接入角色。除 ensureRole 外其余方法不抛异常。
+ * 核心目标：向功能包开放「用户 / 角色 / 权限 / 权限组」只读查询能力
+ * 文档简略描述：聚合宿主 RBAC 数据源（RbacUser / RbacRoles / RbacPermissionGroup / PermissionRegistry / RbacPermissionCalculator）。
+ *               V1.2 收缩：角色仅限 5 个系统预设角色且不可增删改，移除 ensureRole 写方法；全部方法只读、不抛异常。
  */
 
 namespace linhub\host\services\auth;
@@ -17,9 +18,9 @@ namespace linhub\host\services\auth;
  * 平台账号与权限服务契约（AQ-1 ~ AQ-11）。
  *
  * 设计原则：
- *  - 只读为主：除 ensureRole 外的所有方法不得修改宿主 / UAIS 数据；任何底层异常都被吞掉返回空结构，功能包侧永远不抛。
- *  - 幂等接入：ensureRole 是唯一的写方法，供功能包在接入/安装时声明自己需要的系统角色；无同名者则创建、已存在则跳过，
- *    结果携带 created 标志与 error（写失败时返回原因，不会静默吞掉写错误导致角色缺失）。
+ *  - 全只读：所有方法不得修改宿主 / UAIS 数据；任何底层异常都被吞掉返回空结构，功能包侧永远不抛。
+ *  - 角色收敛（V1.2）：系统仅提供 5 个预设角色（工作者 / 审核员 / 功能管理员 / 系统管理员 / 超级管理员），
+ *    角色不可新增、改名或删除；权限项 roles 只能落这 5 个预设角色英文键或为空（不限角色）。
  *  - 收敛字段：只暴露功能包「鉴权 / 菜单 / 归属判断」所需的必要字段，不返回 token、密码、会话内部态。
  *  - 身份入参：除 current* 系列外，入参均为字符串 id（本地用户 id、角色 id、权限组 id、权限点 code）；UAIS refId 单独提供按 refId 查询入口。
  *
@@ -28,18 +29,6 @@ namespace linhub\host\services\auth;
  */
 interface RbacQuery
 {
-    /**
-     * 接入角色（幂等，功能包调用）。按角色名判重：已存在同名校则跳过，否则以指定类型创建。
-     * 类型白名单沿用 RbacRoles::TYPE_NAMES，且禁止自建超级管理员（SUPER_ADMIN）。
-     *
-     * @param string $name 角色名称（判重键，非空）
-     * @param string $type 角色类型（WORKER / FUNCTIONAL_ADMIN / SYSTEM_ADMIN，SUPER_ADMIN 禁止）
-     * @return array{created:bool, id:string, name:string, type:string, error:string}
-     *         - created = true  ：本次新建成功，id 为新角色 id；
-     *         - created = false 且 id 非空：已存在同名角色，跳过，id 为已有角色 id；
-     *         - created = false 且 error 非空：写操作失败（如非法类型 / 名称非法 / 底层异常），id 为空。
-     */
-    public function ensureRole(string $name, string $type): array;
     /**
      * 当前登录态快照（聚合 loginstate 已有能力，避免功能包再注入一个服务）。
      *
@@ -88,9 +77,9 @@ interface RbacQuery
     public function permCodesOf(string $userId): array;
 
     /**
-     * 角色列表。
+     * 角色列表（仅 5 个系统预设角色）。
      *
-     * @return list<array{id:string,name:string,type:string,typeName:string,readonly:bool,userCount:int}>
+     * @return list<array{id:string,name:string,readonly:bool,userCount:int}>
      */
     public function listRoles(): array;
 

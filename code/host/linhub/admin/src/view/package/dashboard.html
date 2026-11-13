@@ -8,6 +8,7 @@
   <link rel="icon" type="image/svg+xml" href="/brand/favicon.svg">
   <link rel="stylesheet" href="/static/vendor/element-plus/index.css">
   <link rel="stylesheet" href="/static/vendor/workdesktop-ai/style.css">
+  <link rel="stylesheet" href="/static/linhub/cards.css">
   <style>
     html,
     body,
@@ -88,6 +89,25 @@
       color: var(--wd-text-color-secondary, #6b7280);
     }
 
+    /* —— 明细筛选工具栏 —— */
+    .dash-toolbar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-bottom: 12px;
+      width: 100%;
+    }
+
+    .dash-toolbar-count {
+      font-size: 12px;
+      color: var(--wd-text-color-secondary, #6b7280);
+    }
+
+    .dash-toolbar-spacer {
+      flex: 1 1 auto;
+    }
+
     .num {
       font-variant-numeric: tabular-nums;
     }
@@ -158,13 +178,23 @@
           </div>
 
         <!-- 明细：已安装功能包 -->
-        <wd-panel :border="true" title="已安装功能包明细">
+        <wd-panel description-align="right" :border="true" title="已安装功能包明细">
             <template #description>
               逐包统计：接入点数量、备份与版本态势。接入点以注册表（registry.json）实际登记为准。
             </template>
 
-          <wd-data-grid :data-source="stats.packages" border stripe :with-index="false" :with-pager="false">
+          <wd-data-grid :data-source="filteredPackages" border stripe :with-index="false" :with-pager="false">
             <template #toolbar>
+              <el-input v-model="pkgKw" placeholder="搜索包名 / 短名 / 标题" clearable style="width:220px">
+                <template #prefix><el-icon><Search /></el-icon></template>
+              </el-input>
+              <el-select v-model="pkgState" clearable placeholder="状态" style="width:110px">
+                <el-option label="启用" value="enabled" />
+                <el-option label="禁用" value="disabled" />
+              </el-select>
+              <el-checkbox v-model="pkgUpgradable">仅看可升级</el-checkbox>
+              <span class="dash-toolbar-count">共 {{ filteredPackages.length }} / {{ stats.packages.length }} 个</span>
+              <span class="dash-toolbar-spacer"></span>
               <el-button @click="loadData">
                 <el-icon><Refresh /></el-icon>
                 <span style="margin-left:4px">刷新</span>
@@ -219,16 +249,58 @@
             <template #empty>
               <el-empty description="尚未安装任何功能包" :image-size="80" />
             </template>
+            <!-- ── 卡片清单模式（DataGrid 内建 modeSwitch 视图；扁平三层，只读看板无操作行） ── -->
+            <template #card-item="{ row }">
+              <div class="lh-card">
+                <div class="lh-card__head">
+                  <div class="lh-card__title">{{ row.title }}</div>
+                  <div class="lh-card__tags">
+                    <el-tag :type="row.state === 'enabled' ? 'success' : 'info'" size="small">{{ row.state === 'enabled' ? '启用' : '禁用' }}</el-tag>
+                    <el-tag v-if="row.upgrade_version" size="small" type="warning" effect="plain">可升级 v{{ row.upgrade_version }}</el-tag>
+                  </div>
+                  <div class="lh-card__extra">
+                    <div class="lh-card__stamp">v{{ row.version || '—' }}</div>
+                  </div>
+                </div>
+                <div class="lh-card__fields">
+                  <div class="lh-card__field is-wide"><div class="k">包名</div><div class="v">{{ row.name }}</div></div>
+                  <div class="lh-card__field"><div class="k">短名</div><div class="v">{{ row.short }}</div></div>
+                  <div class="lh-card__field"><div class="k">接入</div><div class="v">{{ row.access || 'admin' }}</div></div>
+                  <div class="lh-card__field"><div class="k">权限点</div><div class="v">{{ row.permissions }}</div></div>
+                  <div class="lh-card__field"><div class="k">菜单</div><div class="v">{{ row.menus }}</div></div>
+                  <div class="lh-card__field"><div class="k">工作台插槽</div><div class="v">{{ row.slots }}</div></div>
+                  <div class="lh-card__field"><div class="k">数据表</div><div class="v">{{ row.tables }}</div></div>
+                  <div class="lh-card__field"><div class="k">备份</div><div class="v">{{ row.backups }}</div></div>
+                </div>
+              </div>
+            </template>
           </wd-data-grid>
         </wd-panel>
 
         <!-- 明细：暂存区功能包 -->
-        <wd-panel :border="true" title="暂存区功能包明细">
+        <wd-panel description-align="right" :border="true" title="暂存区功能包明细">
             <template #description>
               暂存目录（lgg-pkg-短名）内的功能包：完整性与审核状态统计。待审核 {{ stats.stagingOverall.pending }} · 已驳回 {{ stats.stagingOverall.rejected }} · 可升级 {{ stats.stagingOverall.upgradable }}
             </template>
 
-          <wd-data-grid :data-source="stats.staging" border stripe :with-index="false" :with-pager="false">
+          <wd-data-grid :data-source="filteredStaging" border stripe :with-index="false" :with-pager="false">
+            <template #toolbar>
+              <el-input v-model="stgKw" placeholder="搜索目录 / 短名 / 说明" clearable style="width:220px">
+                <template #prefix><el-icon><Search /></el-icon></template>
+              </el-input>
+              <el-select v-model="stgReview" clearable placeholder="审核状态" style="width:130px">
+                <el-option label="待审核" value="pending" />
+                <el-option label="已通过" value="approved" />
+                <el-option label="已驳回" value="rejected" />
+                <el-option label="内容已变更" value="changed" />
+              </el-select>
+              <el-select v-model="stgValid" clearable placeholder="完整性" style="width:110px">
+                <el-option label="通过" value="1" />
+                <el-option label="异常" value="0" />
+              </el-select>
+              <span class="dash-toolbar-count">共 {{ filteredStaging.length }} / {{ stats.staging.length }} 个</span>
+              <span class="dash-toolbar-spacer"></span>
+            </template>
             <el-table-column label="目录 / 短名" min-width="180">
               <template #default="{ row }">
                 <div>{{ row.title }}</div>
@@ -274,6 +346,29 @@
             <template #empty>
               <el-empty description="暂存目录为空，没有可安装的功能包" :image-size="80" />
             </template>
+            <!-- ── 卡片清单模式（DataGrid 内建 modeSwitch 视图；扁平三层，只读看板无操作行） ── -->
+            <template #card-item="{ row }">
+              <div class="lh-card">
+                <div class="lh-card__head">
+                  <div class="lh-card__title">{{ row.title }}</div>
+                  <div class="lh-card__tags">
+                    <el-tag v-if="!row.valid" size="small" type="danger">异常</el-tag>
+                    <el-tag v-else size="small" type="success">通过</el-tag>
+                    <el-tag :type="reviewTagType(row.review_status)" size="small">{{ reviewText(row.review_status) }}</el-tag>
+                  </div>
+                  <div class="lh-card__extra">
+                    <div class="lh-card__stamp">v{{ row.version || '—' }}</div>
+                  </div>
+                </div>
+                <div class="lh-card__fields">
+                  <div class="lh-card__field is-wide"><div class="k">目录</div><div class="v">{{ row.dir }}</div></div>
+                  <div class="lh-card__field"><div class="k">短名</div><div class="v">{{ row.short }}</div></div>
+                  <div class="lh-card__field"><div class="k">审核人</div><div class="v">{{ row.reviewer || '—' }}</div></div>
+                  <div class="lh-card__field is-wide"><div class="k">安装关系</div><div class="v">{{ row.installed ? (row.upgrade_version ? '已安装（可升级，当前 v' + row.installed_version + '）' : '同版本已安装') : '未安装' }}</div></div>
+                  <div class="lh-card__field is-wide"><div class="k">说明</div><div class="v">{{ row.description || '—' }}</div></div>
+                </div>
+              </div>
+            </template>
           </wd-data-grid>
         </wd-panel>
   </div>
@@ -283,11 +378,12 @@
   <script src="/static/vendor/element-plus/index.full.min.js"></script>
   <script src="/static/vendor/icons/index.iife.min.js"></script>
   <script src="/static/vendor/workdesktop-ai/index.umd.js"></script>
+  <script src="/static/linhub/auth-guard.js?v=2"></script>
   <script>
     const WD = window.WorkDesktop;
     const ElementPlus = window.ElementPlus;
     const { WorkDesktop } = WD;
-    const { ref, reactive } = Vue;
+    const { ref, reactive, computed } = Vue;
 
     const app = Vue.createApp({
       template: '#dash-tpl',
@@ -299,6 +395,40 @@
           packages: [],
           staging: [],
           stagingOverall: {},
+        });
+
+        // —— 已安装功能包筛选 ——
+        const pkgKw = ref('');
+        const pkgState = ref('');
+        const pkgUpgradable = ref(false);
+        const filteredPackages = computed(() => {
+          const kw = pkgKw.value.trim().toLowerCase();
+          return stats.value.packages.filter(row => {
+            if (pkgState.value && row.state !== pkgState.value) return false;
+            if (pkgUpgradable.value && !row.upgrade_version) return false;
+            if (kw) {
+              const hay = [row.title, row.name, row.short].map(v => String(v || '').toLowerCase()).join(' ');
+              if (!hay.includes(kw)) return false;
+            }
+            return true;
+          });
+        });
+
+        // —— 暂存区功能包筛选 ——
+        const stgKw = ref('');
+        const stgReview = ref('');
+        const stgValid = ref('');
+        const filteredStaging = computed(() => {
+          const kw = stgKw.value.trim().toLowerCase();
+          return stats.value.staging.filter(row => {
+            if (stgReview.value && (row.review_status || 'pending') !== stgReview.value) return false;
+            if (stgValid.value !== '' && String(Number(row.valid)) !== stgValid.value) return false;
+            if (kw) {
+              const hay = [row.title, row.dir, row.short, row.description].map(v => String(v || '').toLowerCase()).join(' ');
+              if (!hay.includes(kw)) return false;
+            }
+            return true;
+          });
         });
 
         // 把 ISO 8601（如 2026-10-22T13:45:32+08:00）格式化为 YYYY-MM-DD HH:mm:ss
@@ -344,7 +474,11 @@
 
         return {
           hostVersion, loading, stats,
+          pkgKw, pkgState, pkgUpgradable, filteredPackages,
+          stgKw, stgReview, stgValid, filteredStaging,
           fmtIso, fmtDate, reviewText, reviewTagType, loadData,
+          Search: window.ElementPlusIconsVue.Search,
+          Refresh: window.ElementPlusIconsVue.Refresh,
         };
       }
     });

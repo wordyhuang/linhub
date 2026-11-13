@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>日志服务工作台 - LinHub 林枢</title>
+<link rel="icon" type="image/svg+xml" href="/brand/favicon.svg">
+  <link rel="stylesheet" href="/static/vendor/element-plus/index.css">
+  <link rel="stylesheet" href="/static/vendor/workdesktop-ai/style.css">
+  <link rel="stylesheet" href="/static/linhub/cards.css">
+  <style>
+    html,
+    body,
+    #app {
+      height: 100%;
+      margin: 0;
+    }
+
+    body {
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+
+    .lgc-page {
+      height: 100%;
+      padding: 16px 20px 24px;
+      box-sizing: border-box;
+      overflow-y: auto;
+    }
+
+    .lgc-mono {
+      font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+      font-size: 12px;
+    }
+
+    .lgc-cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+
+    .lgc-stat {
+      border: 1px solid var(--el-border-color-light, #e4e7ed);
+      border-radius: 10px;
+      padding: 14px 16px;
+      background: var(--el-bg-color, #fff);
+    }
+
+    .lgc-stat .k {
+      font-size: 12px;
+      color: #909399;
+    }
+
+    .lgc-stat .v {
+      font-size: 22px;
+      font-weight: 700;
+      color: #303133;
+      margin-top: 6px;
+      line-height: 1.2;
+    }
+
+    .lgc-stat .s {
+      font-size: 12px;
+      color: #909399;
+      margin-top: 4px;
+    }
+
+    .lgc-level-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 10px;
+      flex-wrap: wrap;
+    }
+
+    .lgc-level-row .num {
+      font-weight: 600;
+    }
+
+    .lgc-filter {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 12px;
+      flex-wrap: wrap;
+    }
+
+    .lgc-section-title {
+      font-size: 15px;
+      font-weight: 600;
+      color: #303133;
+      margin: 4px 0 10px;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="app"></div>
+
+  <script type="text/x-template" id="lgc-tpl">
+  <div class="lgc-page">
+    <wd-panel description-align="right" :border="true">
+      <wd-tips type="box" style="margin-bottom:14px">
+        运行日志工作台：汇总 runtime/log 落盘文件的体量与月度归档，检索最近日志条目；级别开关与保留策略在「日志设置」中维护。
+      </wd-tips>
+
+      <!-- ── 汇总卡片 ── -->
+      <div class="lgc-cards">
+        <div class="lgc-stat">
+          <div class="k">日志文件总数</div>
+          <div class="v">{{ stats.files }}</div>
+          <div class="s" :title="stats.root">{{ stats.root }}</div>
+        </div>
+        <div class="lgc-stat">
+          <div class="k">占用空间</div>
+          <div class="v">{{ humanSize(stats.bytes) }}</div>
+          <div class="s">按月归档：YYYYMM/host.log</div>
+        </div>
+        <div class="lgc-stat">
+          <div class="k">今日条目</div>
+          <div class="v">{{ today.total }}</div>
+          <div class="lgc-level-row">
+            <el-tag v-for="lv in ['debug','info','warning','error']" :key="lv" size="small"
+              :type="levelTag(lv)" effect="light">{{ lv }} {{ today[lv] }}</el-tag>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── 月度归档 ── -->
+      <div class="lgc-section-title">月度归档</div>
+      <el-table :data="stats.months" border stripe size="small" style="margin-bottom:18px">
+        <el-table-column prop="month" label="月份" width="110">
+          <template #default="{ row }"><span class="lgc-mono">{{ row.month }}</span></template>
+        </el-table-column>
+        <el-table-column prop="files" label="文件数" width="90" />
+        <el-table-column label="大小" width="110">
+          <template #default="{ row }">{{ humanSize(row.bytes) }}</template>
+        </el-table-column>
+        <el-table-column prop="updated_at" label="最近写入" min-width="170">
+          <template #default="{ row }">
+            <span v-if="row.updated_at">{{ row.updated_at }}</span>
+            <span v-else style="color:#bbb">—</span>
+          </template>
+        </el-table-column>
+        <template #empty><el-empty description="暂无归档月份（尚未产生运行日志）" :image-size="80" /></template>
+      </el-table>
+
+      <!-- ── 最近日志 ── -->
+      <div class="lgc-section-title">最近日志（当前月，尾部 512KB）</div>
+      <form class="lgc-filter" @submit.prevent="loadRecent">
+        <el-select v-model="recentLevel" placeholder="全部级别" size="small" style="width:130px" clearable>
+          <el-option v-for="lv in ['debug','info','warning','error']" :key="lv" :label="lv" :value="lv" />
+        </el-select>
+        <el-select v-model="recentLimit" size="small" style="width:110px">
+          <el-option :value="50" label="最近 50 条" />
+          <el-option :value="100" label="最近 100 条" />
+          <el-option :value="200" label="最近 200 条" />
+          <el-option :value="500" label="最近 500 条" />
+        </el-select>
+        <el-button native-type="submit" type="primary" size="small" :loading="loading">刷新</el-button>
+      </form>
+
+      <wd-data-grid :data-source="recent" border stripe :with-index="false">
+        <el-table-column prop="time" label="时间" width="170" />
+        <el-table-column label="级别" width="100">
+          <template #default="{ row }">
+            <el-tag size="small" :type="levelTag(row.level)" effect="light">{{ row.level }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="message" label="消息" min-width="240" show-overflow-tooltip />
+        <el-table-column label="上下文" min-width="100">
+          <template #default="{ row }">
+            <el-popover v-if="row.context" width="360" trigger="click">
+              <pre class="lgc-mono" style="margin:0;white-space:pre-wrap">{{ prettyContext(row.context) }}</pre>
+              <template #reference><el-button size="small" text type="primary">查看</el-button></template>
+            </el-popover>
+            <span v-else style="color:#bbb">—</span>
+          </template>
+        </el-table-column>
+        <template #empty><el-empty description="暂无日志条目" :image-size="80" /></template>
+        <!-- ── 卡片模式（DataGrid modeSwitch 内建视图；统一 lh-card 结构） ── -->
+        <template #card-item="{ row }">
+          <div class="lh-card">
+            <div class="lh-card__head">
+              <div class="lh-card__title">{{ row.message || '—' }}</div>
+              <div class="lh-card__tags">
+                <el-tag size="small" :type="levelTag(row.level)" effect="light">{{ row.level }}</el-tag>
+              </div>
+              <div class="lh-card__extra">
+                <div class="lh-card__stamp">{{ row.time || '—' }}</div>
+              </div>
+            </div>
+            <div class="lh-card__ops" v-if="row.context">
+              <el-popover width="360" trigger="click">
+                <pre class="lgc-mono" style="margin:0;white-space:pre-wrap">{{ prettyContext(row.context) }}</pre>
+                <template #reference><el-button size="small" text type="primary">查看上下文</el-button></template>
+              </el-popover>
+            </div>
+          </div>
+        </template>
+      </wd-data-grid>
+    </wd-panel>
+  </div>
+</script>
+
+  <script src="/static/vendor/vue/vue.global.prod.js"></script>
+  <script src="/static/vendor/element-plus/index.full.min.js"></script>
+  <script src="/static/vendor/icons/index.iife.min.js"></script>
+  <script src="/static/vendor/workdesktop-ai/index.umd.js"></script>
+  <script src="/static/linhub/auth-guard.js?v=2"></script>
+  <script>
+    const WD = window.WorkDesktop;
+    const ElementPlus = window.ElementPlus;
+    const { WorkDesktop } = WD;
+    const { ref, reactive } = Vue;
+
+    const app = Vue.createApp({
+      template: '#lgc-tpl',
+      setup() {
+        const loading = ref(false);
+        const stats = reactive({ root: '', files: 0, bytes: 0, months: [], today: { total: 0, debug: 0, info: 0, warning: 0, error: 0 } });
+        const recent = ref([]);
+        const recentLevel = ref('');
+        const recentLimit = ref(100);
+
+        function loadStats() {
+          WD.request.get('/admin/LogCenter/stats').then(res => {
+            if (!res.success) return;
+            Object.assign(stats, res.data || {});
+          });
+        }
+        function loadRecent() {
+          loading.value = true;
+          const p = new URLSearchParams();
+          if (recentLevel.value) p.append('level', recentLevel.value);
+          p.append('limit', String(recentLimit.value));
+          WD.request.get('/admin/LogCenter/recent?' + p.toString()).then(res => {
+            loading.value = false;
+            if (!res.success) return;
+            recent.value = res.data.list || [];
+          });
+        }
+        function levelTag(lv) {
+          const m = { info: 'info', warning: 'warning', error: 'danger', debug: '' };
+          return m[lv] !== undefined ? m[lv] : '';
+        }
+        function humanSize(bytes) {
+          const n = Number(bytes) || 0;
+          if (n < 1024) return n + ' B';
+          if (n < 1048576) return (n / 1024).toFixed(1) + ' KB';
+          if (n < 1073741824) return (n / 1048576).toFixed(1) + ' MB';
+          return (n / 1073741824).toFixed(2) + ' GB';
+        }
+        function prettyContext(ctx) {
+          if (ctx === 'null') return 'null';
+          try { return JSON.stringify(JSON.parse(ctx), null, 2); } catch (e) { return String(ctx); }
+        }
+
+        loadStats();
+        loadRecent();
+
+        return {
+          loading, stats, recent, recentLevel, recentLimit,
+          loadRecent, levelTag, humanSize, prettyContext, today: stats.today
+        };
+      }
+    });
+
+    for (const [name, comp] of Object.entries(window.ElementPlusIconsVue)) {
+      app.component(name, comp);
+    }
+    app.use(ElementPlus);
+    app.use(WorkDesktop);
+    app.mount('#app');
+  </script>
+</body>
+
+</html>

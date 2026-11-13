@@ -62,6 +62,8 @@ final class WorkspaceRegistry
                 'zone'   => (string) (($s['zone'] ?? '') ?: 'home.top'),
                 'order'  => (int) ($s['order'] ?? 0),
                 'perms'  => array_values((array) ($s['perms'] ?? [])), // 缺省不限
+                // 角色白名单：缺省不限；声明后仅对应角色类型（SUPER_ADMIN 等）的首页可见
+                'roles'  => array_values(array_unique(array_map('strval', (array) ($s['roles'] ?? [])))),
                 'short'  => $short,
             ];
         }
@@ -89,17 +91,24 @@ final class WorkspaceRegistry
     }
 
     /**
-     * 按用户最终权限过滤可见插槽（T4.4 / T5）。
+     * 按用户最终权限 + 角色类型过滤可见插槽（T4.4 / T5）。
      * 插槽 perms 为空 => 恒可见；否则：若设置了权限回调则按回调判定，否则按"声明的任一 perms 命中用户权限"判定。
+     * 插槽 roles 为空 => 不限角色；否则要求与用户角色类型有交集（未传角色时 roles 受限插槽一律隐藏）。
      *
      * @param list<string> $userPerms 用户最终权限（S5 计算后传入，本处仅消费）
+     * @param list<string> $userRoles 用户角色类型（RbacRoles::SUPER_ADMIN 等），缺省为空
      * @return list<array<string, mixed>>
      */
-    public function slotsAllowedBy(array $userPerms): array
+    public function slotsAllowedBy(array $userPerms, array $userRoles = []): array
     {
         return array_values(array_filter(
             $this->allSlots(),
-            function (array $slot) use ($userPerms): bool {
+            function (array $slot) use ($userPerms, $userRoles): bool {
+                // 角色白名单：声明后必须命中用户角色类型
+                $roles = (array) ($slot['roles'] ?? []);
+                if ($roles !== [] && count(array_intersect($roles, $userRoles)) === 0) {
+                    return false;
+                }
                 $perms = (array) ($slot['perms'] ?? []);
                 if ($perms === []) {
                     return true;

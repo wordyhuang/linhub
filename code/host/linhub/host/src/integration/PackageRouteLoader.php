@@ -7,6 +7,7 @@ namespace linhub\host\integration;
 use linhub\host\lifecycle\LifecycleState;
 use linhub\host\lifecycle\PackageStateStore;
 use linhub\host\services\messaging\MessagingService;
+use linhub\host\support\middleware\RequireLogin;
 use think\App;
 use think\facade\Route;
 
@@ -35,7 +36,7 @@ final class PackageRouteLoader
     }
 
     /** 落地根（code/plugins，与 Package 控制器一致）。 */
-    private function loadRoot(): string
+    private static function loadRoot(): string
     {
         return dirname(__DIR__, 5) . '/plugins';
     }
@@ -53,7 +54,7 @@ final class PackageRouteLoader
     public function boot(): void
     {
         // 先注册 PSR-4 自动加载闭包，保证 include route.php 时能解析到功能包控制器类。
-        $this->registerAutoload();
+        self::registerAutoload();
         $records = (new PackageStateStore($this->stateFile()))->read();
         $manifests = [];
         foreach ($records as $rec) {
@@ -64,7 +65,7 @@ final class PackageRouteLoader
             if ($short === '') {
                 continue;
             }
-            $root = $this->loadRoot() . '/' . $short;
+            $root = self::loadRoot() . '/' . $short;
 
             // 先读 manifest（纯声明数组，无副作用）：路由补前缀按 access 判定，订阅声明一并收集
             $manifestFile = $root . '/manifest.php';
@@ -80,27 +81,67 @@ final class PackageRouteLoader
         }
     }
 
+    /**
+     * 安装完成里程碑（协议 4.5.1 V1.7）：对刚落地的功能包执行即时装配。
+     *
+     * 安装当次请求内新包尚未经历 boot() 装配，若不补装配，包类无法被自动加载、
+     * subscribes 也不在总线上，收不到 installed 广播。此方法幂等（与 boot()
+     * 共用同一套静态 PSR-4 映射与总线装配），失败不抛异常、不影响安装结果。
+     */
+    public static function attach(string $short): void
+    {
+        $short = trim($short);
+        if ($short === '' || !preg_match('/^[A-Za-z0-9_.\-]+$/', $short)) {
+            return;
+        }
+        $root = self::loadRoot() . '/' . $short;
+        if (!is_dir($root)) {
+            return;
+        }
+        try {
+            self::registerAutoload();
+            self::registerPsr4FromComposer($root);
+            $manifestFile = $root . '/manifest.php';
+            $manifest = is_file($manifestFile) ? (array) @include $manifestFile : [];
+            if ($manifest !== []) {
+                MessagingService::subscribeFromManifests([$manifest]);
+            }
+        } catch (\Throwable) {
+            // 即时装配失败不影响安装结果；下次请求 boot() 正常装配
+        }
+    }
+
     /** 加载单个功能包：注册 PSR-4 + include route.php。 */
     private function loadPackage(string $root, array $manifest = []): void
     {
         if (!is_dir($root)) {
             return;
         }
-        $this->registerPsr4FromComposer($root);
+        self::registerPsr4FromComposer($root);
         $routeFile = $root . '/route.php';
         if (!is_file($routeFile)) {
             return;
         }
 
-        // 可配置的 /admin/ 前缀强制补齐：开启时仅对 access=admin（中后台，需登录+RBAC，默认值）的包
-        // 用 Route::group('admin', ...) 包裹 route.php 统一补前缀（包内写裸路径，如 demo/record）；
-        // access=public（免登录公开，回调/探活等外部端点）的包不补全——不隶属中后台，外部调用方不带 admin/ 前缀；
-        // 关闭时为常规模式，所有包内须自写 admin/ 前缀。未声明 access 的包按协议视为 admin（O4）。
+        // 统一登录门禁：access=admin（中后台，默认值）的包由平台中间件统一校验，包内不再自建门禁；
+        // access=public（免登录公开，回调/探活等外部端点）的包不挂门禁，外部调用方不带 admin/ 前缀。
+        $access  = (string) ($manifest['access'] ?? 'admin');
+        $guard   = $access === 'public' ? [] : [RequireLogin::class];
+
+        // 可配置的 /admin/ 前缀强制补齐：开启时仅对 access=admin 的包用 Route::group('admin', ...)
+        // 包裹 route.php 统一补前缀（包内写裸路径，如 demo/record）；关闭时为常规模式。
         $forceAdmin = (bool) $this->app->config->get('route.package_route_force_admin', false);
-        if ($forceAdmin && (string) ($manifest['access'] ?? 'admin') === 'admin') {
+        if ($forceAdmin && $access === 'admin') {
             Route::group('admin', static function () use ($routeFile): void {
                 include $routeFile;
-            });
+            })->middleware($guard);
+            return;
+        }
+
+        if ($guard !== []) {
+            Route::group(static function () use ($routeFile): void {
+                include $routeFile;
+            })->middleware($guard);
             return;
         }
 
@@ -108,7 +149,7 @@ final class PackageRouteLoader
     }
 
     /** 从功能包 composer.json 的 psr-4 声明注册命名空间自动加载。 */
-    private function registerPsr4FromComposer(string $root): void
+    private static function registerPsr4FromComposer(string $root): void
     {
         $composerFile = $root . '/composer.json';
         if (!is_file($composerFile)) {
@@ -129,7 +170,7 @@ final class PackageRouteLoader
     }
 
     /** 注册 PSR-4 自动加载闭包（仅首次注册，避免重复注册累积）。 */
-    private function registerAutoload(): void
+    private static function registerAutoload(): void
     {
         if (self::$autoloadRegistered) {
             return;

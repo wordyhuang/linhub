@@ -7,12 +7,19 @@
 <link rel="icon" type="image/svg+xml" href="/brand/favicon.svg">
 <link rel="stylesheet" href="/static/vendor/element-plus/index.css">
 <link rel="stylesheet" href="/static/vendor/workdesktop-ai/style.css">
+<link rel="stylesheet" href="/static/linhub/cards.css">
 <style>
   html, body, #app { height: 100%; margin: 0; }
   body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif; }
   .user-page { height: 100%; padding: 16px 20px 24px; box-sizing: border-box; }
   .user-head { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 14px; gap: 12px; }
   .role-tag { margin-right: 4px; }
+  /* 权限预览表格单元格 */
+  .perm-cell__title { font-weight: 600; }
+  .perm-cell__code { color: #9ca3af; font-size: 12px; font-family: Consolas, monospace; margin-top: 2px; word-break: break-all; }
+  .perm-cell__desc { color: #6b7280; font-size: 12px; }
+  .perm-cell__empty { color: #c0c4cc; }
+  .perm-cell__tag { margin: 0 4px 2px 0; }
 </style>
 </head>
 <body>
@@ -20,7 +27,7 @@
 
 <script type="text/x-template" id="user-tpl">
   <div class="user-page">
-    <wd-panel :border="true">
+    <wd-panel description-align="right" :border="true">
       <wd-tips type="box" style="margin-bottom:12px">
         OpenId 取自 UAIS；可点击「同步 UAIS 用户」从远端全量建档/改名，也可手工录入唯一 OpenId（姓名可任取）。
       </wd-tips>
@@ -46,6 +53,9 @@
             <el-form-item label="OpenId" required>
               <el-input v-model="form.refId" :disabled="editing" placeholder="输入 OpenId（取自 UAIS，唯一）" maxlength="64" />
             </el-form-item>
+            <el-form-item label="备注">
+              <el-input v-model="form.remark" type="textarea" :rows="3" placeholder="本地备注（可选）" maxlength="200" show-word-limit />
+            </el-form-item>
             <div style="color:var(--wd-text-color-secondary,#6b7280);font-size:12px;padding:0 4px 8px">
               OpenId 取自 UAIS，当前不支持远端检索（O-1）；编辑时不可改。
             </div>
@@ -54,7 +64,7 @@
         <template #footer="f">
           <el-button @click="f.close">取消</el-button>
           <wd-api-button label="保存" type="primary" api="/admin/user/save"
-                         :api-param="{ mode: 'create', name: form.name, refId: form.refId }"
+                         :api-param="{ mode: 'create', name: form.name, refId: form.refId, remark: form.remark }"
                          head-refresh-datagrid="user" @api-success="f.close">保存</wd-api-button>
         </template>
       </wd-drawer-button>
@@ -117,9 +127,9 @@
               </p>
               <el-form label-width="90px">
                 <el-form-item label="角色">
-                  <el-select v-model="assignDlg.roles" multiple placeholder="选择角色" style="width:100%">
-                    <el-option v-for="r in options.roleOptions" :key="r.id" :label="r.name" :value="r.id" />
-                  </el-select>
+                  <el-checkbox-group v-model="assignDlg.roles">
+                    <el-checkbox v-for="r in options.roleOptions" :key="r.id" :value="r.id">{{ r.name }}</el-checkbox>
+                  </el-checkbox-group>
                 </el-form-item>
                 <el-form-item label="权限组">
                   <el-select v-model="assignDlg.groups" multiple placeholder="选择权限组" style="width:100%">
@@ -136,17 +146,36 @@
             </template>
           </wd-drawer-button>
 
-          <wd-drawer-button label="预览" title="最终权限预览" drawer-size="560px" size="small" type="primary" filter="user" @open="openPerms(row)">
+          <wd-drawer-button label="预览" title="最终权限预览" drawer-size="680px" size="small" type="primary" filter="user" @open="openPerms(row)">
             <template #default="{ close }">
               <div>
                 <p style="margin:0 0 8px;color:var(--wd-text-color-secondary,#6b7280);font-size:13px">
-                  {{ permDlg.name }}：{{ permDlg.codes.length === 0 ? '尚无任何权限组，权限码为空（J6 并集）。' : '最终有效权限码如下（J6 并集）：' }}
+                  {{ permDlg.name }}：{{ permDlg.codes.length === 0 ? '尚无任何权限组，权限码为空（J6 并集）。' : '最终有效权限共 ' + permDlg.details.length + ' 项（J6 并集），介绍与授权来源见下表：' }}
                 </p>
-                <template v-if="permDlg.codes.length">
-                  <el-tag v-for="c in permDlg.codes" :key="c" style="margin:0 6px 8px 0;max-width:100%" effect="plain">
-                    {{ options.permTitles[c] || c }}
-                  </el-tag>
-                </template>
+                <el-table v-if="permDlg.codes.length" :data="permDlg.details" size="small" border style="width:100%">
+                  <el-table-column label="权限" min-width="190">
+                    <template #default="{ row: d }">
+                      <div class="perm-cell">
+                        <div class="perm-cell__title">{{ d.title || d.code }}</div>
+                        <div class="perm-cell__code">{{ d.code }}</div>
+                      </div>
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="权限介绍" min-width="200">
+                    <template #default="{ row: d }">
+                      <span v-if="d.description" class="perm-cell__desc">{{ d.description }}</span>
+                      <span v-else class="perm-cell__empty">—</span>
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="授权来自" min-width="170">
+                    <template #default="{ row: d }">
+                      <template v-if="d.sources.length">
+                        <el-tag v-for="s in d.sources" :key="s" size="small" effect="plain" class="perm-cell__tag">{{ s }}</el-tag>
+                      </template>
+                      <span v-else class="perm-cell__empty">（无来源权限组）</span>
+                    </template>
+                  </el-table-column>
+                </el-table>
               </div>
             </template>
             <template #footer="f">
@@ -212,6 +241,102 @@
         </template>
       </el-table-column>
       <template #empty><el-empty :image-size="80" description="暂无用户" /></template>
+      <!-- ── 卡片清单模式（DataGrid 内建 modeSwitch 视图；统一 lh-card 结构） ── -->
+      <template #card-item="{ row }">
+        <div class="lh-card">
+          <div class="lh-card__head">
+            <div class="lh-card__title">{{ row.name || '—' }}</div>
+            <div class="lh-card__tags">
+              <el-tag v-for="r in row.roles" :key="r.id" size="small" effect="plain">{{ r.name }}</el-tag>
+              <el-tag v-if="!row.roles || !row.roles.length" size="small" type="info" effect="plain">未分配角色</el-tag>
+            </div>
+            <div class="lh-card__extra">
+              <div class="lh-card__stamp">{{ row.lastLoginAt || '还未登录' }}</div>
+            </div>
+          </div>
+          <div class="lh-card__fields">
+            <div class="lh-card__field">
+              <div class="k">OpenId</div>
+              <div class="v">{{ row.refId || '—' }}</div>
+            </div>
+            <div class="lh-card__field">
+              <div class="k">用户名</div>
+              <div class="v">{{ row.username || '—' }}</div>
+            </div>
+            <div class="lh-card__field">
+              <div class="k">部门</div>
+              <div class="v">{{ row.department || '—' }}</div>
+            </div>
+            <div class="lh-card__field">
+              <div class="k">邮箱</div>
+              <div class="v">{{ row.email || '—' }}</div>
+            </div>
+            <div class="lh-card__field is-wide">
+              <div class="k">权限组</div>
+              <div class="v" :class="{ 'is-muted': !row.groups || !row.groups.length }">
+                <template v-if="row.groups && row.groups.length">
+                  <el-tag v-for="g in row.groups" :key="g.id" size="small" type="success" effect="plain" style="margin-right:4px">{{ g.name }}</el-tag>
+                </template>
+                <span v-else>未分配</span>
+              </div>
+            </div>
+          </div>
+          <div class="lh-card__ops">
+            <wd-drawer-button label="编辑" title="编辑用户" drawer-size="520px" size="small" type="primary" filter="user" @open="openEdit(row)">
+              <template #default>
+                <el-form label-width="110px">
+                  <el-form-item label="用户名">
+                    <el-input v-model="form.username" disabled placeholder="由 UAIS 同步，不可改" />
+                  </el-form-item>
+                  <el-form-item label="昵称" required>
+                    <el-input v-model="form.name" placeholder="输入昵称（UAIS 同步）" maxlength="40" />
+                  </el-form-item>
+                  <el-form-item label="OpenId" required>
+                    <el-input v-model="form.refId" :disabled="editing" placeholder="输入 OpenId（取自 UAIS，唯一）" maxlength="64" />
+                  </el-form-item>
+                  <el-form-item label="备注">
+                    <el-input v-model="form.remark" type="textarea" :rows="3" placeholder="本地备注（不影响 UAIS，仅超管可见）" maxlength="200" show-word-limit />
+                  </el-form-item>
+                  <el-divider content-position="left">UAIS 同步信息（只读）</el-divider>
+                  <el-form-item label="邮箱">
+                    <el-input :model-value="form.email" disabled placeholder="—" />
+                  </el-form-item>
+                  <el-form-item label="手机">
+                    <el-input :model-value="form.phone" disabled placeholder="—" />
+                  </el-form-item>
+                  <el-form-item label="部门">
+                    <el-input :model-value="form.department" disabled placeholder="—" />
+                  </el-form-item>
+                  <el-form-item label="公司">
+                    <el-input :model-value="form.company" disabled placeholder="—" />
+                  </el-form-item>
+                  <el-form-item label="职位">
+                    <el-input :model-value="form.title" disabled placeholder="—" />
+                  </el-form-item>
+                  <el-form-item label="用户类型">
+                    <el-input :model-value="form.userType" disabled placeholder="—" />
+                  </el-form-item>
+                  <el-form-item label="标签">
+                    <el-tag v-for="t in form.tags" :key="t" style="margin-right:6px" effect="plain">{{ t }}</el-tag>
+                    <span v-if="!form.tags || !form.tags.length" style="color:var(--wd-text-color-secondary,#6b7280)">—</span>
+                  </el-form-item>
+                </el-form>
+              </template>
+              <template #footer="f">
+                <el-button @click="f.close">取消</el-button>
+                <wd-api-button label="保存" type="primary" api="/admin/user/save"
+                               :api-param="{ mode: 'update', id: form.id, name: form.name, refId: form.refId, remark: form.remark }"
+                               head-refresh-datagrid="user" @api-success="f.close">保存</wd-api-button>
+              </template>
+            </wd-drawer-button>
+            <wd-popconfirm-button :title="`确认删除用户「${row.name}」？`"
+                                  api="/admin/user/delete" :api-param="{ id: row.id }"
+                                  tip="仅删除本地映射，不影响 UAIS 账号（无远端调用）"
+                                  size="small"
+                                  type="danger" head-refresh-datagrid>删除</wd-popconfirm-button>
+          </div>
+        </div>
+      </template>
     </wd-data-grid>
     </wd-panel>
   </div>
@@ -221,6 +346,7 @@
 <script src="/static/vendor/element-plus/index.full.min.js"></script>
 <script src="/static/vendor/icons/index.iife.min.js"></script>
 <script src="/static/vendor/workdesktop-ai/index.umd.js"></script>
+<script src="/static/linhub/auth-guard.js?v=2"></script>
 <script>
   const WD = window.WorkDesktop;
   const ElementPlus = window.ElementPlus;
@@ -246,7 +372,7 @@
         username: '', email: '', phone: '', department: '', company: '', title: '', userType: '', tags: [],
       });
       const assignDlg = reactive({ id: '', name: '', roles: [], groups: [] });
-      const permDlg = reactive({ name: '', codes: [] });
+      const permDlg = reactive({ name: '', codes: [], details: [] });
       const options = reactive({ roleOptions: [], groupOptions: [], permTitles: {} });
       let optsLoaded = false;
 
@@ -350,6 +476,9 @@
         ensureOptions();
         permDlg.name = row.name;
         permDlg.codes = row.permCodes || [];
+        // 权限详情（介绍 + 授权来源），hover 标签展示
+        permDlg.details = row.permDetails
+          || (row.permCodes || []).map(c => ({ code: c, title: options.permTitles[c] || c, description: '', sources: [] }));
       }
 
       return { grid, editing, keyword, syncing, syncRemote, doSearch, form, assignDlg, permDlg, options, openCreate, openEdit, openAssign, openPerms };

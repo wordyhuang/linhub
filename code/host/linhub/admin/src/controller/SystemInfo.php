@@ -6,6 +6,7 @@ namespace app\admin\controller;
 
 use linhub\capability\auth\Identity;
 use linhub\capability\auth\UaisClient;
+use linhub\host\communication\broker\PredisStreamClient;
 use linhub\host\Version;
 use think\Config;
 
@@ -44,12 +45,13 @@ class SystemInfo extends AdminController
      * 采集系统环境信息（私有方法，TDD 反射直接测）。
      *
      * @return array{
-     *   platform: array{version:string},
+     *   platform: array{version:string, framework:string},
      *   php: array{version:string, sapi:string, loaded_config:string, timezone:string, upload_max_filesize:string, post_max_size:string, memory_limit:string},
      *   server: array{os:string, hostname:string, software:string},
      *   system: array{disk_total:int, disk_free:int, memory_usage:int, memory_peak:int},
      *   extensions: array<string,bool>,
-     *   database: array{driver:string, host:string, port:string, database:string, charset:string, version:string}
+     *   database: array{driver:string, host:string, port:string, database:string, charset:string, version:string},
+     *   redis: array{host:string, port:string, pass_configured:bool, status:string, error:string}
      * }
      */
     private function collect(): array
@@ -89,6 +91,7 @@ class SystemInfo extends AdminController
         return [
             'platform' => [
                 'version' => Version::current(),
+                'framework' => \think\App::VERSION,
             ],
             'php' => [
                 'version' => PHP_VERSION,
@@ -123,6 +126,7 @@ class SystemInfo extends AdminController
                 'version' => $version,
             ],
             'uais' => $this->collectUais(),
+            'redis' => $this->collectRedis(),
         ];
     }
 
@@ -159,6 +163,43 @@ class SystemInfo extends AdminController
             'app_key_configured' => $hasKey,
             'app_secret_configured' => $hasSecret,
             'admin_tag' => $adminTag,
+            'status' => $status,
+            'error' => $error,
+        ];
+    }
+
+    /**
+     * 采集 Redis Stream 事件总线接入信息（只读、非敏感）。
+     *
+     * 功能包间消息通信（RedisStreamBroker）依赖 Redis Stream，本卡与 UAIS 卡对称：
+     * 只暴露 host:port / 连接密码是否已配置 / 连通性状态，绝不输出 REDIS_PASS 明文（安全红线）。
+     * 探测复用 PredisStreamClient（无参构造即按真实通信同源配置连接），连接失败降级为状态串，不抛出。
+     *
+     * @return array{host:string, port:string, pass_configured:bool, status:string, error:string}
+     */
+    private function collectRedis(): array
+    {
+        $host = (string) env('REDIS_HOST', '');
+        $port = (string) env('REDIS_PORT', '');
+        $hasPass = (string) env('REDIS_PASS', '') !== '';
+
+        $status = '未配置';
+        $error  = '';
+        if ($host !== '') {
+            try {
+                // 构造即连接（含 AUTH），仅校验连通性，不返回任何实例或值
+                new PredisStreamClient();
+                $status = '已连接';
+            } catch (\Throwable $e) {
+                $status = '连接失败';
+                $error  = $e->getMessage();
+            }
+        }
+
+        return [
+            'host' => $host,
+            'port' => $port,
+            'pass_configured' => $hasPass,
             'status' => $status,
             'error' => $error,
         ];

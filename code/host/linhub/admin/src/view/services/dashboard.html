@@ -8,6 +8,7 @@
 <link rel="icon" type="image/svg+xml" href="/brand/favicon.svg">
   <link rel="stylesheet" href="/static/vendor/element-plus/index.css">
   <link rel="stylesheet" href="/static/vendor/workdesktop-ai/style.css">
+  <link rel="stylesheet" href="/static/linhub/cards.css">
   <style>
 
     .sv-mono {
@@ -15,22 +16,65 @@
       font-size: 12px;
     }
 
-    .sv-chips {
-      display: flex;
-      gap: 12px;
-      margin: 8px 0 12px;
-      flex-wrap: wrap;
+    /* —— 治理概览统计卡（对齐平台首页 stats-card 风格） —— */
+    .sv-stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 14px;
+      margin-top: 12px;
     }
 
-    .sv-chip {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      padding: 2px 10px;
-      border-radius: 14px;
+    .sv-stat {
+      border: 1px solid #e5e7eb;
+      border-radius: 10px;
+      background: #fff;
+      padding: 14px 16px;
+    }
+
+    .sv-stat-lbl {
+      font-size: 13px;
+      font-weight: 600;
+      color: #1f2937;
+    }
+
+    .sv-stat-num {
+      margin-top: 6px;
+      font-size: 26px;
+      font-weight: 600;
+      color: #0066CC;
+      line-height: 1.2;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .sv-stat-sub {
+      margin-top: 4px;
       font-size: 12px;
-      background: var(--wd-border-color, #f0f0f0);
-      color: var(--wd-text-color, #1f2937);
+      color: #909399;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .sv-stat-sub.is-warn {
+      color: #e6a23c;
+    }
+
+    /* —— 区块筛选工具栏 —— */
+    .sv-toolbar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-bottom: 12px;
+    }
+
+    .sv-toolbar-count {
+      font-size: 12px;
+      color: #909399;
+    }
+
+    .sv-toolbar-spacer {
+      flex: 1 1 auto;
     }
   </style>
 </head>
@@ -55,25 +99,60 @@
     </el-alert>
 
     <div v-loading="loading" element-loading-text="加载中...">
-      
-      <wd-panel>
-    <wd-tips type="box" style="margin-bottom:12px">
-      只读展示平台服务与能力画像。服务事实来源为 services.php 服务清单；能力画像与升级记录来自 lg_mgt_ 持久化镜像与 changelog；调用统计来自服务调用次数累计。
-      服务增删改请编辑 services/services.php 并提交 Git，本页不提供写接口。
-    </wd-tips>
-        <div class="sv-chips">
-        <span class="sv-chip">服务 {{ state.services.length }}</span>
-        <span class="sv-chip">调用记录 {{ state.calls.length }}</span>
-        <span class="sv-chip">能力 {{ state.capabilities.length }}</span>
-        <span class="sv-chip">升级记录 {{ state.changelog.length }}</span>
-      </div>
-    </wd-panel>
-      
+
+      <!-- 治理概览 -->
+      <wd-panel description-align="right">
+        <wd-tips type="box" style="margin-bottom:2px">
+          只读画像页：服务事实来源 services.php 服务清单，能力画像来自 lg_mgt_ 持久化镜像，调用统计为服务调用次数累计。服务增删改请编辑 services/services.php 并提交 Git。
+        </wd-tips>
+        <div class="sv-stats">
+          <div class="sv-stat">
+            <div class="sv-stat-lbl">服务总数</div>
+            <div class="sv-stat-num">{{ fmt(state.services.length) }}</div>
+            <div class="sv-stat-sub">宿主 {{ hostCount }} · 功能包 {{ pkgCount }}</div>
+          </div>
+          <div class="sv-stat">
+            <div class="sv-stat-lbl">累计调用次数</div>
+            <div class="sv-stat-num">{{ fmt(totalCalls) }}</div>
+            <div class="sv-stat-sub">接口记录 {{ state.calls.length }} 条</div>
+          </div>
+          <div class="sv-stat">
+            <div class="sv-stat-lbl">能力镜像</div>
+            <div class="sv-stat-num">{{ fmt(state.capabilities.length) }}</div>
+            <div class="sv-stat-sub" :class="{ 'is-warn': state.diagnostic }">
+              {{ state.diagnostic ? '数据库镜像不可用' : ('覆盖 ' + capPkgs + ' 个功能包') }}
+            </div>
+          </div>
+          <div class="sv-stat">
+            <div class="sv-stat-lbl">升级记录</div>
+            <div class="sv-stat-num">{{ fmt(state.changelog.length) }}</div>
+            <div class="sv-stat-sub">{{ latestChangelog ? ('最近 ' + latestChangelog) : '暂无记录' }}</div>
+          </div>
+          <div class="sv-stat" style="display:flex;align-items:center">
+            <el-button :icon="Refresh" @click="load">刷新数据</el-button>
+          </div>
+        </div>
+      </wd-panel>
 
       <!-- 服务清单 -->
-      <wd-panel :border="true" title="服务清单">
-        <wd-data-grid v-if="state.services.length > 0" :data-source="state.services" border stripe table-size="small" :with-index="true" :with-pager="false">
-          <el-table-column prop="id" label="服务 ID" min-width="120">
+      <wd-panel description-align="right" :border="true" title="服务清单">
+        <div class="sv-toolbar">
+          <el-input v-model="svKw" placeholder="搜索服务 ID / 说明 / 类名" clearable style="width:240px">
+            <template #prefix><el-icon><Search /></el-icon></template>
+          </el-input>
+          <el-select v-model="svSource" clearable placeholder="来源" style="width:140px">
+            <el-option label="宿主 host" value="host" />
+            <el-option label="功能包 package" value="package" />
+          </el-select>
+          <el-select v-model="svType" clearable placeholder="服务类型" style="width:140px">
+            <el-option label="功能服务" value="functional" />
+            <el-option label="托管服务" value="hosted" />
+          </el-select>
+          <span class="sv-toolbar-count">共 {{ filteredServices.length }} / {{ state.services.length }} 项</span>
+          <span class="sv-toolbar-spacer"></span>
+        </div>
+        <wd-data-grid v-if="state.services.length > 0" :data-source="filteredServices" border stripe table-size="small" :with-index="true" :with-pager="false">
+          <el-table-column prop="id" label="服务 ID" min-width="120" sortable>
             <template #default="{ row }"><span class="sv-mono">{{ row.id }}</span></template>
           </el-table-column>
           <el-table-column prop="desc" label="说明 / 参数" min-width="260">
@@ -89,7 +168,7 @@
           <el-table-column prop="class" label="类" min-width="260">
             <template #default="{ row }"><span class="sv-mono">{{ row.class }}</span></template>
           </el-table-column>
-          <el-table-column prop="version" label="版本" width="90">
+          <el-table-column prop="version" label="版本" width="90" sortable>
             <template #default="{ row }">
               <el-tag size="small" effect="plain">v{{ row.version }}</el-tag>
             </template>
@@ -109,18 +188,50 @@
               <span v-else style="color:#9ca3af">-</span>
             </template>
           </el-table-column>
-          <el-table-column prop="source" label="来源" width="90">
+          <el-table-column prop="source" label="来源" width="90" sortable>
             <template #default="{ row }">
               <el-tag size="small" :type="row.source === 'host' ? 'success' : 'primary'" effect="light">{{ row.source }}</el-tag>
             </template>
           </el-table-column>
+          <el-table-column prop="type" label="服务类型" width="100">
+            <template #default="{ row }">
+              <el-tag v-if="row.type" size="small" :type="row.type === 'hosted' ? 'warning' : 'info'" effect="light">{{ row.type === 'hosted' ? '托管服务' : '功能服务' }}</el-tag>
+              <span v-else style="color:#9ca3af">-</span>
+            </template>
+          </el-table-column>
+          <!-- ── 卡片清单模式（DataGrid 内建 modeSwitch 视图；扁平三层，只读清单无操作行） ── -->
+          <template #card-item="{ row }">
+            <div class="lh-card">
+              <div class="lh-card__head">
+                <div class="lh-card__title">{{ row.id }}</div>
+                <div class="lh-card__tags">
+                  <el-tag size="small" :type="row.source === 'host' ? 'success' : 'primary'" effect="light">{{ row.source }}</el-tag>
+                  <el-tag size="small" :type="row.type === 'hosted' ? 'warning' : 'info'" effect="light">{{ row.type === 'hosted' ? '托管服务' : '功能服务' }}</el-tag>
+                  <el-tag size="small" effect="plain">v{{ row.version }}</el-tag>
+                </div>
+              </div>
+              <div class="lh-card__fields">
+                <div class="lh-card__field is-wide"><div class="k">类</div><div class="v sv-mono">{{ row.class }}</div></div>
+                <div class="lh-card__field is-wide"><div class="k">说明</div><div class="v">{{ row.desc || '—' }}</div></div>
+                <div class="lh-card__field"><div class="k">被依赖</div><div class="v">{{ row.consumers && row.consumers.length ? row.consumers.length + ' 个包' : '—' }}</div></div>
+              </div>
+            </div>
+          </template>
         </wd-data-grid>
+        <el-empty v-else description="暂无服务数据" :image-size="60" />
       </wd-panel>
 
       <!-- 调用统计 -->
-      <wd-panel :border="true" title="调用统计">
-        <wd-data-grid v-if="state.calls.length > 0" :data-source="state.calls" border stripe table-size="small" :with-index="true" :with-pager="false">
-          <el-table-column prop="callee" label="被调用方" min-width="170">
+      <wd-panel description-align="right" :border="true" title="调用统计">
+        <div class="sv-toolbar">
+          <el-input v-model="callKw" placeholder="搜索被调用方 / 接口 / 调用方" clearable style="width:260px">
+            <template #prefix><el-icon><Search /></el-icon></template>
+          </el-input>
+          <span class="sv-toolbar-count">共 {{ filteredCalls.length }} / {{ state.calls.length }} 条 · 累计 {{ fmt(totalCalls) }} 次</span>
+          <span class="sv-toolbar-spacer"></span>
+        </div>
+        <wd-data-grid v-if="state.calls.length > 0" :data-source="filteredCalls" border stripe table-size="small" :with-index="true" :with-pager="false">
+          <el-table-column prop="callee" label="被调用方" min-width="170" sortable>
             <template #default="{ row }">
               <span class="sv-mono">{{ row.callee }}</span>
               <el-tag v-if="row.owner" size="small" effect="plain" style="margin-left:6px">{{ row.owner }}</el-tag>
@@ -131,34 +242,63 @@
               <el-tag size="small" :type="row.source === 'host' ? 'success' : 'primary'" effect="light">{{ row.source }}</el-tag>
             </template>
           </el-table-column>
-          <el-table-column prop="method" label="接口" min-width="180">
+          <el-table-column prop="method" label="接口" min-width="180" sortable>
             <template #default="{ row }"><span class="sv-mono">{{ row.method }}</span></template>
           </el-table-column>
           <el-table-column prop="caller" label="调用方" width="130">
             <template #default="{ row }"><span class="sv-mono">{{ row.caller }}</span></template>
           </el-table-column>
-          <el-table-column prop="count" label="调用次数" width="100" align="right">
-            <template #default="{ row }"><span class="sv-mono">{{ row.count }}</span></template>
+          <el-table-column prop="count" label="调用次数" width="110" align="right" sortable :sort-method="byCount">
+            <template #default="{ row }"><span class="sv-mono">{{ fmt(row.count) }}</span></template>
           </el-table-column>
-          <el-table-column prop="lastAt" label="最后调用时间" width="180">
+          <el-table-column prop="lastAt" label="最后调用时间" width="180" sortable>
             <template #default="{ row }"><span class="sv-mono">{{ row.lastAt }}</span></template>
           </el-table-column>
           <el-table-column prop="lastUrl" label="最后调用 URL" min-width="220" show-overflow-tooltip>
             <template #default="{ row }"><span class="sv-mono">{{ row.lastUrl }}</span></template>
           </el-table-column>
+          <!-- ── 卡片清单模式（DataGrid 内建 modeSwitch 视图；扁平三层，只读清单无操作行） ── -->
+          <template #card-item="{ row }">
+            <div class="lh-card">
+              <div class="lh-card__head">
+                <div class="lh-card__title">{{ row.callee }}</div>
+                <div class="lh-card__tags">
+                  <el-tag v-if="row.owner" size="small" effect="plain">{{ row.owner }}</el-tag>
+                  <el-tag size="small" :type="row.source === 'host' ? 'success' : 'primary'" effect="light">{{ row.source }}</el-tag>
+                </div>
+                <div class="lh-card__extra">
+                  <div class="lh-card__metric">{{ fmt(row.count) }}</div>
+                  <div class="lh-card__metric-label">次调用</div>
+                </div>
+              </div>
+              <div class="lh-card__fields">
+                <div class="lh-card__field is-wide"><div class="k">接口</div><div class="v sv-mono">{{ row.method }}</div></div>
+                <div class="lh-card__field"><div class="k">调用方</div><div class="v sv-mono">{{ row.caller || '—' }}</div></div>
+                <div class="lh-card__field"><div class="k">最后调用时间</div><div class="v">{{ row.lastAt || '—' }}</div></div>
+                <div class="lh-card__field is-wide"><div class="k">最后调用 URL</div><div class="v sv-mono">{{ row.lastUrl || '—' }}</div></div>
+              </div>
+            </div>
+          </template>
         </wd-data-grid>
         <p v-else style="color:var(--wd-text-color-secondary,#6b7280);font-size:13px">暂无调用记录。功能包调用平台服务或包间服务后，这里会按接口累计次数。</p>
       </wd-panel>
 
       <!-- 能力清单 -->
-      <wd-panel :border="true" title="能力清单（lg_mgt_capability）">
+      <wd-panel description-align="right" :border="true" title="能力清单（lg_mgt_capability）">
         <el-empty v-if="state.diagnostic" description="数据库镜像不可用，暂无能力数据" :image-size="60" />
         <template v-else>
-          <wd-data-grid v-if="state.capabilities.length > 0" :data-source="state.capabilities" border stripe table-size="small" :with-index="true" :with-pager="false">
-            <el-table-column prop="pkgKey" label="所属包" min-width="140">
+          <div class="sv-toolbar" v-if="state.capabilities.length > 0">
+            <el-input v-model="capKw" placeholder="搜索所属包 / 能力类型" clearable style="width:240px">
+              <template #prefix><el-icon><Search /></el-icon></template>
+            </el-input>
+            <span class="sv-toolbar-count">共 {{ filteredCapabilities.length }} / {{ state.capabilities.length }} 条 · 覆盖 {{ capPkgs }} 个功能包</span>
+            <span class="sv-toolbar-spacer"></span>
+          </div>
+          <wd-data-grid v-if="state.capabilities.length > 0" :data-source="filteredCapabilities" border stripe table-size="small" :with-index="true" :with-pager="false">
+            <el-table-column prop="pkgKey" label="所属包" min-width="140" sortable>
               <template #default="{ row }"><span class="sv-mono">{{ row.pkgKey }}</span></template>
             </el-table-column>
-            <el-table-column prop="capType" label="能力类型" min-width="130">
+            <el-table-column prop="capType" label="能力类型" min-width="130" sortable>
               <template #default="{ row }"><span class="sv-mono">{{ row.capType }}</span></template>
             </el-table-column>
             <el-table-column prop="payload" label="画像摘要" min-width="240">
@@ -166,25 +306,57 @@
                 <span class="sv-mono">{{ summarize(row.payload) }}</span>
               </template>
             </el-table-column>
-            <el-table-column prop="updatedAt" label="同步时间" width="180">
+            <el-table-column prop="updatedAt" label="同步时间" width="180" sortable>
               <template #default="{ row }"><span class="sv-mono">{{ row.updatedAt }}</span></template>
             </el-table-column>
+            <!-- ── 卡片清单模式（DataGrid 内建 modeSwitch 视图；扁平三层，只读清单无操作行） ── -->
+            <template #card-item="{ row }">
+              <div class="lh-card">
+                <div class="lh-card__head">
+                  <div class="lh-card__title">{{ row.pkgKey }}</div>
+                  <div class="lh-card__tags">
+                    <el-tag size="small" effect="plain">{{ row.capType }}</el-tag>
+                  </div>
+                  <div class="lh-card__extra">
+                    <div class="lh-card__stamp">{{ row.updatedAt }}</div>
+                  </div>
+                </div>
+                <div class="lh-card__fields">
+                  <div class="lh-card__field is-wide"><div class="k">画像摘要</div><div class="v sv-mono">{{ summarize(row.payload) || '—' }}</div></div>
+                </div>
+              </div>
+            </template>
           </wd-data-grid>
           <p v-else style="color:var(--wd-text-color-secondary,#6b7280);font-size:13px">暂无能力数据，请先在宿主端触发一次服务同步。</p>
         </template>
       </wd-panel>
 
       <!-- 升级记录 -->
-      <wd-panel :border="true" title="升级记录（services.php changelog）">
+      <wd-panel description-align="right" :border="true" title="升级记录（services.php changelog）">
         <wd-data-grid v-if="state.changelog.length > 0" :data-source="state.changelog" border stripe table-size="small" :with-index="true" :with-pager="false">
-          <el-table-column prop="key" label="服务版本" min-width="150">
+          <el-table-column prop="key" label="服务版本" min-width="150" sortable>
             <template #default="{ row }"><span class="sv-mono">{{ row.key }}</span></template>
           </el-table-column>
-          <el-table-column prop="date" label="日期" width="120">
+          <el-table-column prop="date" label="日期" width="120" sortable>
             <template #default="{ row }"><span class="sv-mono">{{ row.date }}</span></template>
           </el-table-column>
           <el-table-column prop="note" label="说明" min-width="280" />
+          <!-- ── 卡片清单模式（DataGrid 内建 modeSwitch 视图；扁平三层，只读清单无操作行） ── -->
+          <template #card-item="{ row }">
+            <div class="lh-card">
+              <div class="lh-card__head">
+                <div class="lh-card__title">{{ row.key }}</div>
+                <div class="lh-card__extra">
+                  <div class="lh-card__stamp">{{ row.date }}</div>
+                </div>
+              </div>
+              <div class="lh-card__fields">
+                <div class="lh-card__field is-wide"><div class="k">说明</div><div class="v">{{ row.note || '—' }}</div></div>
+              </div>
+            </div>
+          </template>
         </wd-data-grid>
+        <p v-else style="color:var(--wd-text-color-secondary,#6b7280);font-size:13px">暂无升级记录。</p>
       </wd-panel>
     </div>
 </script>
@@ -193,11 +365,12 @@
   <script src="/static/vendor/element-plus/index.full.min.js"></script>
   <script src="/static/vendor/icons/index.iife.min.js"></script>
   <script src="/static/vendor/workdesktop-ai/index.umd.js"></script>
+  <script src="/static/linhub/auth-guard.js?v=2"></script>
   <script>
     const WD = window.WorkDesktop;
     const ElementPlus = window.ElementPlus;
     const { WorkDesktop } = WD;
-    const { ref, reactive } = Vue;
+    const { ref, reactive, computed } = Vue;
 
     function summarize(payload) {
       if (!payload || typeof payload !== 'object') return JSON.stringify(payload);
@@ -232,7 +405,75 @@
 
         load();
 
-        return { loading, state, summarize };
+        // —— 数字千分位 ——
+        const fmt = (v) => {
+          const n = Number(v);
+          if (!isFinite(n)) return '0';
+          return n.toLocaleString('zh-CN');
+        };
+
+        // —— 概览统计 ——
+        const hostCount = computed(() => state.services.filter((s) => s.source === 'host').length);
+        const pkgCount = computed(() => state.services.filter((s) => s.source === 'package').length);
+        const totalCalls = computed(() => state.calls.reduce((a, c) => a + (Number(c.count) || 0), 0));
+        const capPkgs = computed(() => new Set(state.capabilities.map((c) => c.pkgKey)).size);
+        const latestChangelog = computed(() => (state.changelog.length ? state.changelog[0].date : ''));
+
+        // —— 服务清单筛选：关键字 + 来源 + 服务类型 ——
+        const svKw = ref('');
+        const svSource = ref('');
+        const svType = ref('');
+        const filteredServices = computed(() => {
+          const kw = svKw.value.trim().toLowerCase();
+          const src = svSource.value || '';
+          const typ = svType.value || '';
+          return state.services.filter((s) => {
+            if (src && s.source !== src) return false;
+            if (typ && s.type !== typ) return false;
+            if (kw) {
+              const hit = (s.id || '').toLowerCase().includes(kw)
+                || (s.desc || '').toLowerCase().includes(kw)
+                || (s.class || '').toLowerCase().includes(kw);
+              if (!hit) return false;
+            }
+            return true;
+          });
+        });
+
+        // —— 调用统计筛选：关键字（默认按调用次数降序） ——
+        const callKw = ref('');
+        const filteredCalls = computed(() => {
+          const kw = callKw.value.trim().toLowerCase();
+          const rows = state.calls.filter((c) => {
+            if (!kw) return true;
+            return (c.callee || '').toLowerCase().includes(kw)
+              || (c.method || '').toLowerCase().includes(kw)
+              || (c.caller || '').toLowerCase().includes(kw)
+              || (c.owner || '').toLowerCase().includes(kw);
+          });
+          return rows.slice().sort((a, b) => (Number(b.count) || 0) - (Number(a.count) || 0));
+        });
+        const byCount = (a, b) => (Number(a.count) || 0) - (Number(b.count) || 0);
+
+        // —— 能力清单筛选：关键字 ——
+        const capKw = ref('');
+        const filteredCapabilities = computed(() => {
+          const kw = capKw.value.trim().toLowerCase();
+          if (!kw) return state.capabilities;
+          return state.capabilities.filter((c) =>
+            (c.pkgKey || '').toLowerCase().includes(kw)
+            || (c.capType || '').toLowerCase().includes(kw));
+        });
+
+        return {
+          loading, state, summarize, load, fmt,
+          hostCount, pkgCount, totalCalls, capPkgs, latestChangelog,
+          svKw, svSource, svType, filteredServices,
+          callKw, filteredCalls, byCount,
+          capKw, filteredCapabilities,
+          Search: window.ElementPlusIconsVue.Search,
+          Refresh: window.ElementPlusIconsVue.Refresh,
+        };
       }
     });
 

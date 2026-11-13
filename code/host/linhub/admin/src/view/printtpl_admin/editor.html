@@ -1,0 +1,866 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>打印模板编辑器 - LinHub 林枢</title>
+  <link rel="icon" type="image/svg+xml" href="/brand/favicon.svg">
+  <link rel="stylesheet" href="/static/vendor/element-plus/index.css">
+  <link rel="stylesheet" href="/static/vendor/workdesktop-ai/style.css">
+  <link rel="stylesheet" href="/static/linhub/cards.css">
+  <style>
+    html, body, #app { height: 100%; margin: 0; overflow: hidden; }
+    body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif; }
+    .ed-wrap { display: flex; flex-direction: column; height: 100%; }
+    .ed-top { flex: 0 0 auto; padding: 10px 16px; background: #fff; border-bottom: 1px solid #e4e7ed; }
+    .ed-top-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .ed-top-row + .ed-top-row { margin-top: 8px; }
+    .ed-main { flex: 1 1 auto; display: flex; min-height: 0; }
+    .ed-left { flex: 0 0 168px; border-right: 1px solid #e4e7ed; background: #fff; padding: 12px 10px; overflow: auto; }
+    .ed-center { flex: 1 1 auto; overflow: auto; background: #909399; padding: 24px; position: relative; }
+    .ed-right { flex: 0 0 300px; border-left: 1px solid #e4e7ed; background: #fff; padding: 12px; overflow: auto; }
+    .ed-widget { border: 1px solid #dcdfe6; border-radius: 6px; padding: 8px 10px; margin-bottom: 8px; cursor: grab;
+      font-size: 13px; background: #f6f8fa; user-select: none; }
+    .ed-widget:hover { border-color: #409eff; color: #409eff; }
+    .ed-widget.is-off { opacity: .45; cursor: not-allowed; }
+    .ed-widget small { display: block; color: #909399; margin-top: 2px; }
+
+    /* 画布（mm 直接作为 CSS 单位，与打印一致） */
+    .pt-canvas { position: relative; background: #fff; box-shadow: 0 2px 12px rgba(0,0,0,.35); margin: 0 auto; }
+    .pt-margin-guide { position: absolute; border: 1px dashed #d0d3d9; pointer-events: none; }
+    .cv-el { position: absolute; cursor: move; box-sizing: border-box; overflow: hidden; font-size: 12px; }
+    .cv-el.is-sel { outline: 2px solid #409eff; outline-offset: 1px; }
+    .cv-el .cv-tag { position: absolute; top: 0; left: 0; font-size: 10px; line-height: 1.2;
+      background: #409eff; color: #fff; padding: 0 4px; border-radius: 0 0 3px 0; z-index: 3; pointer-events: none; }
+    .cv-el.is-sel .cv-rs { position: absolute; right: -5px; bottom: -5px; width: 10px; height: 10px;
+      background: #409eff; border: 2px solid #fff; border-radius: 2px; cursor: nwse-resize; z-index: 4; }
+    .cv-el .cv-tbl { width: 100%; border-collapse: collapse; table-layout: fixed; }
+    .cv-el .cv-tbl th, .cv-el .cv-tbl td { border: 1px solid #303133; padding: 2px 4px; font-size: 12px;
+      overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+    .cv-el .cv-tbl th { background: #f2f3f5; font-weight: 600; }
+    .cv-el .cv-kv { width: 100%; border-collapse: collapse; table-layout: fixed; }
+    .cv-el .cv-kv td { padding: 1px 4px 1px 0; font-size: 12px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+    .cv-el .cv-kv .cv-kv-l { color: #909399; }
+    .cv-el .cv-kv .cv-kv-l::after { content: "："; }
+    .cv-empty-hint { text-align: center; color: #ecf0f4; font-size: 15px; padding-top: 60px; }
+    .ed-src { width: 100%; height: 100%; box-sizing: border-box; font-family: ui-monospace, Consolas, monospace;
+      font-size: 12px; padding: 12px; border: 0; resize: none; outline: none; }
+    .ed-prop-title { font-size: 13px; font-weight: 600; margin: 4px 0 10px; }
+    .ed-prop-title small { font-weight: 400; color: #909399; }
+    .ed-cols-row { display: flex; gap: 4px; align-items: center; margin-bottom: 4px; }
+    .ed-cols-row .el-input, .ed-cols-row .el-select { flex: 1; }
+  </style>
+</head>
+
+<body>
+  <div id="app"></div>
+
+  <script type="text/x-template" id="ed-tpl">
+    <div class="ed-wrap">
+      <!-- ── 顶部工具栏 ── -->
+      <div class="ed-top">
+        <div class="ed-top-row">
+          <el-input v-model="form.code" placeholder="编号 如 shop.receipt（创建后不可改）" style="width:240px" :disabled="!!form.id" size="small" />
+          <el-input v-model="form.name" placeholder="模板名称" style="width:160px" size="small" />
+          <el-select v-model="form.scope" style="width:130px" size="small">
+            <el-option label="平台公共" value="platform" />
+            <el-option label="包级私有" value="package" />
+          </el-select>
+          <el-input v-model="form.owner_pkg" placeholder="归属包 short（包级时必填）" style="width:180px" size="small"
+                    :disabled="form.scope !== 'package'" />
+          <div style="flex:1"></div>
+          <el-radio-group v-model="mode" size="small" @change="onModeChange">
+            <el-radio-button value="visual">可视化</el-radio-button>
+            <el-radio-button value="source">源码</el-radio-button>
+          </el-radio-group>
+          <el-button size="small" :icon="Document" @click="sampleVisible = true">样例数据</el-button>
+          <el-button size="small" :icon="View" @click="preview">预览</el-button>
+          <el-button size="small" type="primary" :icon="Check" :loading="saving" @click="save">保存</el-button>
+          <el-button size="small" :icon="Printer" :disabled="!form.id" @click="testPrint">试打</el-button>
+          <el-button size="small" :icon="Back" v-if="!inFrame" @click="location.href = '/admin/printtpl_admin/index'">返回列表</el-button>
+        </div>
+        <div class="ed-top-row" style="font-size:12px;color:#909399">
+          纸张：
+          <el-select v-model="paper.size" size="small" style="width:100px" @change="onPaperPreset">
+            <el-option v-for="(v, k) in presets" :key="k" :label="k" :value="k" />
+            <el-option label="自定义" value="custom" />
+          </el-select>
+          <template v-if="paper.size === 'custom'">
+            宽 <el-input-number v-model="paper.w" :min="30" :max="2000" size="small" style="width:100px" controls-position="right" />
+            高 <el-input-number v-model="paper.h" :min="30" :max="2000" size="small" style="width:100px" controls-position="right" />
+          </template>
+          <el-checkbox v-model="landscape" @change="onOrientation">横向</el-checkbox>
+          边距
+          <el-input-number v-model="paper.margin.t" :min="0" :max="60" size="small" style="width:80px" controls-position="right" />
+          <el-input-number v-model="paper.margin.r" :min="0" :max="60" size="small" style="width:80px" controls-position="right" />
+          <el-input-number v-model="paper.margin.b" :min="0" :max="60" size="small" style="width:80px" controls-position="right" />
+          <el-input-number v-model="paper.margin.l" :min="0" :max="60" size="small" style="width:80px" controls-position="right" />
+          <span style="margin-left:8px">mm · 明细表跨页自动分页且表头每页重复 · 页码占位 {{ PH.page }} / {{ PH.pages }}</span>
+        </div>
+      </div>
+
+      <div class="ed-main">
+        <!-- ── 左：组件面板 ── -->
+        <div class="ed-left" v-if="mode === 'visual'">
+          <div class="ed-prop-title">组件 <small>点击添加到画布</small></div>
+          <div class="ed-widget" v-for="w in widgets" :key="w.type" :class="{ 'is-off': w.off }" @click="addWidget(w)">
+            {{ w.label }}<small>{{ w.hint }}</small>
+          </div>
+          <div class="ed-prop-title" style="margin-top:14px">说明</div>
+          <div style="font-size:12px;color:#909399;line-height:1.8">
+            组件内可写占位符：<br>
+            <code>{{ PH.var }}</code> 取值<br>
+            <code>{{ PH.each }}</code> 循环（源码）<br>
+            <code>{{ PH.if }}</code> 条件（源码）<br>
+            表格组件绑定数组路径，列配置在右侧属性面板；<br>
+            键值对 / 分栏 / 分组框为布局组件，条目与标题在右侧属性面板配置；<br>
+            二维码 / 条码组件的内容支持占位符（如单号路径），打印时自动生成图形；<br>
+            文本中可写日期与金额格式化（date 取日期格式化、money 千分位金额，缺失输出空串）；<br>
+            图片地址可填完整 URL 或 <code>attach://附件token</code>（附件托管服务引用）；<br>
+            「页眉/页脚」组件每页重复；页脚常放页码占位。
+          </div>
+        </div>
+        <div class="ed-left" v-else style="flex-basis:0;padding:0;border:0"></div>
+
+        <!-- ── 中：画布 / 源码 ── -->
+        <div class="ed-center" ref="centerRef">
+          <template v-if="mode === 'visual'">
+            <div class="pt-canvas" :style="canvasStyle" @mousedown.self="selectedIdx = -1">
+              <div class="pt-margin-guide" :style="marginStyle"></div>
+              <div v-if="elements.length === 0" class="cv-empty-hint">点击左侧组件开始排版</div>
+              <div v-for="(el, i) in elements" :key="i" class="cv-el" :class="{ 'is-sel': selectedIdx === i }"
+                   :style="elStyle(el)" @mousedown.stop="startDrag($event, i)">
+                <span class="cv-tag" v-if="el.fixed">{{ el.fixed === 'header' ? '页眉' : '页脚' }}</span>
+                <!-- text -->
+                <template v-if="el.type === 'text'">
+                  <div :style="{ fontSize: el.fontSize + 'px', textAlign: el.align, color: el.color, fontWeight: el.bold ? 600 : 400, lineHeight: 1.5 }"
+                       v-html="el.content"></div>
+                </template>
+                <!-- table（示意渲染：表头 + 2 行示例） -->
+                <template v-else-if="el.type === 'table'">
+                  <table class="cv-tbl">
+                    <thead><tr><th v-for="c in el.cols" :key="c.k" :style="{ width: c.w, textAlign: c.align }">{{ c.t }}</th></tr></thead>
+                    <tbody>
+                      <tr v-for="n in 2" :key="n"><td v-for="c in el.cols" :key="c.k" :style="{ textAlign: c.align }">{{ c.k }}</td></tr>
+                    </tbody>
+                  </table>
+                </template>
+                <!-- image -->
+                <template v-else-if="el.type === 'image'">
+                  <img v-if="el.src" :src="imgSrc(el)" style="width:100%;height:100%;object-fit:contain;display:block">
+                  <div v-else style="color:#c0c4cc;text-align:center;padding-top:14px">图片</div>
+                </template>
+                <!-- kv（键值对：值显示占位符原文，渲染端统一填充） -->
+                <template v-else-if="el.type === 'kv'">
+                  <div v-if="!(el.items || []).length" style="color:#c0c4cc;text-align:center;padding-top:10px">键值对未配置条目</div>
+                  <table v-else class="cv-kv">
+                    <tr v-for="(row, ri) in kvRows(el)" :key="ri">
+                      <td v-for="(cell, ci) in row" :key="ci">
+                        <span class="cv-kv-l" v-if="cell.item.l" v-text="cell.item.l"></span>
+                        <span v-if="cell.item.p" v-text="phPath(cell.item.p)"></span>
+                      </td>
+                    </tr>
+                  </table>
+                </template>
+                <!-- cols（分栏：栏内容按 HTML 示意渲染） -->
+                <template v-else-if="el.type === 'cols'">
+                  <div style="display:flex;gap:6px;width:100%;height:100%">
+                    <div v-if="!(el.items || []).length" style="color:#c0c4cc">分栏未配置栏</div>
+                    <div v-for="(c, ci) in (el.items || [])" :key="ci"
+                         :style="{ width: c.w || 'auto', flex: c.w ? '0 0 auto' : '1 1 0', minWidth: 0, overflow: 'hidden', fontSize: '12px',
+                                   borderRight: ci < (el.items || []).length - 1 ? '1px dashed #d0d3d9' : 'none' }">
+                      <span v-if="c.html" v-html="c.html"></span>
+                      <span v-else style="color:#c0c4cc">空栏</span>
+                    </div>
+                  </div>
+                </template>
+                <!-- group（分组框：边框 + 标题条） -->
+                <template v-else-if="el.type === 'group'">
+                  <div style="width:100%;height:100%;border:1px solid #303133">
+                    <div v-if="el.title" style="padding:2px 8px;font-size:12px;font-weight:600;background:#fafafa;border-bottom:1px solid #303133" v-text="el.title"></div>
+                  </div>
+                </template>
+                <!-- code（二维码/条码：画布按内容生成 SVG，值支持占位符原文） -->
+                <template v-else-if="el.type === 'code'">
+                  <div class="cv-code" :data-kind="el.kind || 'qr'" :data-value="el.value || ''" style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;overflow:hidden"></div>
+                </template>
+                <!-- line -->
+                <div v-else-if="el.type === 'line'" :style="{ background: el.color, height: '100%' }"></div>
+                <!-- rect -->
+                <div v-else-if="el.type === 'rect'" :style="{ border: '1px solid ' + el.color, background: el.bg, width: '100%', height: '100%' }"></div>
+                <!-- html 兜底 -->
+                <div v-else v-html="el.html"></div>
+                <span class="cv-rs" v-if="selectedIdx === i" @mousedown.stop="startResize($event, i)"></span>
+              </div>
+            </div>
+          </template>
+          <textarea v-else class="ed-src" v-model="sourceBody" spellcheck="false"
+                    placeholder="受约束 HTML：组件为 &lt;div class=&quot;pt-el&quot; data-pt=&quot;text|table|image|kv|cols|group|code|line|rect&quot; style=&quot;left/top/width/height...&quot;&gt;…"></textarea>
+        </div>
+
+        <!-- ── 右：属性面板 ── -->
+        <div class="ed-right" v-if="mode === 'visual'">
+          <template v-if="sel">
+            <div class="ed-prop-title">{{ selTypeLabel }} <small>#{{ selectedIdx + 1 }}</small></div>
+            <el-form label-width="70px" size="small">
+              <el-form-item label="位置">
+                <div style="display:flex;gap:4px">
+                  <el-input-number v-model="sel.x" :min="0" :max="paper.w" :step="1" controls-position="right" style="width:90px" @change="clampSel" />
+                  <el-input-number v-model="sel.y" :min="0" :max="paper.h" :step="1" controls-position="right" style="width:90px" @change="clampSel" />
+                </div>
+              </el-form-item>
+              <el-form-item label="大小">
+                <div style="display:flex;gap:4px">
+                  <el-input-number v-model="sel.w" :min="1" :max="paper.w" :step="1" controls-position="right" style="width:90px" @change="clampSel" />
+                  <el-input-number v-model="sel.h" :min="0.5" :max="paper.h" :step="0.5" controls-position="right" style="width:90px" @change="clampSel" />
+                </div>
+              </el-form-item>
+              <el-form-item label="重复区域">
+                <el-select v-model="sel.fixed" style="width:100%">
+                  <el-option label="随正文（不重复）" value="" />
+                  <el-option label="页眉（每页重复）" value="header" />
+                  <el-option label="页脚（每页重复）" value="footer" />
+                </el-select>
+              </el-form-item>
+
+              <!-- text -->
+              <template v-if="sel.type === 'text'">
+                <el-form-item label="内容">
+                  <el-input v-model="sel.content" type="textarea" :rows="3" :placeholder="'支持 ' + PH.path + ' 占位符'" />
+                </el-form-item>
+                <el-form-item label="字号">
+                  <el-input-number v-model="sel.fontSize" :min="6" :max="72" controls-position="right" style="width:100%" />
+                </el-form-item>
+                <el-form-item label="对齐">
+                  <el-radio-group v-model="sel.align">
+                    <el-radio-button value="left">左</el-radio-button>
+                    <el-radio-button value="center">中</el-radio-button>
+                    <el-radio-button value="right">右</el-radio-button>
+                  </el-radio-group>
+                </el-form-item>
+                <el-form-item label="样式">
+                  <el-color-picker v-model="sel.color" />
+                  <el-checkbox v-model="sel.bold" style="margin-left:8px">加粗</el-checkbox>
+                </el-form-item>
+              </template>
+
+              <!-- table -->
+              <template v-else-if="sel.type === 'table'">
+                <el-form-item label="数据绑定">
+                  <el-input v-model="sel.bind" placeholder="数组路径，如 order.items" />
+                </el-form-item>
+                <el-form-item label="空文案">
+                  <el-input v-model="sel.empty" placeholder="暂无数据" />
+                </el-form-item>
+                <el-form-item label="分组列">
+                  <el-select v-model="sel.group" clearable style="width:100%" placeholder="按列分组并插入小计行">
+                    <el-option v-for="c in sel.cols" :key="c.k" :label="c.t" :value="c.k" />
+                  </el-select>
+                </el-form-item>
+                <el-form-item label="合并列">
+                  <el-select v-model="sel.merge" clearable style="width:100%" placeholder="组内相邻同值纵向合并">
+                    <el-option v-for="c in sel.cols" :key="c.k" :label="c.t" :value="c.k" />
+                  </el-select>
+                </el-form-item>
+                <el-form-item label="列配置">
+                  <div style="width:100%">
+                    <div class="ed-cols-row" v-for="(c, ci) in sel.cols" :key="ci">
+                      <el-input v-model="c.t" placeholder="列名" size="small" style="max-width:70px" />
+                      <el-input v-model="c.k" placeholder="键" size="small" style="max-width:70px" />
+                      <el-input v-model="c.w" placeholder="40% 或 60px" size="small" style="max-width:76px" />
+                      <el-select v-model="c.align" size="small" style="max-width:70px">
+                        <el-option label="左" value="left" /><el-option label="中" value="center" /><el-option label="右" value="right" />
+                      </el-select>
+                      <el-tooltip content="小计列：分组小计行对该列求和" placement="top">
+                        <el-checkbox v-model="c.subtotal" size="small">计</el-checkbox>
+                      </el-tooltip>
+                      <el-button size="small" text type="danger" @click="sel.cols.splice(ci, 1)">删</el-button>
+                    </div>
+                    <el-button size="small" @click="sel.cols.push({ k: 'col' + (sel.cols.length + 1), t: '新列', w: '60px', align: 'left', subtotal: false })">加列</el-button>
+                  </div>
+                </el-form-item>
+              </template>
+
+              <!-- image -->
+              <template v-else-if="sel.type === 'image'">
+                <el-form-item label="图片地址">
+                  <el-input v-model="sel.src" :placeholder="'URL / attach://附件token 或 ' + PH.path + ' 占位符'" />
+                </el-form-item>
+              </template>
+
+              <!-- kv -->
+              <template v-else-if="sel.type === 'kv'">
+                <el-form-item label="列数">
+                  <el-select v-model="sel.cols" style="width:100%">
+                    <el-option v-for="n in 4" :key="n" :label="n + ' 列'" :value="n" />
+                  </el-select>
+                </el-form-item>
+                <el-form-item label="条目">
+                  <div style="width:100%">
+                    <div class="ed-cols-row" v-for="(it, ii) in sel.items" :key="ii">
+                      <el-input v-model="it.l" placeholder="标签" size="small" style="max-width:84px" />
+                      <el-input v-model="it.p" placeholder="值路径 如 order.no" size="small" />
+                      <el-button size="small" text type="danger" @click="sel.items.splice(ii, 1)">删</el-button>
+                    </div>
+                    <el-button size="small" @click="sel.items.push({ l: '标签', p: '' })">加条目</el-button>
+                  </div>
+                </el-form-item>
+              </template>
+
+              <!-- cols -->
+              <template v-else-if="sel.type === 'cols'">
+                <el-form-item label="分栏">
+                  <div style="width:100%">
+                    <div class="ed-cols-row" v-for="(c, ci) in sel.items" :key="ci">
+                      <el-input v-model="c.w" placeholder="栏宽 50%" size="small" style="max-width:74px" />
+                      <el-input v-model="c.html" placeholder="栏内容，支持 HTML 与占位符" size="small" />
+                      <el-button size="small" text type="danger" @click="sel.items.splice(ci, 1)">删</el-button>
+                    </div>
+                    <el-button size="small" @click="sel.items.push({ w: '', html: '' })">加栏</el-button>
+                  </div>
+                </el-form-item>
+              </template>
+
+              <!-- group -->
+              <template v-else-if="sel.type === 'group'">
+                <el-form-item label="标题">
+                  <el-input v-model="sel.title" placeholder="留空则只画边框" />
+                </el-form-item>
+              </template>
+
+              <!-- code（二维码/条码） -->
+              <template v-else-if="sel.type === 'code'">
+                <el-form-item label="类型">
+                  <el-select v-model="sel.kind" style="width:100%" @change="redrawCanvasCodes">
+                    <el-option label="二维码 QR" value="qr" />
+                    <el-option label="条码 Code128" value="bar" />
+                  </el-select>
+                </el-form-item>
+                <el-form-item label="内容">
+                  <el-input v-model="sel.value" placeholder="内容，支持占位符（与文本组件相同语法）" @input="redrawCanvasCodes" />
+                </el-form-item>
+              </template>
+
+              <!-- line / rect -->
+              <template v-else-if="sel.type === 'line'">
+                <el-form-item label="颜色"><el-color-picker v-model="sel.color" /></el-form-item>
+              </template>
+              <template v-else-if="sel.type === 'rect'">
+                <el-form-item label="边框色"><el-color-picker v-model="sel.color" /></el-form-item>
+                <el-form-item label="填充色"><el-color-picker v-model="sel.bg" /></el-form-item>
+              </template>
+
+              <el-form-item label=" ">
+                <el-button size="small" type="danger" plain @click="removeSelected">删除该组件</el-button>
+              </el-form-item>
+            </el-form>
+          </template>
+          <el-empty v-else description="选中画布组件后在此编辑属性" :image-size="60" />
+        </div>
+        <div class="ed-right" v-else style="flex-basis:0;padding:0;border:0"></div>
+      </div>
+
+      <!-- 样例数据弹窗 -->
+      <el-dialog v-model="sampleVisible" title="样例数据（JSON）" width="640px">
+        <el-input v-model="sampleJson" type="textarea" :rows="16" spellcheck="false"
+                  style="font-family:ui-monospace,Consolas,monospace;font-size:12px" />
+        <template #footer>
+          <el-button @click="sampleVisible = false">关闭</el-button>
+          <el-button type="primary" @click="applySample">应用</el-button>
+        </template>
+      </el-dialog>
+    </div>
+  </script>
+
+  <script src="/static/vendor/vue/vue.global.prod.js"></script>
+  <script src="/static/vendor/element-plus/index.full.min.js"></script>
+  <script src="/static/vendor/icons/index.iife.min.js"></script>
+  <script src="/static/vendor/workdesktop-ai/index.umd.js"></script>
+  <script src="/static/linhub/auth-guard.js?v=2"></script>
+  <script src="/static/vendor/qrcode/qrcode.js"></script>
+  <script src="/static/vendor/barcode/JsBarcode.all.min.js"></script>
+  <script>
+    const WD = window.WorkDesktop;
+    const ElementPlus = window.ElementPlus;
+    const { WorkDesktop } = WD;
+    const { ref, reactive, computed, nextTick } = Vue;
+    const { Document, View, Check, Printer, Back } = window.ElementPlusIconsVue || {};
+
+    const PX_PER_MM = 96 / 25.4;
+    const PRESETS = { A4: { w: 210, h: 297 }, A5: { w: 148, h: 210 }, Letter: { w: 216, h: 279 } };
+    // 模板中展示的字面占位符文本（避免与 Vue 插值定界符冲突）
+    const PH = {
+      page: '{{pt.page}}', pages: '{{pt.pages}}', path: '{{路径}}',
+      var: '{{customer.name}}', each: '{{#each items}}', if: '{{#if total}}'
+    };
+    const DEFAULT_SAMPLE = {
+      customer: { name: '杭州云启科技', phone: '0571-88880000' },
+      order: { no: 'SO-20261103-001', date: '2026-11-03', items: [
+        { name: '热敏打印机 TP-80', spec: '80mm 热敏', qty: 2, price: 320, amount: 640 },
+        { name: '标签纸 60×40', spec: '500 张/卷', qty: 10, price: 18.5, amount: 185 },
+        { name: '碳带 wax 110mm', spec: '300m', qty: 4, price: 26, amount: 104 }
+      ] },
+      totalAmount: 929,
+      remark: '感谢惠顾，凭此单 seven 日内可退换。'
+    };
+
+    const app = Vue.createApp({
+      template: '#ed-tpl',
+      setup() {
+        // —— 基本信息 / 纸张 ——
+        const form = reactive({ id: 0, code: '', name: '', scope: 'platform', owner_pkg: '', version_no: 0 });
+        const paper = reactive({ size: 'A4', w: 210, h: 297, orientation: 'portrait', margin: { t: 10, r: 10, b: 10, l: 10 } });
+        const landscape = ref(false);
+        const mode = ref('visual');
+        const saving = ref(false);
+        const sampleVisible = ref(false);
+        const sampleJson = ref(JSON.stringify(DEFAULT_SAMPLE, null, 2));
+        const sampleData = ref(JSON.parse(JSON.stringify(DEFAULT_SAMPLE)));
+
+        // —— 组件模型 ——
+        const elements = ref([]);
+        const selectedIdx = ref(-1);
+        const sourceBody = ref('');
+
+        const widgets = [
+          { type: 'text', label: '文本', hint: '标题 / 字段 / 占位符' },
+          { type: 'table', label: '明细表格', hint: '数组绑定 · 跨页分页 · 小计' },
+          { type: 'image', label: '图片', hint: 'Logo / 印章 / 条码图' },
+          { type: 'kv', label: '键值对', hint: '头部信息网格 · 多列' },
+          { type: 'cols', label: '分栏', hint: '并排多栏内容' },
+          { type: 'group', label: '分组框', hint: '带标题的边框容器' },
+          { type: 'line', label: '线条', hint: '分隔线' },
+          { type: 'rect', label: '矩形', hint: '色块 / 边框区域' },
+          { type: 'code', label: '二维码 / 条码', hint: '单号图形 · Code128 / QR' }
+        ];
+        const typeLabels = { text: '文本', table: '明细表格', image: '图片', kv: '键值对', cols: '分栏', group: '分组框', code: '二维码 / 条码', line: '线条', rect: '矩形', html: '自定义HTML' };
+
+        const sel = computed(() => (selectedIdx.value >= 0 ? elements.value[selectedIdx.value] : null));
+        const selTypeLabel = computed(() => (sel.value ? (typeLabels[sel.value.type] || sel.value.type) : ''));
+
+        const canvasStyle = computed(() => ({ width: paper.w + 'mm', height: paper.h + 'mm' }));
+        const marginStyle = computed(() => ({
+          left: paper.margin.l + 'mm', top: paper.margin.t + 'mm',
+          width: (paper.w - paper.margin.l - paper.margin.r) + 'mm',
+          height: (paper.h - paper.margin.t - paper.margin.b) + 'mm'
+        }));
+
+        function elStyle(el) {
+          const base = { left: el.x + 'mm', top: el.y + 'mm', width: el.w + 'mm', height: el.h + 'mm' };
+          if (el.type === 'text') {
+            base.overflow = 'hidden';
+          }
+          return base;
+        }
+
+        /** 画布图片地址：attach://<token> 附件引用转换为下载地址（与渲染端 resolveAttachSrcs 对齐），其余原样。 */
+        function imgSrc(el) {
+          const s = String(el.src || '');
+          return s.toLowerCase().startsWith('attach://')
+            ? '/attachment/download?token=' + encodeURIComponent(s.slice(9)) + '&image=1'
+            : s;
+        }
+
+        /** 占位符字面文本：路径包大括号（经函数拼接，避免与 Vue 插值定界符冲突）。 */
+        function phPath(p) { return '{{' + p + '}}'; }
+        /** 键值对画布示意：按列数切行，不足补空格（与渲染端 array_chunk 对齐）。 */
+        function kvRows(el) {
+          const n = Math.max(1, Math.min(4, Number(el.cols) || 2));
+          const rows = [];
+          for (let i = 0; i < (el.items || []).length; i += n) {
+            const chunk = el.items.slice(i, i + n).map(item => ({ item }));
+            while (chunk.length < n) chunk.push({ item: { l: '', p: '' } });
+            rows.push(chunk);
+          }
+          return rows;
+        }
+
+        // —— 二维码 / 条码（T-6 v1.1）：画布绘制，与打印页 drawCodes 同逻辑（data-drawn 记录 kind|内容，变更自动重绘） ——
+        function drawOneCode(box) {
+          const kind = box.getAttribute('data-kind');
+          const val = box.getAttribute('data-value') || '';
+          const mark = kind + '|' + val;
+          if (box.getAttribute('data-drawn') === mark) return;
+          if (!val) {
+            box.innerHTML = '<span style="color:#c0c4cc;font-size:11px">内容为空</span>';
+            box.setAttribute('data-drawn', mark);
+            return;
+          }
+          try {
+            if (kind === 'bar') {
+              if (typeof JsBarcode === 'undefined') throw new Error('nolib');
+              const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+              JsBarcode(svg, val, { format: 'CODE128', displayValue: true, fontSize: 11, margin: 2, height: Math.max(24, (box.clientHeight || 60) - 14), width: 1 });
+              box.innerHTML = '';
+              box.appendChild(svg);
+            } else {
+              if (typeof qrcode === 'undefined') throw new Error('nolib');
+              if (!qrcode.stringToBytes || !qrcode.stringToBytes.__utf8) {
+                qrcode.stringToBytes = function (s) {
+                  const u = unescape(encodeURIComponent(s)), b = [];
+                  for (let i = 0; i < u.length; i++) b.push(u.charCodeAt(i) & 0xff);
+                  return b;
+                };
+                qrcode.stringToBytes.__utf8 = true;
+              }
+              const qr = qrcode(0, 'M');
+              qr.addData(val);
+              qr.make();
+              box.innerHTML = qr.createSvgTag({ cellSize: 4, margin: 1, scalable: true });
+              const qs = box.querySelector('svg');
+              if (qs) { qs.style.width = '100%'; qs.style.height = '100%'; }
+            }
+            box.setAttribute('data-drawn', mark);
+          } catch (e) {
+            box.innerHTML = '<span style="color:#f56c6c;font-size:11px">无法生成图形</span>';
+            box.setAttribute('data-drawn', mark);
+          }
+        }
+        function redrawCanvasCodes() {
+          document.querySelectorAll('.pt-canvas .cv-code').forEach(drawOneCode);
+        }
+
+        // —— 纸张 ——
+        function onPaperPreset() {
+          if (PRESETS[paper.size]) { paper.w = PRESETS[paper.size].w; paper.h = PRESETS[paper.size].h; }
+          applyOrientation();
+        }
+        function onOrientation() { applyOrientation(); }
+        function applyOrientation() {
+          // 勾选横向：竖换横；取消勾选：横换回竖（此前只在勾选方向交换，取消后 w/h 停在横向）
+          const wantWide = landscape.value;
+          const isWide = paper.w > paper.h;
+          if (wantWide !== isWide && paper.w !== paper.h) { const t = paper.w; paper.w = paper.h; paper.h = t; }
+          paper.orientation = wantWide ? 'landscape' : 'portrait';
+        }
+
+        // —— 组件增删 ——
+        function nextY() {
+          let y = paper.margin.t;
+          for (const el of elements.value) y = Math.max(y, el.y + el.h + 4);
+          return Math.min(y, paper.h - 10);
+        }
+        function addWidget(w) {
+          const base = { type: w.type, x: paper.margin.l, y: nextY(), w: 60, h: 10, fixed: '' };
+          if (w.type === 'text') Object.assign(base, { content: '文本内容', fontSize: 14, align: 'left', color: '#1f2329', bold: false });
+          if (w.type === 'table') Object.assign(base, {
+            w: paper.w - paper.margin.l - paper.margin.r, h: 40, bind: 'order.items', empty: '暂无数据',
+            group: '', merge: '', cols: [
+              { k: 'name', t: '品名', w: '40%', align: 'left', subtotal: false },
+              { k: 'qty', t: '数量', w: '60px', align: 'right', subtotal: false },
+              { k: 'amount', t: '金额', w: '80px', align: 'right', subtotal: true }
+            ]
+          });
+          if (w.type === 'image') Object.assign(base, { w: 28, h: 28, src: '' });
+          if (w.type === 'kv') Object.assign(base, {
+            w: paper.w - paper.margin.l - paper.margin.r, h: 14, cols: 2,
+            items: [
+              { l: '客户名称', p: 'customer.name' },
+              { l: '单号', p: 'order.no' },
+              { l: '下单日期', p: 'order.date' },
+              { l: '联系电话', p: 'customer.phone' }
+            ]
+          });
+          if (w.type === 'cols') Object.assign(base, {
+            w: paper.w - paper.margin.l - paper.margin.r, h: 16,
+            items: [ { w: '50%', html: '左栏内容' }, { w: '50%', html: '右栏内容' } ]
+          });
+          if (w.type === 'group') Object.assign(base, { w: paper.w - paper.margin.l - paper.margin.r, h: 30, title: '分组标题' });
+          if (w.type === 'code') Object.assign(base, { w: 26, h: 26, kind: 'qr', value: '{{order.no}}' });
+          if (w.type === 'line') Object.assign(base, { w: paper.w - paper.margin.l - paper.margin.r, h: 0.6, color: '#1f2329' });
+          if (w.type === 'rect') Object.assign(base, { w: 60, h: 20, color: '#1f2329', bg: '#ffffff00' });
+          elements.value.push(base);
+          selectedIdx.value = elements.value.length - 1;
+          if (w.type === 'code') nextTick(redrawCanvasCodes);
+        }
+        function removeSelected() {
+          if (selectedIdx.value < 0) return;
+          elements.value.splice(selectedIdx.value, 1);
+          selectedIdx.value = -1;
+        }
+        function clampSel() {
+          const el = sel.value;
+          if (!el) return;
+          el.w = Math.min(el.w, paper.w); el.h = Math.min(el.h, paper.h);
+          el.x = Math.min(Math.max(0, el.x), paper.w - el.w);
+          el.y = Math.min(Math.max(0, el.y), paper.h - el.h);
+        }
+
+        // —— 拖拽 / 缩放 ——
+        function startDrag(evt, i) {
+          selectedIdx.value = i;
+          const el = elements.value[i];
+          const sx = evt.clientX, sy = evt.clientY, ox = el.x, oy = el.y;
+          const move = (e) => {
+            el.x = Math.round((ox + (e.clientX - sx) / PX_PER_MM) * 10) / 10;
+            el.y = Math.round((oy + (e.clientY - sy) / PX_PER_MM) * 10) / 10;
+            clampSel();
+          };
+          const up = () => { document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); };
+          document.addEventListener('mousemove', move);
+          document.addEventListener('mouseup', up);
+        }
+        function startResize(evt, i) {
+          const el = elements.value[i];
+          const sx = evt.clientX, sy = evt.clientY, ow = el.w, oh = el.h;
+          const move = (e) => {
+            el.w = Math.round(Math.max(1, ow + (e.clientX - sx) / PX_PER_MM) * 10) / 10;
+            el.h = Math.round(Math.max(0.5, oh + (e.clientY - sy) / PX_PER_MM) * 10) / 10;
+            clampSel();
+          };
+          const up = () => { document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); };
+          document.addEventListener('mousemove', move);
+          document.addEventListener('mouseup', up);
+        }
+
+        // —— 可视化 ⇄ 源码 互转（AC-9） ——
+        function escAttr(s) {
+          return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        }
+        function parseStyleAttr(s) {
+          const m = {};
+          for (const seg of String(s || '').split(';')) {
+            const i = seg.indexOf(':');
+            if (i > 0) m[seg.slice(0, i).trim().toLowerCase()] = seg.slice(i + 1).trim();
+          }
+          return m;
+        }
+        function mm(v, dflt) {
+          const n = parseFloat(String(v || ''));
+          return isNaN(n) ? dflt : n;
+        }
+        /** 源码 → 组件模型；无法识别的 .pt-el 降级为 html 组件兜底，非组件节点忽略。 */
+        function parseBody(html) {
+          const out = [];
+          const doc = new DOMParser().parseFromString('<div id="root">' + (html || '') + '</div>', 'text/html');
+          const root = doc.getElementById('root');
+          for (const node of Array.from(root.children)) {
+            if (!node.classList || !node.classList.contains('pt-el')) continue;
+            const st = parseStyleAttr(node.getAttribute('style'));
+            const type = node.getAttribute('data-pt') || 'html';
+            const el = {
+              type, x: mm(st.left, 10), y: mm(st.top, 10), w: mm(st.width, 60), h: mm(st.height, 10),
+              fixed: node.getAttribute('data-fixed') || ''
+            };
+            if (type === 'text') {
+              Object.assign(el, {
+                content: node.innerHTML,
+                fontSize: mm((st.fontSize || '14px').replace('px', ''), 14),
+                align: st.textAlign || 'left', color: st.color || '#1f2329',
+                bold: (st.fontWeight || '') === '600' || (st.fontWeight || '') === 'bold'
+              });
+            } else if (type === 'table') {
+              let cols = [];
+              try { cols = JSON.parse(node.getAttribute('data-cols') || '[]') || []; } catch (e) {}
+              Object.assign(el, {
+                bind: node.getAttribute('data-bind') || '', empty: node.getAttribute('data-empty') || '暂无数据',
+                group: node.getAttribute('data-group') || '', merge: node.getAttribute('data-merge') || '',
+                cols: cols.map(c => ({ k: c.k || '', t: c.t || '', w: c.w || '60px', align: c.align || 'left', subtotal: !!c.subtotal }))
+              });
+            } else if (type === 'image') {
+              const img = node.querySelector('img');
+              Object.assign(el, { src: img ? img.getAttribute('src') : (node.getAttribute('data-src') || '') });
+            } else if (type === 'kv') {
+              let items = [];
+              try { items = JSON.parse(node.getAttribute('data-items') || '[]') || []; } catch (e) {}
+              Object.assign(el, {
+                cols: Number(node.getAttribute('data-cols')) || 2,
+                items: items.map(it => ({ l: it.l || '', p: it.p || '' }))
+              });
+            } else if (type === 'cols') {
+              let items = [];
+              try { items = JSON.parse(node.getAttribute('data-items') || '[]') || []; } catch (e) {}
+              Object.assign(el, { items: items.map(c => ({ w: c.w || '', html: c.html || '' })) });
+            } else if (type === 'group') {
+              Object.assign(el, { title: node.getAttribute('data-title') || '' });
+            } else if (type === 'code') {
+              Object.assign(el, {
+                kind: node.getAttribute('data-kind') === 'bar' ? 'bar' : 'qr',
+                value: node.getAttribute('data-value') || ''
+              });
+            } else if (type === 'line') {
+              Object.assign(el, { color: st.background || '#1f2329' });
+            } else if (type === 'rect') {
+              Object.assign(el, { color: (st.border || '1px solid #1f2329').split(' ').pop(), bg: st.background || '#ffffff00' });
+            } else {
+              Object.assign(el, { type: 'html', html: node.innerHTML });
+            }
+            out.push(el);
+          }
+          return out;
+        }
+        /** 组件模型 → 源码（与 Renderer 解析端约定严格对齐：表格 div 恒为空体）。 */
+        function serialize() {
+          return elements.value.map(el => {
+            let style = `left:${el.x}mm;top:${el.y}mm;width:${el.w}mm;height:${el.h}mm;`;
+            const fx = el.fixed ? ` data-fixed="${el.fixed}"` : '';
+            if (el.type === 'text') {
+              style += `font-size:${el.fontSize}px;text-align:${el.align};color:${el.color};font-weight:${el.bold ? 600 : 400};`;
+              return `<div class="pt-el" data-pt="text" style="${style}"${fx}>${el.content}</div>`;
+            }
+            if (el.type === 'table') {
+              const cols = el.cols.map(c => ({
+                k: c.k, t: c.t, w: c.w, align: c.align, subtotal: !!c.subtotal
+              }));
+              style += 'overflow:visible;';
+              return `<div class="pt-el" data-pt="table" style="${style}"${fx}`
+                + ` data-bind="${escAttr(el.bind)}" data-cols='${escAttr(JSON.stringify(cols))}'`
+                + ` data-group="${escAttr(el.group)}" data-merge="${escAttr(el.merge)}" data-empty="${escAttr(el.empty)}"></div>`;
+            }
+            if (el.type === 'image') {
+              return `<div class="pt-el" data-pt="image" style="${style}"${fx}><img src="${escAttr(el.src)}" alt=""></div>`;
+            }
+            if (el.type === 'kv') {
+              const items = (el.items || []).map(it => ({ l: it.l || '', p: it.p || '' }));
+              const cn = Math.max(1, Math.min(4, Number(el.cols) || 2));
+              return `<div class="pt-el" data-pt="kv" style="${style}"${fx}`
+                + ` data-cols="${cn}" data-items='${escAttr(JSON.stringify(items))}'></div>`;
+            }
+            if (el.type === 'cols') {
+              const items = (el.items || []).map(c => ({ w: c.w || '', html: c.html || '' }));
+              return `<div class="pt-el" data-pt="cols" style="${style}"${fx}`
+                + ` data-items='${escAttr(JSON.stringify(items))}'></div>`;
+            }
+            if (el.type === 'group') {
+              return `<div class="pt-el" data-pt="group" style="${style}"${fx} data-title="${escAttr(el.title || '')}"></div>`;
+            }
+            if (el.type === 'code') {
+              const kind = el.kind === 'bar' ? 'bar' : 'qr';
+              return `<div class="pt-el" data-pt="code" style="${style}"${fx}`
+                + ` data-kind="${kind}" data-value="${escAttr(el.value || '')}"></div>`;
+            }
+            if (el.type === 'line') {
+              style += `background:${el.color};`;
+              return `<div class="pt-el" data-pt="line" style="${style}"${fx}></div>`;
+            }
+            if (el.type === 'rect') {
+              style += `border:1px solid ${el.color};background:${el.bg};`;
+              return `<div class="pt-el" data-pt="rect" style="${style}"${fx}></div>`;
+            }
+            return `<div class="pt-el" data-pt="html" style="${style}"${fx}>${el.html || ''}</div>`;
+          }).join('\n');
+        }
+        /** 模式切换：可视化→源码同步序列化结果；源码→可视化重解析。 */
+        function onModeChange() {
+          if (mode.value === 'source') {
+            sourceBody.value = serialize();
+          } else {
+            elements.value = parseBody(sourceBody.value);
+            selectedIdx.value = -1;
+          }
+        }
+
+        // —— 样例数据 ——
+        function applySample() {
+          try {
+            sampleData.value = JSON.parse(sampleJson.value);
+            sampleVisible.value = false;
+            ElementPlus.ElMessage.success('样例数据已应用（用于试打/预览）');
+          } catch (e) {
+            ElementPlus.ElMessage.error('JSON 解析失败：' + e.message);
+          }
+        }
+
+        // —— 预览 / 保存 / 试打 ——
+        function currentBody() {
+          return mode.value === 'source' ? sourceBody.value : serialize();
+        }
+        function preview() {
+          const f = document.createElement('form');
+          f.method = 'POST'; f.action = '/admin/printtpl_admin/preview'; f.target = '_blank';
+          const add = (k, v) => { const i = document.createElement('input'); i.type = 'hidden'; i.name = k; i.value = v; f.appendChild(i); };
+          add('body', currentBody());
+          add('paper', JSON.stringify({ ...paper }));
+          add('sample_data', JSON.stringify(sampleData.value));
+          document.body.appendChild(f); f.submit(); f.remove();
+        }
+        async function save() {
+          if (!form.code) { ElementPlus.ElMessage.warning('请填写模板编号'); return; }
+          if (!form.name) { ElementPlus.ElMessage.warning('请填写模板名称'); return; }
+          if (form.scope === 'package' && !form.owner_pkg) { ElementPlus.ElMessage.warning('包级私有模板须填写归属包 short'); return; }
+          saving.value = true;
+          try {
+            const res = await WD.request.post('/admin/printtpl_admin/save', {
+              id: form.id || 0,
+              code: form.code, name: form.name,
+              scope: form.scope, owner_pkg: form.scope === 'package' ? form.owner_pkg : '',
+              mode: mode.value,
+              body: currentBody(),
+              paper: JSON.stringify({ ...paper }),
+              sample_data: JSON.stringify(sampleData.value)
+            });
+            if (!res.success) { ElementPlus.ElMessage.error(res.message || '保存失败'); return; }
+            form.id = res.data.id;
+            form.version_no = res.data.version_no;
+            if (mode.value === 'visual') sourceBody.value = serialize();
+            ElementPlus.ElMessage.success(res.message || '已保存');
+            closeDrawer();
+          } finally {
+            saving.value = false;
+          }
+        }
+        function testPrint() {
+          if (form.id) window.open('/admin/printtpl_admin/print?id=' + form.id, '_blank');
+        }
+
+        // —— 载入 ——
+        async function load() {
+          const id = new URLSearchParams(location.search).get('id');
+          if (!id) return;
+          try {
+            const res = await WD.request.get('/admin/printtpl_admin/detail?id=' + id);
+            if (!res.success) { ElementPlus.ElMessage.error(res.message || '载入失败'); return; }
+            const t = res.data.tpl || res.data;
+            form.id = t.id; form.code = t.code; form.name = t.name;
+            form.scope = t.scope || 'platform'; form.owner_pkg = t.owner_pkg || '';
+            form.version_no = t.version_no || 0;
+            const p = t.paper || {};
+            paper.size = p.size || 'A4';
+            paper.w = Number(p.w) || (PRESETS[paper.size] ? PRESETS[paper.size].w : 210);
+            paper.h = Number(p.h) || (PRESETS[paper.size] ? PRESETS[paper.size].h : 297);
+            paper.orientation = p.orientation || 'portrait';
+            landscape.value = paper.orientation === 'landscape';
+            const m = p.margin || {};
+            paper.margin = { t: Number(m.t ?? 10), r: Number(m.r ?? 10), b: Number(m.b ?? 10), l: Number(m.l ?? 10) };
+            sourceBody.value = t.body || '';
+            if (t.sample_data && typeof t.sample_data === 'object') {
+              sampleData.value = t.sample_data;
+              sampleJson.value = JSON.stringify(t.sample_data, null, 2);
+            }
+            mode.value = t.mode === 'source' ? 'source' : 'visual';
+            if (mode.value === 'visual') elements.value = parseBody(sourceBody.value);
+            nextTick(redrawCanvasCodes);
+          } catch (e) {
+            ElementPlus.ElMessage.error('载入失败：' + e.message);
+          }
+        }
+        // 列表页以全屏抽屉（wd-drawer-button url 模式）嵌入本页：iframe 内隐藏「返回列表」，
+        // 保存成功后 postMessage 通知外层 wd-drawer 自动关闭（@close 由列表页刷新数据）
+        const inFrame = window.self !== window.top;
+        function closeDrawer() {
+          if (inFrame) window.parent.postMessage({ type: 'wd-container:close' }, window.location.origin);
+        }
+        load();
+
+        return {
+          form, paper, landscape, mode, saving, sampleVisible, sampleJson, inFrame,
+          elements, selectedIdx, sourceBody, widgets, sel, selTypeLabel, canvasStyle, marginStyle, elStyle, imgSrc, phPath, kvRows, redrawCanvasCodes,
+          presets: PRESETS, PH,
+          onPaperPreset, onOrientation, addWidget, removeSelected, clampSel,
+          startDrag, startResize, onModeChange, applySample, preview, save, testPrint,
+          Document, View, Check, Printer, Back
+        };
+      }
+    });
+
+    for (const [name, comp] of Object.entries(window.ElementPlusIconsVue)) {
+      app.component(name, comp);
+    }
+    app.use(ElementPlus);
+    app.use(WorkDesktop);
+    app.mount('#app');
+  </script>
+</body>
+
+</html>

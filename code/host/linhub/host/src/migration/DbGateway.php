@@ -20,6 +20,14 @@ interface DbGateway
     /** 执行一条不返回结果集的 SQL（DDL / DML）。 */
     public function exec(string $sql): void;
 
+    /**
+     * 执行一条写语句并返回受影响行数。
+     *
+     * 用于「条件 UPDATE 认领」这类需要判断是否真正抢占成功的场景（异步任务调度 AT-17）：
+     * 返回 1 表示本次语句生效，0 表示条件不成立（已被其他进程处理）。
+     */
+    public function execAffected(string $sql): int;
+
     /** 执行查询并返回所有行（关联数组列表）。 */
     public function query(string $sql): array;
 

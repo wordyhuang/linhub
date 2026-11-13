@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace app\admin\controller;
 
 use linhub\capability\auth\Identity;
+use linhub\host\rbac\RbacRoles;
 
 /**
  * 用户管理 GUI（G4 / T5.4 / B3 / J1 / J5）—— admin 应用
@@ -39,7 +40,19 @@ class User extends AdminController
         }
         $groupMap = [];
         foreach ($groups->all() as $g) {
-            $groupMap[(string) ($g['id'] ?? '')] = (string) ($g['name'] ?? '');
+            $groupMap[(string) ($g['id'] ?? '')] = [
+                'name'  => (string) ($g['name'] ?? ''),
+                'perms' => array_values((array) ($g['perms'] ?? [])),
+            ];
+        }
+        // 权限码 → 介绍（J4 权限点声明的 title / description）
+        $permInfo = [];
+        foreach ($this->bootstrap->permissions()->all() as $p) {
+            $code = (string) ($p['code'] ?? '');
+            $permInfo[$code] = [
+                'title'       => (string) ($p['title'] ?? ''),
+                'description' => (string) ($p['description'] ?? ''),
+            ];
         }
 
         $items = [];
@@ -54,10 +67,33 @@ class User extends AdminController
                 $rid = (string) $rid;
                 $roles[] = ['id' => $rid, 'name' => (string) ($roleMap[$rid] ?? $rid)];
             }
-            $groups = [];
+            $userGroups = [];
             foreach ($users->groupsOf($uid) as $gid) {
                 $gid = (string) $gid;
-                $groups[] = ['id' => $gid, 'name' => (string) ($groupMap[$gid] ?? $gid)];
+                $meta = $groupMap[$gid] ?? null;
+                $userGroups[] = [
+                    'id'    => $gid,
+                    'name'  => is_array($meta) ? $meta['name'] : (string) $gid,
+                    'perms' => is_array($meta) ? $meta['perms'] : [],
+                ];
+            }
+            // 权限码 → 授权来源组（角色不绑定权限，T5.6，来源恒为权限组）
+            $sourceMap = [];
+            foreach ($userGroups as $g) {
+                foreach ($g['perms'] as $code) {
+                    $sourceMap[(string) $code][] = $g['name'];
+                }
+            }
+            $permDetails = [];
+            foreach ($calc->calcPermissions($uid) as $code) {
+                $code = (string) $code;
+                $info = $permInfo[$code] ?? [];
+                $permDetails[] = [
+                    'code'        => $code,
+                    'title'       => (string) ($info['title'] ?? ''),
+                    'description' => (string) ($info['description'] ?? ''),
+                    'sources'     => array_values(array_unique($sourceMap[$code] ?? [])),
+                ];
             }
             $items[] = [
                 'id'          => $uid,
@@ -78,8 +114,9 @@ class User extends AdminController
                 'remark'      => (string) ($u['remark'] ?? ''),
                 'lastLoginAt' => (string) ($u['last_login_at'] ?? ''),
                 'roles'       => $roles,
-                'groups'      => $groups,
-                'permCodes'   => $calc->calcPermissions($uid),
+                'groups'      => array_map(fn ($g) => ['id' => $g['id'], 'name' => $g['name']], $userGroups),
+                'permCodes'   => array_column($permDetails, 'code'),
+                'permDetails' => $permDetails,
             ];
         }
         return $items;
@@ -121,7 +158,12 @@ class User extends AdminController
 
         $roleOptions = [];
         foreach ($this->bootstrap->roles()->all() as $r) {
-            $roleOptions[] = ['id' => (string) ($r['id'] ?? ''), 'name' => (string) ($r['name'] ?? '')];
+            $rid = (string) ($r['id'] ?? '');
+            // 超级管理员为平台占位只读角色，不进入选取列表（选取仅 4 个）
+            if ((RbacRoles::PRESET_KEYS[$rid] ?? '') === RbacRoles::SUPER_ADMIN) {
+                continue;
+            }
+            $roleOptions[] = ['id' => $rid, 'name' => (string) ($r['name'] ?? '')];
         }
         $groupOptions = [];
         foreach ($this->bootstrap->permissionGroups()->all() as $g) {
@@ -223,6 +265,12 @@ class User extends AdminController
             $badGroups = array_values(array_diff($groupIds, $groups));
             if ($badRoles !== [] || $badGroups !== []) {
                 return $this->jsonFail('含失效角色/权限组引用');
+            }
+            // 超级管理员为平台占位角色，不可分配（对齐 Role::usersSave 只读口径）
+            foreach ($roleIds as $rid) {
+                if ((RbacRoles::PRESET_KEYS[$rid] ?? '') === RbacRoles::SUPER_ADMIN) {
+                    return $this->jsonFail('超级管理员为平台占位角色，不可分配');
+                }
             }
             $users->setRoles($id, $roleIds);
             $users->setGroups($id, $groupIds);

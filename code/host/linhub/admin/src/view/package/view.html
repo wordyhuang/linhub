@@ -161,6 +161,49 @@
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       word-break: break-all;
     }
+
+    /* 服务条目悬停浮层：简介 + 参数 */
+    .svc-pop .svc-desc {
+      font-size: 13px;
+      line-height: 1.7;
+      margin-bottom: 8px;
+    }
+
+    .svc-pop .svc-muted {
+      color: var(--wd-text-color-secondary, #909399);
+    }
+
+    .svc-pop .svc-line {
+      font-size: 12px;
+      line-height: 1.8;
+      color: var(--wd-text-color-regular, #606266);
+    }
+
+    .svc-pop .svc-line .k {
+      color: var(--wd-text-color-secondary, #909399);
+      margin-right: 6px;
+    }
+
+    .svc-pop .svc-params-title {
+      margin: 8px 0 6px;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--wd-text-color-secondary, #909399);
+    }
+
+    .svc-pop .svc-param {
+      font-size: 12px;
+      line-height: 1.6;
+      margin-bottom: 4px;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .svc-pop .svc-param-name {
+      display: block;
+      font-weight: 600;
+      color: var(--wd-color-primary, #409eff);
+    }
   </style>
 </head>
 
@@ -265,20 +308,46 @@
         </div>
 
         <!-- 服务声明 -->
-        <wd-panel :border="true" title="服务" collapsible :opened="false">
+        <wd-panel description-align="right" :border="true" title="服务" :description="String(m.provides.length)" collapsible :opened="false">
           <div style="font-size:13px">
             <span class="k" style="color:var(--wd-text-color-secondary,#6b7280)">对外提供：</span>
             <template v-if="m.provides.length">
-              <el-tag v-for="p in m.provides" :key="p.id" size="small" type="success" effect="plain" style="margin:0 6px 4px 0">
-                {{ p.id }} <span class="mono" style="opacity:0.7">· {{ shortClass(p.class) }}</span>
-              </el-tag>
+              <el-popover
+                v-for="p in m.provides" :key="p.id"
+                placement="right" :width="420" trigger="hover" :show-after="200">
+                <template #reference>
+                  <el-tag size="small" type="success" effect="plain" style="margin:0 6px 4px 0;cursor:help">
+                    {{ p.id }} <span class="mono" style="opacity:0.7">· {{ shortClass(p.class) }}</span>
+                  </el-tag>
+                </template>
+                <div class="svc-pop">
+                  <div class="svc-line" style="font-size:13px;font-weight:600;color:var(--wd-text-color-primary,#303133)">
+                    <span class="mono">{{ p.id }}</span>
+                    <el-tag v-if="p.version" size="small" effect="plain" style="margin-left:6px">{{ p.version }}</el-tag>
+                  </div>
+                  <div class="svc-desc" style="margin-top:6px" :class="{ 'svc-muted': !p.desc }">
+                    {{ p.desc || '未声明简介（manifest services.provides.desc）' }}
+                  </div>
+                  <div v-if="p.class" class="svc-line"><span class="k">实现</span><span class="mono">{{ p.class }}</span></div>
+                  <template v-if="p.params && Object.keys(p.params).length">
+                    <div class="svc-params-title">参数（方法 → 签名）</div>
+                    <div v-for="(sig, name) in p.params" :key="name" class="svc-param">
+                      <span class="svc-param-name mono">{{ name }}</span>
+                      <span class="mono">{{ sig }}</span>
+                    </div>
+                  </template>
+                  <div v-else class="svc-desc svc-muted" style="margin-bottom:0;font-size:12px">
+                    未声明参数信息（manifest services.provides.params）
+                  </div>
+                </div>
+              </el-popover>
             </template>
             <span v-else>无</span>
           </div>
         </wd-panel>
 
         <!-- 依赖（平台 / 功能包 / 宿主服务） -->
-        <wd-panel :border="true" title="依赖" :description="'平台 ' + m.platform.length + ' · 功能包 ' + m.dependencies.length + ' · 服务 ' + m.requires.length" collapsible :opened="false">
+        <wd-panel description-align="right" :border="true" title="依赖" :description="'平台 ' + m.platform.length + ' · 功能包 ' + m.dependencies.length + ' · 服务 ' + m.requires.length" collapsible :opened="false">
           <div class="dep-group-title">平台依赖</div>
           <div v-if="m.platform.length" class="kv-list">
             <div v-for="p in m.platform" :key="p.name" class="kv">
@@ -297,7 +366,53 @@
 
           <div class="dep-group-title">宿主服务依赖</div>
           <div style="font-size:13px">
-            <template v-if="m.requires.length">
+            <template v-if="m.requiresDetail && m.requiresDetail.length">
+              <el-popover
+                v-for="r in m.requiresDetail" :key="r.id + '|' + r.constraint"
+                placement="right" :width="420" trigger="hover" :show-after="200">
+                <template #reference>
+                  <el-tag size="small" :type="r.founded ? 'info' : 'warning'" effect="plain"
+                          style="margin:0 6px 4px 0;cursor:help">
+                    {{ r.id }}<span v-if="r.constraint" class="mono" style="opacity:0.7"> · {{ r.constraint }}</span>
+                  </el-tag>
+                </template>
+                <div class="svc-pop">
+                  <div class="svc-line" style="font-size:13px;font-weight:600;color:var(--wd-text-color-primary,#303133)">
+                    <span class="mono">{{ r.id }}</span>
+                    <el-tag v-if="r.version" size="small" effect="plain" style="margin-left:6px">{{ r.version }}</el-tag>
+                    <el-tag size="small" effect="plain" style="margin-left:6px"
+                            :type="r.source === 'host' ? 'info' : (r.source === 'package' ? 'success' : 'warning')">
+                      {{ r.source === 'host' ? '宿主服务' : (r.source === 'package' ? '功能包提供' : '未提供') }}
+                    </el-tag>
+                  </div>
+                  <div class="svc-desc" style="margin-top:6px" :class="{ 'svc-muted': !r.desc }">
+                    {{ r.desc || (r.founded ? '未声明简介' : '未找到该服务：宿主清单与已启用功能包均未提供') }}
+                  </div>
+                  <div v-if="r.constraint" class="svc-line"><span class="k">版本约束</span><span class="mono">{{ r.constraint }}</span></div>
+                  <div v-if="r.provider" class="svc-line">
+                    <span class="k">提供方</span>
+                    <span>{{ r.provider }}<span v-if="r.providerShort" class="mono" style="opacity:0.7"> · {{ r.providerShort }}</span></span>
+                  </div>
+                  <div v-if="r.type" class="svc-line">
+                    <span class="k">服务类型</span>
+                    <span>{{ r.type === 'hosted' ? '托管服务（hosted）' : '功能服务（functional）' }}</span>
+                  </div>
+                  <div v-if="r.contract" class="svc-line">
+                    <span class="k">{{ r.source === 'package' ? '实现' : '契约' }}</span>
+                    <span class="mono">{{ r.contract }}</span>
+                  </div>
+                  <div v-if="r.impl" class="svc-line"><span class="k">实现</span><span class="mono">{{ r.impl }}</span></div>
+                  <template v-if="r.params && r.params.length">
+                    <div class="svc-params-title">参数（方法 → 签名）</div>
+                    <div v-for="(pg, i) in r.params" :key="i" class="svc-param">
+                      <span v-if="pg.name" class="svc-param-name mono">{{ pg.name }}</span>
+                      <span class="mono">{{ pg.desc }}</span>
+                    </div>
+                  </template>
+                </div>
+              </el-popover>
+            </template>
+            <template v-else-if="m.requires.length">
               <el-tag v-for="r in m.requires" :key="r" size="small" type="info" effect="plain" style="margin:0 6px 4px 0">{{ r }}</el-tag>
             </template>
             <span v-else>无</span>
@@ -305,7 +420,7 @@
         </wd-panel>
 
         <!-- 菜单 -->
-        <wd-panel :border="true" title="菜单" :description="String(d.menus.length)" collapsible :opened="false">
+        <wd-panel description-align="right" :border="true" title="菜单" :description="String(d.menus.length)" collapsible :opened="false">
           <el-empty v-if="!d.menus.length" description="无菜单" :image-size="50" />
           <el-table v-else :data="menuTree" row-key="id" size="small" border default-expand-all>
             <el-table-column prop="title" label="标题" min-width="180">
@@ -322,7 +437,7 @@
         </wd-panel>
 
         <!-- 挂载点（工作台插槽 / 界面替换 / 首页快捷入口） -->
-        <wd-panel :border="true" title="挂载点" :description="mountSummary" collapsible :opened="false">
+        <wd-panel description-align="right" :border="true" title="挂载点" :description="mountSummary" collapsible :opened="false">
           <el-empty v-if="!hasMounts" description="未声明内容挂载点（工作台插槽 / 界面替换 / 首页快捷入口）" :image-size="50" />
           <template v-else>
             <!-- 工作台内容插槽（workspace.php）：zone 为挂载区锚点 -->
@@ -371,7 +486,7 @@
         </wd-panel>
 
         <!-- 权限点 -->
-        <wd-panel :border="true" title="权限点" :description="String(d.permissions.length)" collapsible :opened="false">
+        <wd-panel description-align="right" :border="true" title="权限点" :description="String(d.permissions.length)" collapsible :opened="false">
           <el-empty v-if="!d.permissions.length" description="无权限点" :image-size="50" />
           <el-table v-else :data="d.permissions" size="small" border>
             <el-table-column prop="code" label="编码" min-width="160" />
@@ -387,10 +502,10 @@
         </wd-panel>
 
         <!-- 数据表（重点：列/索引/行数） -->
-        <wd-panel :border="true" title="数据表" :description="String(d.tables.length)" collapsible :opened="false">
+        <wd-panel description-align="right" :border="true" title="数据表" :description="String(d.tables.length)" collapsible :opened="false">
           <el-empty v-if="!d.tables.length" description="未声明数据表" :image-size="60" />
           <template v-for="t in d.tables" :key="t.table">
-            <wd-panel :border="true" :title="t.table">
+            <wd-panel description-align="right" :border="true" :title="t.table">
               <template #extra>
                 <el-tag v-if="t.type" size="small">{{ t.type }}</el-tag>
                 <el-tag v-if="t.exists === false" size="small" type="danger">表不存在</el-tag>
@@ -433,7 +548,7 @@
         </wd-panel>
 
         <!-- 迁移 -->
-        <wd-panel :border="true" title="迁移版本" :description="String(d.migrations.length)" collapsible :opened="false">
+        <wd-panel description-align="right" :border="true" title="迁移版本" :description="String(d.migrations.length)" collapsible :opened="false">
           <el-timeline v-if="d.migrations.length">
             <el-timeline-item v-for="mg in d.migrations" :key="mg.version" :timestamp="mg.version" placement="top">
               <el-tag v-for="f in mg.files" :key="f" size="small" effect="plain" style="margin:0 6px 4px 0">{{ f }}</el-tag>
@@ -443,7 +558,7 @@
         </wd-panel>
 
         <!-- 命名空间 PSR-4 -->
-        <wd-panel :border="true" title="命名空间（PSR-4）" collapsible :opened="false">
+        <wd-panel description-align="right" :border="true" title="命名空间（PSR-4）" collapsible :opened="false">
           <div v-if="psrPairs.length" class="kv-list">
             <div v-for="kv in psrPairs" :key="kv[0]" class="kv">
               <span class="mono">{{ kv[0] }}</span> → <span class="mono">{{ kv[1] }}</span>
@@ -453,7 +568,7 @@
         </wd-panel>
 
         <!-- 目录配置 -->
-        <wd-panel :border="true" title="目录配置" collapsible :opened="false">
+        <wd-panel description-align="right" :border="true" title="目录配置" collapsible :opened="false">
           <div class="kv-list">
             <div class="kv kv-full">
               <span class="k">源码目录</span><template v-if="st.sourceDir"> <el-button type="text" size="small" style="padding:0 4px;vertical-align:middle" title="拷贝路径" @click="copyPath(relPath(st.sourceDir))"><el-icon><DocumentCopy /></el-icon></el-button>
@@ -639,6 +754,7 @@
   <script src="/static/vendor/element-plus/index.full.min.js"></script>
   <script src="/static/vendor/icons/index.iife.min.js"></script>
   <script src="/static/vendor/workdesktop-ai/index.umd.js"></script>
+  <script src="/static/linhub/auth-guard.js?v=2"></script>
   <script>
     const WD = window.WorkDesktop;
     const ElementPlus = window.ElementPlus;

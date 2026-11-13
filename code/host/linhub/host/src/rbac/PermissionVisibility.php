@@ -11,6 +11,8 @@ use linhub\host\integration\PermissionRegistry;
  *
  * 基于 S4 权限声明（permissions.php）的 roles 判定权限对当前角色/用户是否可见。
  * 权限项 roles 省略或为空 => 对所有角色可见；roles 非空 => 仅当与用户角色有交集才可见。
+ * roles 取值口径（V2.0）：预设角色英文键常量（WORKER/REVIEWER/FUNCTIONAL_ADMIN/SYSTEM_ADMIN/SUPER_ADMIN），
+ * 只能落在 5 个预设角色上或为空（不限角色）。
  * 角色不绑定权限（J3）：可见性只依据权限声明，角色本身无权限字段。
  *
  * 权限来源：默认自洽接收权限点数组；提供 {@see self::fromRegistry()} 复用 S4 PermissionRegistry.all() 作为权限源。
@@ -39,7 +41,7 @@ final class PermissionVisibility
     /**
      * 某权限对给定角色集合是否可见。
      *
-     * @param list<string> $roles 用户当前角色（类型名，如 WORKER/功能管理员）
+     * @param list<string> $roles 用户当前角色（预设角色英文键，如 WORKER/FUNCTIONAL_ADMIN）
      */
     public function isVisible(string $code, array $roles): bool
     {

@@ -85,7 +85,7 @@
 
   <script type="text/x-template" id="review-tpl">
     <div class="review-page">
-      <wd-panel :border="true" title="功能包接入审核">
+      <wd-panel description-align="right" :border="true" title="功能包接入审核">
         <template #description>
           超管专属：审核暂存区中各功能包申请接入的权限、菜单、工作台、界面替换、数据表与迁移脚本；只有审核通过且包内容未变更，功能包方可安装或升级接入。
         </template>
@@ -411,6 +411,7 @@
   <script src="/static/vendor/element-plus/index.full.min.js"></script>
   <script src="/static/vendor/icons/index.iife.min.js"></script>
   <script src="/static/vendor/workdesktop-ai/index.umd.js"></script>
+  <script src="/static/linhub/auth-guard.js?v=2"></script>
   <script>
     const WD = window.WorkDesktop;
     const ElementPlus = window.ElementPlus;

@@ -7,6 +7,8 @@ namespace linhub\host\bridge;
 use linhub\host\metrics\RecordingServiceProxy;
 use linhub\host\services\llmgateway\BoundLlmGateway;
 use linhub\host\services\llmgateway\LlmGateway;
+use linhub\host\services\scheduler\BoundScheduler;
+use linhub\host\services\scheduler\SchedulerService;
 use linhub\host\services\ServiceRegistry;
 use linhub\host\manifest\VersionConstraint;
 use think\App;
@@ -103,6 +105,12 @@ final class ServiceInjector
                     ? 'pkg.' . $pkgId
                     : 'pkg.unknown';
                 $instance = new BoundLlmGateway($instance, $boundCaller);
+            }
+
+            // scheduler 特殊处理：SchedulerService 不实现 TaskScheduler（方法首参带 namespace），
+            // 用 BoundScheduler 焊死包身份并对外暴露标准 TaskScheduler 契约。
+            if ($id === 'scheduler' && $instance instanceof SchedulerService) {
+                $instance = new BoundScheduler($instance, $pkgId !== null && $pkgId !== '' ? $pkgId : 'pkg.unknown');
             }
 
             /** @var object $instance 统一套调用统计代理（host / package 服务均计数） */

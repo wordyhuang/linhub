@@ -1,0 +1,560 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>审批流程 - LinHub 林枢</title>
+  <link rel="icon" type="image/svg+xml" href="/brand/favicon.svg">
+  <link rel="stylesheet" href="/static/vendor/element-plus/index.css">
+  <link rel="stylesheet" href="/static/vendor/workdesktop-ai/style.css">
+  <link rel="stylesheet" href="/static/linhub/cards.css">
+  <style>
+    html,
+    body,
+    #app {
+      height: 100%;
+      margin: 0;
+    }
+
+    body {
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+
+    .ap-page {
+      height: 100%;
+      padding: 16px 20px 24px;
+      box-sizing: border-box;
+    }
+
+    .ap-mono {
+      font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+      font-size: 12px;
+    }
+
+    .ap-toolbar {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 12px;
+      align-items: center;
+    }
+
+    /* 流程节点视图（详情抽屉） */
+    .ap-chain {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 4px 0;
+    }
+
+    .ap-node {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 14px;
+      border-radius: 6px;
+      border: 1px solid #d9d9d9;
+      background: #fff;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+      max-width: 100%;
+      box-sizing: border-box;
+    }
+
+    .ap-node-approval { border-color: #91caff; background: #f0f7ff; }
+    .ap-node-exclusive { border-color: #ffd591; background: #fff7e6; }
+    .ap-node-parallel { border-color: #b7eb8f; background: #f6ffed; }
+
+    .ap-node-badge {
+      font-size: 12px;
+      padding: 0 6px;
+      border-radius: 4px;
+      color: #fff;
+      line-height: 18px;
+      flex: none;
+    }
+
+    .ap-node-approval .ap-node-badge { background: #1677ff; }
+    .ap-node-exclusive .ap-node-badge { background: #fa8c16; }
+    .ap-node-parallel .ap-node-badge { background: #52c41a; }
+    .ap-node-other .ap-node-badge { background: #8c8c8c; }
+
+    .ap-node-name {
+      font-size: 13px;
+      color: #303133;
+      font-weight: 500;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .ap-arrow {
+      color: #a8abb2;
+      font-size: 12px;
+      line-height: 18px;
+      padding: 2px 0;
+      text-align: center;
+    }
+
+    .ap-branches {
+      display: flex;
+      gap: 16px;
+      justify-content: center;
+      width: 100%;
+      padding: 6px 0;
+      flex-wrap: wrap;
+    }
+
+    .ap-branch {
+      border: 1px dashed #dcdfe6;
+      border-radius: 6px;
+      padding: 8px 10px;
+      min-width: 200px;
+      max-width: 46%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    .ap-branch-label {
+      font-size: 12px;
+      color: #909399;
+      margin-bottom: 6px;
+    }
+
+    .ap-merge {
+      font-size: 12px;
+      color: #909399;
+      padding: 3px 10px;
+      border: 1px dashed #dcdfe6;
+      border-radius: 10px;
+      background: #fafafa;
+    }
+
+    .ap-node-pop .ap-pop-row {
+      display: flex;
+      gap: 10px;
+      font-size: 12px;
+      line-height: 20px;
+    }
+
+    .ap-node-pop .ap-pop-k {
+      color: #909399;
+      flex: 0 0 62px;
+      text-align: justify;
+      text-align-last: justify;
+    }
+
+  </style>
+</head>
+
+<body>
+  <div id="app"></div>
+
+  <script type="text/x-template" id="ap-flow-index-tpl">
+    <div class="ap-page">
+      <wd-panel description-align="right" :border="true">
+        <wd-tips type="box" style="margin-bottom:12px">
+          流程清单：平台全部审批流程模板。「自定义」为后台超管在流程设计中创建的可编辑流程；「系统定义」为功能包内注册的流程，仅可查看不可修改。
+        </wd-tips>
+
+        <el-tabs v-model="activeTab">
+          <el-tab-pane name="admin">
+            <template #label>
+              自定义流程 <el-badge :value="adminRows.length" type="primary" style="margin-left:4px" />
+            </template>
+            <wd-data-grid :data-source="adminRows" border stripe :with-index="false" :with-pager="false" v-loading="loading">
+              <el-table-column prop="package" label="所属包" min-width="120">
+                <template #default="{ row }"><span class="ap-mono">{{ row.package }}</span></template>
+              </el-table-column>
+              <el-table-column prop="flow_key" label="流程标识" min-width="160">
+                <template #default="{ row }"><span class="ap-mono">{{ row.flow_key }}</span></template>
+              </el-table-column>
+              <el-table-column prop="name" label="名称" min-width="180" show-overflow-tooltip />
+              <el-table-column prop="version" label="版本" width="80">
+                <template #default="{ row }"><span class="ap-mono">v{{ row.version }}</span></template>
+              </el-table-column>
+              <el-table-column label="状态" width="90">
+                <template #default="{ row }">
+                  <el-tag size="small" :type="row.status === 'active' ? 'success' : 'info'">{{ row.status === 'active' ? '启用' : '停用' }}</el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column prop="updated_at" label="更新时间" width="180" />
+              <el-table-column label="操作" width="140" fixed="right">
+                <template #default="{ row }">
+                  <el-button-group>
+                    <ap-flow-detail-drawer :row="row"></ap-flow-detail-drawer>
+                    <wd-drawer-button size="small" type="primary" drawer-size="60%" title="编辑流程" label="编辑" :url="editorUrl(row)" @close="load"></wd-drawer-button>
+                  </el-button-group>
+                </template>
+              </el-table-column>
+              <template #empty><el-empty description="暂无自定义流程，点击上方「新建流程」创建" :image-size="80" /></template>
+              <template #toolbar>
+                <wd-drawer-button type="primary" :icon="Plus" drawer-size="80%" url="/admin/ApprovalAdmin/flowEditor" title="新建流程" label="新建流程"></wd-drawer-button>
+              </template>
+              <!-- ── 卡片模式（DataGrid modeSwitch 内建视图；统一 lh-card 结构） ── -->
+              <template #card-item="{ row }">
+                <div class="lh-card">
+                  <div class="lh-card__head">
+                    <div class="lh-card__title">{{ row.name || row.flow_key || '未命名流程' }}</div>
+                    <div class="lh-card__tags">
+                      <el-tag size="small" :type="row.status === 'active' ? 'success' : 'info'">{{ row.status === 'active' ? '启用' : '停用' }}</el-tag>
+                    </div>
+                    <div class="lh-card__extra">
+                      <div class="lh-card__stamp ap-mono">v{{ row.version }}</div>
+                    </div>
+                  </div>
+                  <div class="lh-card__fields">
+                    <div class="lh-card__field">
+                      <div class="k">所属包</div>
+                      <div class="v ap-mono">{{ row.package || '—' }}</div>
+                    </div>
+                    <div class="lh-card__field">
+                      <div class="k">流程标识</div>
+                      <div class="v ap-mono">{{ row.flow_key || '—' }}</div>
+                    </div>
+                    <div class="lh-card__field is-wide">
+                      <div class="k">更新时间</div>
+                      <div class="v">{{ row.updated_at || '—' }}</div>
+                    </div>
+                  </div>
+                  <div class="lh-card__ops">
+                    <ap-flow-detail-drawer :row="row"></ap-flow-detail-drawer>
+                    <wd-drawer-button size="small" type="primary" drawer-size="60%" title="编辑流程" label="编辑" :url="editorUrl(row)" @close="load"></wd-drawer-button>
+                  </div>
+                </div>
+              </template>
+            </wd-data-grid>
+          </el-tab-pane>
+
+          <el-tab-pane name="package">
+            <template #label>
+              系统定义 <el-badge :value="packageRows.length" type="info" style="margin-left:4px" />
+            </template>
+            <wd-data-grid :data-source="filteredPackageRows" border stripe :with-index="false" :with-pager="false" v-loading="loading">
+              <el-table-column prop="package" label="所属包" min-width="80">
+                <template #default="{ row }">
+                  <el-tag>{{ row.package }}</el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column prop="flow_key" label="流程标识" min-width="160">
+                <template #default="{ row }"><span class="ap-mono">{{ row.flow_key }}</span></template>
+              </el-table-column>
+              <el-table-column prop="name" label="名称" min-width="180" show-overflow-tooltip />
+              <el-table-column prop="version" label="版本" width="80">
+                <template #default="{ row }"><span class="ap-mono">v{{ row.version }}</span></template>
+              </el-table-column>
+              <el-table-column label="状态" width="90">
+                <template #default="{ row }">
+                  <el-tag size="small" :type="row.status === 'active' ? 'success' : 'info'">{{ row.status === 'active' ? '启用' : '停用' }}</el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column prop="updated_at" label="更新时间" />
+              <el-table-column label="操作" width="90" fixed="right">
+                <template #default="{ row }">
+                  <el-button-group>
+                    <ap-flow-detail-drawer :row="row"></ap-flow-detail-drawer>
+                  </el-button-group>
+                </template>
+              </el-table-column>
+              <template #empty><el-empty :description="packageFilter ? '该所属包下暂无系统定义流程' : '暂无系统定义流程（功能包内注册的流程会显示在此）'" :image-size="80" /></template>
+              <template #toolbar>
+                <el-select v-model="packageFilter" placeholder="全部所属包" clearable style="width:180px">
+                  <el-option v-for="p in pkgPackages" :key="p" :label="p" :value="p" />
+                </el-select>
+              </template>
+              <!-- ── 卡片模式（DataGrid modeSwitch 内建视图；统一 lh-card 结构） ── -->
+              <template #card-item="{ row }">
+                <div class="lh-card">
+                  <div class="lh-card__head">
+                    <div class="lh-card__title">{{ row.name || row.flow_key || '未命名流程' }}</div>
+                    <div class="lh-card__tags">
+                      <el-tag size="small" :type="row.status === 'active' ? 'success' : 'info'">{{ row.status === 'active' ? '启用' : '停用' }}</el-tag>
+                    </div>
+                    <div class="lh-card__extra">
+                      <div class="lh-card__stamp ap-mono">v{{ row.version }}</div>
+                    </div>
+                  </div>
+                  <div class="lh-card__fields">
+                    <div class="lh-card__field">
+                      <div class="k">所属包</div>
+                      <div class="v ap-mono">{{ row.package || '—' }}</div>
+                    </div>
+                    <div class="lh-card__field">
+                      <div class="k">流程标识</div>
+                      <div class="v ap-mono">{{ row.flow_key || '—' }}</div>
+                    </div>
+                    <div class="lh-card__field is-wide">
+                      <div class="k">更新时间</div>
+                      <div class="v">{{ row.updated_at || '—' }}</div>
+                    </div>
+                  </div>
+                  <div class="lh-card__ops">
+                    <ap-flow-detail-drawer :row="row"></ap-flow-detail-drawer>
+                  </div>
+                </div>
+              </template>
+            </wd-data-grid>
+          </el-tab-pane>
+        </el-tabs>
+      </wd-panel>
+    </div>
+  </script>
+
+  <script type="text/x-template" id="ap-flow-detail-tpl">
+    <wd-drawer-button label="详情" title="流程详情" drawer-size="60%" size="small" type="primary" @open="onOpen">
+      <template #default>
+        <template v-if="current">
+          <el-descriptions :column="2" border size="small">
+            <el-descriptions-item label="所属包"><span class="ap-mono">{{ current.package || '-' }}</span></el-descriptions-item>
+            <el-descriptions-item label="流程标识"><span class="ap-mono">{{ current.flow_key }}</span></el-descriptions-item>
+            <el-descriptions-item label="名称">{{ current.name || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="版本"><span class="ap-mono">v{{ current.version }}</span></el-descriptions-item>
+            <el-descriptions-item label="状态">
+              <el-tag size="small" :type="current.status === 'active' ? 'success' : 'info'">{{ current.status === 'active' ? '启用' : '停用' }}</el-tag>
+            </el-descriptions-item>
+            <el-descriptions-item label="来源">{{ sourceText(current) }}</el-descriptions-item>
+            <el-descriptions-item label="创建时间">{{ current.created_at || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="更新时间">{{ current.updated_at || '-' }}</el-descriptions-item>
+          </el-descriptions>
+
+          <h4 style="margin:14px 0 8px;font-size:14px">流程节点（{{ nodeRows.length }}）</h4>
+          <el-tabs v-model="viewTab">
+            <el-tab-pane label="节点视图" name="graph">
+              <div v-if="rootChain.length" class="ap-flow-graph">
+                <ap-flow-chain :items="rootChain"></ap-flow-chain>
+              </div>
+              <el-empty v-else description="该流程暂无节点定义" :image-size="60" />
+            </el-tab-pane>
+            <el-tab-pane label="表格" name="table">
+              <el-table :data="nodeRows" size="small" border>
+                <el-table-column prop="id" label="ID" width="90">
+                  <template #default="{ row }"><span class="ap-mono">{{ row.id }}</span></template>
+                </el-table-column>
+                <el-table-column prop="name" label="名称" min-width="120" show-overflow-tooltip />
+                <el-table-column prop="type" label="类型" width="100">
+                  <template #default="{ row }"><el-tag size="small" effect="plain">{{ typeText(row.type) }}</el-tag></template>
+                </el-table-column>
+                <el-table-column label="配置摘要" min-width="220">
+                  <template #default="{ row }"><span class="ap-mono">{{ nodeSummary(row) || '-' }}</span></template>
+                </el-table-column>
+              </el-table>
+            </el-tab-pane>
+          </el-tabs>
+
+          <el-collapse style="margin-top:12px">
+            <el-collapse-item name="dsl">
+              <template #title>完整流程定义（DSL JSON）</template>
+              <pre class="ap-mono" style="margin:0;max-height:320px;overflow:auto;white-space:pre-wrap;word-break:break-all">{{ defText }}</pre>
+            </el-collapse-item>
+          </el-collapse>
+        </template>
+      </template>
+      <template #footer="f">
+        <el-button @click="f.close">关闭</el-button>
+      </template>
+    </wd-drawer-button>
+  </script>
+
+  <script type="text/x-template" id="ap-flow-chain-tpl">
+    <div class="ap-chain">
+      <template v-for="(item, idx) in items" :key="item.node ? item.node.id : ('merge-' + idx)">
+        <div v-if="item.merge" class="ap-merge">汇合至「{{ item.merge.name || item.merge.id }}」</div>
+        <el-popover v-else placement="top" :width="320" trigger="hover">
+          <template #reference>
+            <div class="ap-node" :class="item.node.type === 'approval' || item.node.type === 'exclusive' || item.node.type === 'parallel' ? 'ap-node-' + item.node.type : 'ap-node-other'">
+              <span class="ap-node-badge">{{ typeText(item.node.type) }}</span>
+              <span class="ap-node-name" :title="item.node.name || item.node.id">{{ item.node.name || item.node.id }}</span>
+            </div>
+          </template>
+          <div class="ap-node-pop">
+            <div class="ap-pop-row"><span class="ap-pop-k">类型</span><span>{{ typeText(item.node.type) }}</span></div>
+            <div class="ap-pop-row"><span class="ap-pop-k">节点 ID</span><span class="ap-mono">{{ item.node.id }}</span></div>
+            <div v-if="item.node.type === 'approval'" class="ap-pop-row"><span class="ap-pop-k">签署方式</span><span>{{ item.node.mode === 'all' ? '会签（需全部同意）' : '或签（任一同意即过）' }}</span></div>
+            <div v-if="usersText(item.node)" class="ap-pop-row"><span class="ap-pop-k">审批用户</span><span>{{ usersText(item.node) }}</span></div>
+            <div v-if="rolesText(item.node)" class="ap-pop-row"><span class="ap-pop-k">审批角色</span><span>{{ rolesText(item.node) }}</span></div>
+            <div v-if="Array.isArray(item.node.branches) && item.node.branches.length" class="ap-pop-row"><span class="ap-pop-k">分支</span><span>{{ branchesText(item.node) }}</span></div>
+            <div v-if="nextText(item.node)" class="ap-pop-row"><span class="ap-pop-k">后继节点</span><span>{{ nextText(item.node) }}</span></div>
+            <div v-if="!nextText(item.node) && !(Array.isArray(item.node.branches) && item.node.branches.length)" class="ap-pop-row"><span class="ap-pop-k">后继节点</span><span>无（流程终点）</span></div>
+          </div>
+        </el-popover>
+        <div v-if="item.branches" class="ap-branches">
+          <div v-for="(b, bi) in item.branches" :key="bi" class="ap-branch">
+            <div class="ap-branch-label">{{ branchLabel(b, bi) }}</div>
+            <ap-flow-chain v-if="b.chain.length" :items="b.chain"></ap-flow-chain>
+            <div v-else class="ap-merge">（无后继节点）</div>
+          </div>
+        </div>
+        <div v-else-if="idx < items.length - 1" class="ap-arrow">▼</div>
+      </template>
+    </div>
+  </script>
+
+  <script src="/static/vendor/vue/vue.global.prod.js"></script>
+  <script src="/static/vendor/element-plus/index.full.min.js"></script>
+  <script src="/static/vendor/icons/index.iife.min.js"></script>
+  <script src="/static/vendor/workdesktop-ai/index.umd.js"></script>
+  <script src="/static/linhub/auth-guard.js?v=2"></script>
+  <script>
+    const WD = window.WorkDesktop;
+    const ElementPlus = window.ElementPlus;
+    const { WorkDesktop } = WD;
+    const { ref, computed } = Vue;
+    const { Plus, Refresh } = window.ElementPlusIconsVue || {};
+
+    // 节点视图共享 helpers（节点视图 / 详情 popover / 表格摘要共用）
+    const NODE_TYPE_MAP = { start: '开始', approval: '审批', exclusive: '排他网关', parallel: '并行网关', join: '汇合', end: '结束' };
+    let nodeMap = {}; // 节点 id -> 节点定义，onOpen 时重建
+
+    function typeText(t) { return NODE_TYPE_MAP[t] || (t || '-'); }
+    function usersText(n) { return n && n.approvers && Array.isArray(n.approvers.users) ? n.approvers.users.join('、') : ''; }
+    function rolesText(n) { return n && n.approvers && Array.isArray(n.approvers.roles) ? n.approvers.roles.join('、') : ''; }
+    function nextText(n) { if (!n || !n.next) return ''; const t = nodeMap[n.next]; return '「' + ((t && t.name) || n.next) + '」'; }
+    function condText(c) {
+      if (!c || typeof c !== 'object') return '';
+      if (Array.isArray(c.all)) return c.all.map(condText).join(' 且 ');
+      if (Array.isArray(c.any)) return c.any.map(condText).join(' 或 ');
+      const opMap = { eq: '=', ne: '≠', gt: '>', gte: '≥', lt: '<', lte: '≤', in: '∈', not_in: '∉', contains: '∋', exists: '?' };
+      return (c.field || '?') + ' ' + (opMap[c.op] || c.op || '?') + ' ' + JSON.stringify(c.value);
+    }
+    function branchLabel(b, i) {
+      if (b && b.label) return b.label;
+      if (b && b.condition === null) return '默认';
+      if (b && b.condition && typeof b.condition === 'object') return condText(b.condition);
+      return '分支 ' + (i + 1);
+    }
+    function branchesText(n) {
+      if (!n || !Array.isArray(n.branches)) return '';
+      return n.branches.map((b, i) => branchLabel(b, i) + '→「' + ((nodeMap[b.next] && nodeMap[b.next].name) || (b && b.next) || '?') + '」').join('；');
+    }
+
+    // 流程节点视图（递归链）：主链纵向、分支横向，汇合处显示标记；节点 hover 显示详情
+    const FlowChain = {
+      name: 'FlowChain',
+      props: { items: { type: Array, required: true } },
+      template: '#ap-flow-chain-tpl',
+      setup() {
+        return { typeText, usersText, rolesText, nextText, branchLabel, branchesText };
+      }
+    };
+
+    // 流程详情抽屉（行内 wd-drawer-button）：基本信息 + 节点视图/表格（tab 切换）+ 完整 DSL JSON
+    const FlowDetailDrawer = {
+      props: { row: { type: Object, required: true } },
+      template: '#ap-flow-detail-tpl',
+      setup(props) {
+        const current = ref(null);
+        const viewTab = ref('graph');
+        const rootChain = ref([]);
+        const nodeRows = computed(() => {
+          const nodes = current.value && current.value.definition
+            ? current.value.definition.nodes
+            : null;
+          if (Array.isArray(nodes)) return nodes;
+          // normalizeFlow 输出以节点 id 为 key 的对象
+          return nodes && typeof nodes === 'object' ? Object.values(nodes) : [];
+        });
+        const defText = computed(() => (current.value ? JSON.stringify(current.value.definition ?? {}, null, 2) : ''));
+        function onOpen() {
+          current.value = props.row;
+          viewTab.value = 'graph';
+          nodeMap = {};
+          const nodes = nodeRows.value;
+          nodes.forEach((n) => { nodeMap[n.id] = n; });
+          const entry = current.value && current.value.definition ? current.value.definition.entry : null;
+          rootChain.value = buildChain(entry && nodeMap[entry] ? entry : (nodes.length ? nodes[0].id : null));
+        }
+        // 沿 next 链构建渲染树：分支递归（横向），已渲染过的汇合节点输出 merge 标记防重复
+        function buildChain(startId) {
+          const seen = new Set();
+          function chainOf(id) {
+            const items = [];
+            let cur = id;
+            while (cur && nodeMap[cur]) {
+              if (seen.has(cur)) { items.push({ merge: nodeMap[cur] }); break; }
+              seen.add(cur);
+              const node = nodeMap[cur];
+              const item = { node };
+              if (Array.isArray(node.branches) && node.branches.length) {
+                item.branches = node.branches.map((b) => Object.assign({}, b, {
+                  chain: chainOf((b && b.next) || ''),
+                }));
+              }
+              items.push(item);
+              cur = node.next;
+            }
+            return items;
+          }
+          return chainOf(startId || '');
+        }
+        function sourceText(row) { return row && row.source === 'admin' ? '后台自定义' : '系统定义'; }
+        function nodeSummary(n) {
+          if (!n || typeof n !== 'object') return '';
+          if (n.type === 'approval') {
+            const ap = n.approvers || {};
+            const users = Array.isArray(ap.users) ? ap.users : [];
+            const roles = Array.isArray(ap.roles) ? ap.roles : [];
+            const groups = Array.isArray(ap.groups) ? ap.groups : [];
+            const parts = [n.mode === 'all' ? '会签' : '或签'];
+            if (users.length) parts.push('用户: ' + users.join(', '));
+            if (roles.length) parts.push('角色: ' + roles.join(', '));
+            if (groups.length) parts.push('权限组: ' + groups.join(', '));
+            if (n.next) parts.push('→ ' + n.next);
+            return parts.join(' · ');
+          }
+          if (Array.isArray(n.branches)) {
+            return n.branches.length + ' 个分支 → ' + n.branches.map((b) => (b && b.next) ? b.next : '?').join(', ');
+          }
+          return '';
+        }
+        return { current, nodeRows, defText, viewTab, rootChain, onOpen, typeText, sourceText, nodeSummary };
+      }
+    };
+
+    const app = Vue.createApp({
+      template: '#ap-flow-index-tpl',
+      setup() {
+        const loading = ref(false);
+        const activeTab = ref('admin');
+        const list = ref([]);
+
+        const adminRows = computed(() => list.value.filter((x) => x.source === 'admin'));
+        const packageRows = computed(() => list.value.filter((x) => x.source !== 'admin'));
+        // 系统定义 tab 的所属包筛选：候选取自现有流程的包去重，空值显示全部
+        const packageFilter = ref('');
+        const pkgPackages = computed(() => [...new Set(packageRows.value.map((x) => x.package))].sort());
+        const filteredPackageRows = computed(() => (packageFilter.value ? packageRows.value.filter((x) => x.package === packageFilter.value) : packageRows.value));
+
+        async function load() {
+          loading.value = true;
+          try {
+            const res = await WD.request.get('/admin/approval_admin/flowList');
+            if (!res.success) {
+              ElementPlus.ElMessage.error(res.message || '加载流程清单失败');
+              return;
+            }
+            list.value = res.data.list || [];
+          } finally {
+            loading.value = false;
+          }
+        }
+
+        function editorUrl(row) { return '/admin/ApprovalAdmin/flowEditor?pkg=' + encodeURIComponent(row.package) + '&key=' + encodeURIComponent(row.flow_key); }
+
+        load();
+
+        return { loading, activeTab, list, adminRows, packageRows, packageFilter, pkgPackages, filteredPackageRows, load, editorUrl, Plus, Refresh };
+      }
+    });
+
+    for (const [name, comp] of Object.entries(window.ElementPlusIconsVue)) {
+      app.component(name, comp);
+    }
+    app.component('ap-flow-detail-drawer', FlowDetailDrawer);
+    app.component('ap-flow-chain', FlowChain);
+    app.use(ElementPlus);
+    app.use(WorkDesktop);
+    app.mount('#app');
+  </script>
+</body>
+
+</html>

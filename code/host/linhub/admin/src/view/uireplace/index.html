@@ -8,6 +8,7 @@
   <link rel="icon" type="image/svg+xml" href="/brand/favicon.svg">
   <link rel="stylesheet" href="/static/vendor/element-plus/index.css">
   <link rel="stylesheet" href="/static/vendor/workdesktop-ai/style.css">
+  <link rel="stylesheet" href="/static/linhub/cards.css">
   <style>
     html,
     body,
@@ -80,6 +81,18 @@
     .ur-red {
       color: #d03050;
     }
+
+    /* —— 替换概览统计卡（对齐平台内页 stats 风格） —— */
+    .ur-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; }
+    .ur-stat { border: 1px solid #e5e7eb; border-radius: 10px; background: #fff; padding: 14px 16px; }
+    .ur-stat-lbl { font-size: 13px; font-weight: 600; color: #1f2937; }
+    .ur-stat-num { margin-top: 6px; font-size: 24px; font-weight: 600; color: #0066CC; line-height: 1.2; font-variant-numeric: tabular-nums; }
+    .ur-stat-sub { margin-top: 4px; font-size: 12px; color: #909399; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .ur-stat-sub.is-danger { color: #f56c6c; }
+
+    /* —— 筛选工具栏 —— */
+    .ur-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+    .ur-toolbar-count { font-size: 12px; color: #909399; }
   </style>
 </head>
 
@@ -87,18 +100,55 @@
   <div id="app"></div>
 
   <script type="text/x-template" id="ur-tpl">
-          <wd-panel :border="true">
+          <wd-panel description-align="right" :border="true">
             <wd-tips type="box" style="margin-bottom:12px">
               查看并选择各功能包对平台页面的替换候选；超管选择生效，非法 target 自动标红。
             </wd-tips>
+
+            <!-- 替换概览 -->
+            <div class="ur-stats" v-if="state.groups.length">
+              <div class="ur-stat">
+                <div class="ur-stat-lbl">可替换目标</div>
+                <div class="ur-stat-num">{{ urSummary.valid }}</div>
+                <div class="ur-stat-sub">共 {{ urSummary.total }} 个声明目标</div>
+              </div>
+              <div class="ur-stat">
+                <div class="ur-stat-lbl">候选视图</div>
+                <div class="ur-stat-num">{{ urSummary.candidates }}</div>
+                <div class="ur-stat-sub">按短名自动推导匹配</div>
+              </div>
+              <div class="ur-stat">
+                <div class="ur-stat-lbl">已显式选择</div>
+                <div class="ur-stat-num">{{ urSummary.chosen }}</div>
+                <div class="ur-stat-sub">显式选择优先于自动推导</div>
+              </div>
+              <div class="ur-stat">
+                <div class="ur-stat-lbl">非法目标</div>
+                <div class="ur-stat-num" :style="{ color: urSummary.invalid ? '#f56c6c' : '#909399' }">{{ urSummary.invalid }}</div>
+                <div class="ur-stat-sub" :class="{ 'is-danger': urSummary.invalid }">{{ urSummary.invalid ? 'target 超出平台白名单' : '均在平台白名单内' }}</div>
+              </div>
+              <div class="ur-stat" style="display:flex;align-items:center">
+                <el-button :icon="Refresh" @click="loadData">刷新数据</el-button>
+              </div>
+            </div>
+            <div style="height:12px"></div>
+
             <div style="margin-bottom:12px">
               <el-tag type="info" effect="plain">可替换页面：{{ state.replaceablePages.join('、') || '（无）' }}</el-tag>
             </div>
 
           <!-- ── 候选分组 ── -->
           <div v-loading="loading" element-loading-text="加载中...">
-          <template v-if="state.groups.length">
-            <div v-for="g in state.groups" :key="g.target" class="ur-card"
+          <!-- 筛选工具栏 -->
+          <div class="ur-toolbar" v-if="state.groups.length">
+            <el-input v-model="urKw" placeholder="搜索目标 / 短名 / 视图" clearable style="width:240px">
+              <template #prefix><el-icon><Search /></el-icon></template>
+            </el-input>
+            <span class="ur-toolbar-count">匹配 {{ visibleGroups.length }} / {{ state.groups.length }} 个目标</span>
+          </div>
+
+          <template v-if="visibleGroups.length">
+            <div v-for="g in visibleGroups" :key="g.target" class="ur-card"
                  :style="g.invalid ? { borderColor: '#fbc4c4', background: '#fff8f8' } : {}">
               <div class="ur-group-head" style="margin-bottom:12px">
                 <h3 style="margin:0">{{ g.invalid ? '非法 target' : '可替换目标' }}</h3>
@@ -125,13 +175,49 @@
                 </el-table-column>
                 <el-table-column label="操作" width="140" fixed="right">
                   <template #default="{ row }">
-                    <el-button-group>
-                    <el-button size="small" type="primary" plain :disabled="g.invalid || g.active.chosen === row.short"
-                               @click="doChoose(g.target, row.short)">选择生效</el-button>
+                    <el-button-group size="small">
+                    <wd-confirm-button v-if="!g.invalid" size="small" type="primary" plain label="选择生效"
+                                       confirm-title="确认替换" :confirm-text="'确认选择功能包「' + row.short + '」替换目标页「' + g.target + '」？'"
+                                       api="/admin/uireplace/choose" :api-param="{ target: g.target, short: row.short }"
+                                       :head-refresh-datagrid="false" :disabled="g.active.chosen === row.short"
+                                       @api-success="loadData" />
                     </el-button-group>
                   </template>
                 </el-table-column>
                 <template #empty><el-empty description="该目标暂无候选声明" :image-size="60" /></template>
+                <!-- ── 卡片清单模式（DataGrid 内建 modeSwitch 视图；统一 lh-card 结构） ── -->
+                <template #card-item="{ row }">
+                  <div class="lh-card">
+                    <div class="lh-card__head">
+                      <div class="lh-card__title"><span class="ur-mono">{{ row.short }}</span></div>
+                      <div class="lh-card__tags">
+                        <el-tag v-if="g.active.chosen === row.short" type="success" size="small">已显式选择</el-tag>
+                        <el-tag v-else-if="g.active.resolved === row.short" type="warning" size="small">按优先级生效</el-tag>
+                      </div>
+                      <div class="lh-card__extra">
+                        <div class="lh-card__metric">{{ row.priority }}</div>
+                        <div class="lh-card__metric-label">优先级</div>
+                      </div>
+                    </div>
+                    <div class="lh-card__fields">
+                      <div class="lh-card__field is-wide">
+                        <div class="k">替换说明</div>
+                        <div class="v">{{ row.label || '—' }}</div>
+                      </div>
+                      <div class="lh-card__field">
+                        <div class="k">视图</div>
+                        <div class="v"><span class="ur-mono">{{ row.view || '—' }}</span></div>
+                      </div>
+                    </div>
+                    <div class="lh-card__ops">
+                      <wd-confirm-button v-if="!g.invalid" size="small" type="primary" plain label="选择生效"
+                                         confirm-title="确认替换" :confirm-text="'确认选择功能包「' + row.short + '」替换目标页「' + g.target + '」？'"
+                                         api="/admin/uireplace/choose" :api-param="{ target: g.target, short: row.short }"
+                                         :head-refresh-datagrid="false" :disabled="g.active.chosen === row.short"
+                                         @api-success="loadData" />
+                    </div>
+                  </div>
+                </template>
               </wd-data-grid>
 
               <div style="margin-top:10px;display:flex;justify-content:flex-end">
@@ -141,7 +227,7 @@
               </div>
             </div>
           </template>
-          <el-empty v-else-if="!loading" description="当前没有任何功能包声明界面替换候选" :image-size="90" />
+          <el-empty v-else-if="!loading" :description="state.groups.length ? '无匹配的替换目标（已按关键字过滤）' : '当前没有任何功能包声明界面替换候选'" :image-size="90" />
           </div>
           </wd-panel>
 </script>
@@ -150,17 +236,46 @@
   <script src="/static/vendor/element-plus/index.full.min.js"></script>
   <script src="/static/vendor/icons/index.iife.min.js"></script>
   <script src="/static/vendor/workdesktop-ai/index.umd.js"></script>
+  <script src="/static/linhub/auth-guard.js?v=2"></script>
   <script>
     const WD = window.WorkDesktop;
     const ElementPlus = window.ElementPlus;
     const { WorkDesktop } = WD;
-    const { ref, reactive } = Vue;
+    const { ref, reactive, computed } = Vue;
 
     const app = Vue.createApp({
       template: '#ur-tpl',
       setup() {
         const loading = ref(false);
         const state = reactive({ groups: [], replaceablePages: [] });
+        const urKw = ref('');
+
+        // —— 关键字过滤后的目标分组（target 命中保留全部候选；候选命中则只留命中项） ——
+        const visibleGroups = computed(() => {
+          const kw = urKw.value.trim().toLowerCase();
+          if (!kw) return state.groups;
+          return state.groups
+            .map(g => {
+              if (String(g.target || '').toLowerCase().includes(kw)) return g;
+              const candidates = (g.candidates || []).filter(r =>
+                [r.short, r.label, r.view].some(v => String(v || '').toLowerCase().includes(kw)));
+              return { ...g, candidates };
+            })
+            .filter(g => (g.candidates || []).length > 0);
+        });
+
+        // —— 概览统计 ——
+        const urSummary = computed(() => {
+          const gs = state.groups;
+          let candidates = 0;
+          let chosen = 0;
+          for (const g of gs) {
+            candidates += (g.candidates || []).length;
+            if (g.active && g.active.chosen) chosen++;
+          }
+          const invalid = gs.filter(g => g.invalid).length;
+          return { total: gs.length, valid: gs.length - invalid, candidates, chosen, invalid };
+        });
 
         async function loadData() {
           loading.value = true;
@@ -217,7 +332,7 @@
 
         loadData();
 
-        return { state, loading, doChoose, doReset };
+        return { state, loading, loadData, doChoose, doReset, urKw, visibleGroups, urSummary, Refresh: window.ElementPlusIconsVue.Refresh };
       }
     });
 

@@ -5,8 +5,12 @@ declare(strict_types=1);
 namespace linhub\host\integration;
 
 use linhub\host\migration\DbGateway;
+use linhub\host\services\PlatformDataImporter;
+use linhub\host\services\approval\ApprovalFlowSeeder;
 use linhub\host\services\approval\ApprovalService;
+use linhub\host\services\printtpl\PrintTplService;
 use linhub\host\services\recyclebin\RecycleBinService;
+use linhub\host\services\scheduler\SchedulerService;
 use linhub\host\services\support\PlatformStore;
 use linhub\host\services\translation\TranslationSeeder;
 
@@ -16,7 +20,7 @@ use linhub\host\services\translation\TranslationSeeder;
  * 统一封装权限/菜单/工作台/界面替换四个注册表，提供"按包安装/覆盖/清理"的接入编排，
  * 并向 PackageInstaller/Upgrader 的 integrate 槽位提供可调用 handler。
  * 读取已在 loadRoot/{short}/ 落地源码中的 permissions.php / menus.php / workspace.php / ui_replace.php / shortcuts.php 并登记到注册文件。
- * 另在安装/升级时导入包内 translations/ 翻译种子（安装 upsert、升级全量覆盖；未注入 DB 网关时跳过）。
+ * 另在安装/升级时导入包内 translations/ 翻译种子（安装 upsert、升级全量覆盖）、data/ 目录的数据随包服务数据（按 manifest.data 声明，见 PlatformDataImporter）与 resource/approvals/ 审批流程声明（统一 upsert；未注入 DB 网关时两者均跳过）。
  */
 final class IntegrationManager
 {
@@ -105,6 +109,26 @@ final class IntegrationManager
             }
         }
 
+        // 数据随包导入（P1）：种子之后、能力接管之前，按 manifest.data 声明导入包内 data/ 目录的服务数据
+        // DB 不可用或包内无 data/index.json 时静默跳过；单服务失败仅告警不阻断（详情见 PlatformDataImporter::importFromDir）
+        try {
+            $stats = PlatformDataImporter::importFromDir($root, $short, $this->db, $manifest);
+            $this->warnings = array_merge($this->warnings, $stats['warnings']);
+        } catch (\Throwable $e) {
+            $this->warnings[] = '服务数据随包导入失败：' . $e->getMessage();
+        }
+
+        // 包声明式审批流程：resource/approvals/*.json 自动注册（安装/升级 upsert；失败仅告警不阻断）
+        // 必须先于 adoptPackage：在途单据重新解析节点审批人时依赖新流程定义已入库
+        if ($this->db !== null) {
+            try {
+                $seeded = (new ApprovalFlowSeeder(new ApprovalService(new PlatformStore($this->db))))->importPackage($short, $root);
+                $this->warnings = array_merge($this->warnings, $seeded['warnings']);
+            } catch (\Throwable $e) {
+                $this->warnings[] = '审批流程声明加载失败：' . $e->getMessage();
+            }
+        }
+
         // 回收站接管：重装/升级同名包时清掉孤儿态，恢复对既有托管条目的正常读写（失败不阻断接入）
         if ($this->db !== null) {
             try {
@@ -117,6 +141,18 @@ final class IntegrationManager
                 (new ApprovalService(new PlatformStore($this->db)))->adoptPackage($short);
             } catch (\Throwable $e) {
                 $this->warnings[] = '审批单据接管失败：' . $e->getMessage();
+            }
+            // 打印模板接管：重装/升级同名包时清掉孤儿态，恢复包级私有模板可用（失败不阻断接入）
+            try {
+                PrintTplService::instance(new PlatformStore($this->db))->adoptPackage($short);
+            } catch (\Throwable $e) {
+                $this->warnings[] = '打印模板接管失败：' . $e->getMessage();
+            }
+            // 任务定义与执行实例接管：重装/升级同名包时清孤儿态，恢复周期定义与历史实例（失败不阻断接入）
+            try {
+                (new SchedulerService(new PlatformStore($this->db)))->adoptPackage($short);
+            } catch (\Throwable $e) {
+                $this->warnings[] = '任务调度接管失败：' . $e->getMessage();
             }
         }
     }

@@ -8,6 +8,7 @@
   <link rel="icon" type="image/svg+xml" href="/brand/favicon.svg">
   <link rel="stylesheet" href="/static/vendor/element-plus/index.css">
   <link rel="stylesheet" href="/static/vendor/workdesktop-ai/style.css">
+  <link rel="stylesheet" href="/static/linhub/cards.css">
   <style>
     html, body, #app { height: 100%; margin: 0; }
     body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif; }
@@ -24,7 +25,7 @@
 
   <script type="text/x-template" id="cl-tpl">
     <div class="cl-page">
-      <wd-panel :border="true">
+      <wd-panel description-align="right" :border="true">
         <wd-tips type="box" style="margin-bottom:12px">
           附件托管服务（AT-12）过期与孤儿文件清理记录。手动触发会扫描已过期元数据与存储目录中的孤儿对象；自动计划由 .env 的 ATTACH_CLEAN_ENABLED / ATTACH_CLEAN_CRON 控制，执行记录同样汇总于此。
         </wd-tips>
@@ -69,6 +70,53 @@
           </el-table-column>
           <el-table-column prop="created_at" label="执行时间" width="200" />
           <template #empty><el-empty description="暂无清理记录" :image-size="80" /></template>
+          <!-- ── 卡片模式（DataGrid modeSwitch 内建视图；统一 lh-card 结构） ── -->
+          <template #card-item="{ row, index }">
+            <div class="lh-card">
+              <div class="lh-card__head">
+                <div class="lh-card__title">{{ row.name || row.title || ('第 ' + (index + 1) + ' 次清理') }}</div>
+                <div class="lh-card__tags">
+                  <el-tag size="small" :type="row.trigger_type === 'manual' ? 'primary' : 'success'" effect="light">
+                    {{ row.trigger_type === 'manual' ? '手动' : (row.trigger_type === 'cron' ? '定时' : row.trigger_type) }}
+                  </el-tag>
+                </div>
+                <div class="lh-card__extra">
+                  <div class="lh-card__metric" :style="{ color: row.deleted > 0 ? 'var(--el-color-danger,#f56c6c)' : '' }">{{ row.deleted }}</div>
+                  <div class="lh-card__metric-label">删除数</div>
+                </div>
+              </div>
+              <div class="lh-card__fields">
+                <div class="lh-card__field">
+                  <div class="k">编号</div>
+                  <div class="v cl-mono">#{{ row.id }}</div>
+                </div>
+                <div class="lh-card__field">
+                  <div class="k">驱动</div>
+                  <div class="v cl-mono">{{ row.driver || '—' }}</div>
+                </div>
+                <div class="lh-card__field">
+                  <div class="k">扫描数</div>
+                  <div class="v">{{ row.scanned }}</div>
+                </div>
+                <div class="lh-card__field">
+                  <div class="k">执行人</div>
+                  <div class="v cl-mono">{{ row.operator_id || '系统' }}</div>
+                </div>
+                <div class="lh-card__field is-wide">
+                  <div class="k">执行时间</div>
+                  <div class="v">{{ row.created_at || '—' }}</div>
+                </div>
+              </div>
+              <div class="lh-card__ops">
+                <el-popover placement="left" :width="420" trigger="click">
+                  <template #reference>
+                    <el-button size="small" text type="primary">查看明细</el-button>
+                  </template>
+                  <pre class="cl-json cl-mono">{{ prettyDetail(row) }}</pre>
+                </el-popover>
+              </div>
+            </div>
+          </template>
         </wd-data-grid>
 
         <div class="cl-pager">
@@ -86,6 +134,7 @@
   <script src="/static/vendor/element-plus/index.full.min.js"></script>
   <script src="/static/vendor/icons/index.iife.min.js"></script>
   <script src="/static/vendor/workdesktop-ai/index.umd.js"></script>
+  <script src="/static/linhub/auth-guard.js?v=2"></script>
   <script>
     const WD = window.WorkDesktop;
     const ElementPlus = window.ElementPlus;

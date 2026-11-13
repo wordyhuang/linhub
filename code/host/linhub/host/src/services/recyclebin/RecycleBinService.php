@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace linhub\host\services\recyclebin;
 
+use linhub\host\services\logging\LoggingService;
 use linhub\host\services\support\PlatformStore;
 
 /**
@@ -114,6 +115,17 @@ final class RecycleBinService implements RecycleBin
             . $this->store->quote($now) . ')'
         );
 
+        $this->journal('put', [
+            'namespace'    => $namespace,
+            'token'        => $token,
+            'source_table' => $sourceTable,
+            'source_pk'    => $sourcePk,
+            'item_key'     => $itemKey,
+            'title'        => $title,
+            'payload_size' => strlen($json),
+            'expires_at'   => $expiresAt,
+            'as_admin'     => $asAdmin,
+        ]);
         $this->lazyClean();
         return $token;
     }
@@ -222,6 +234,7 @@ final class RecycleBinService implements RecycleBin
         $this->store->db()->exec(
             'DELETE FROM ' . PlatformStore::RECYCLE_BIN_TABLE . ' WHERE id=' . (int) $row['id']
         );
+        $this->journal('purge', ['namespace' => $row['namespace'], 'token' => $token, 'as_admin' => $asAdmin]);
         return true;
     }
 
@@ -248,6 +261,9 @@ final class RecycleBinService implements RecycleBin
                 'DELETE FROM ' . PlatformStore::RECYCLE_BIN_TABLE . ' WHERE id=' . (int) $row['id']
             );
             $count++;
+        }
+        if ($count > 0) {
+            $this->journal('purge_batch', ['count' => $count, 'as_admin' => $asAdmin]);
         }
         return $count;
     }
@@ -291,7 +307,11 @@ final class RecycleBinService implements RecycleBin
             $scope = $caller;
         }
         $this->store->ensureRecycleBinTables();
-        return $this->deleteExpired($scope === '' ? null : $scope);
+        $deleted = $this->deleteExpired($scope === '' ? null : $scope);
+        if ($deleted > 0) {
+            $this->journal('purge_expired', ['scope' => $scope, 'count' => $deleted]);
+        }
+        return $deleted;
     }
 
     // —— 生命周期接线（实现类特有，不进 RecycleBin 契约） ——
@@ -313,6 +333,7 @@ final class RecycleBinService implements RecycleBin
                 . ' SET orphaned_at=' . $this->store->quote(date('c'))
                 . ' WHERE namespace=' . $this->store->quote($short) . " AND orphaned_at = ''"
             );
+            $this->journal('orphan_package', ['package' => $short, 'count' => $n]);
         }
         return $n;
     }
@@ -334,6 +355,7 @@ final class RecycleBinService implements RecycleBin
                 . " SET orphaned_at=''"
                 . ' WHERE namespace=' . $this->store->quote($short) . " AND orphaned_at != ''"
             );
+            $this->journal('adopt_package', ['package' => $short, 'count' => $n]);
         }
         return $n;
     }
@@ -357,10 +379,27 @@ final class RecycleBinService implements RecycleBin
             . ', updated_at=' . $this->store->quote(date('c'))
             . ' WHERE id=' . (int) $row['id']
         );
+        $this->journal('extend_ttl', [
+            'namespace'  => $row['namespace'],
+            'token'      => $token,
+            'days'       => $days,
+            'expires_at' => $expiresAt,
+            'as_admin'   => $asAdmin,
+        ]);
         return true;
     }
 
     // —— 内部实现 ——
+
+    /** 日志记录：落 runtime host.log，失败不阻断业务。 */
+    private function journal(string $action, array $context = [], string $level = 'info'): void
+    {
+        try {
+            (new LoggingService())->{$level}('[recyclebin] ' . $action, $context);
+        } catch (\Throwable) {
+            // 日志失败不影响业务
+        }
+    }
 
     private function rowByToken(string $token): ?array
     {

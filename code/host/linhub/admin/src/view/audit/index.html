@@ -8,6 +8,7 @@
 <link rel="icon" type="image/svg+xml" href="/brand/favicon.svg">
   <link rel="stylesheet" href="/static/vendor/element-plus/index.css">
   <link rel="stylesheet" href="/static/vendor/workdesktop-ai/style.css">
+  <link rel="stylesheet" href="/static/linhub/cards.css">
   <style>
     html,
     body,
@@ -38,6 +39,7 @@
       margin-bottom: 12px;
       flex-wrap: wrap;
     }
+
   </style>
 </head>
 
@@ -46,7 +48,7 @@
 
   <script type="text/x-template" id="aud-tpl">
   <div class="aud-page">
-    <wd-panel :border="true">
+    <wd-panel description-align="right" :border="true">
       <wd-tips type="box" style="margin-bottom:12px">
         统一检索操作日志、管控审计轨迹与迁移审计记录。
       </wd-tips>
@@ -95,6 +97,36 @@
             </template>
           </el-table-column>
           <template #empty><el-empty description="暂无匹配的操作日志" :image-size="80" /></template>
+          <!-- ── 卡片模式（DataGrid modeSwitch 内建视图；统一 lh-card 结构） ── -->
+          <template #card-item="{ row }">
+            <div class="lh-card">
+              <div class="lh-card__head">
+                <div class="lh-card__title">{{ row.message || '—' }}</div>
+                <div class="lh-card__tags">
+                  <el-tag size="small" :type="levelTag(row.level)" effect="light">{{ row.level }}</el-tag>
+                </div>
+                <div class="lh-card__extra">
+                  <div class="lh-card__stamp">{{ row.created_at || '—' }}</div>
+                </div>
+              </div>
+              <div class="lh-card__fields">
+                <div class="lh-card__field">
+                  <div class="k">来源包</div>
+                  <div class="v">{{ row.package_id || '—' }}</div>
+                </div>
+                <div class="lh-card__field">
+                  <div class="k">执行人</div>
+                  <div class="v">{{ row.operator || '—' }}</div>
+                </div>
+              </div>
+              <div class="lh-card__ops" v-if="hasCtx(row)">
+                <el-popover width="320" trigger="click">
+                  <pre class="aud-mono" style="margin:0;white-space:pre-wrap">{{ pretty(row.context) }}</pre>
+                  <template #reference><el-button size="small" text type="primary">查看上下文</el-button></template>
+                </el-popover>
+              </div>
+            </div>
+          </template>
         </wd-data-grid>
       </el-tab-pane>
 
@@ -134,6 +166,33 @@
             </template>
           </el-table-column>
           <template #empty><el-empty description="暂无匹配的管控轨迹" :image-size="80" /></template>
+          <!-- ── 卡片模式（DataGrid modeSwitch 内建视图；统一 lh-card 结构） ── -->
+          <template #card-item="{ row }">
+            <div class="lh-card">
+              <div class="lh-card__head">
+                <div class="lh-card__title"><span class="aud-mono">{{ row.action }}</span></div>
+                <div class="lh-card__extra">
+                  <div class="lh-card__stamp">{{ row.created_at || '—' }}</div>
+                </div>
+              </div>
+              <div class="lh-card__fields">
+                <div class="lh-card__field">
+                  <div class="k">对象</div>
+                  <div class="v">{{ row.target || '—' }}</div>
+                </div>
+                <div class="lh-card__field">
+                  <div class="k">执行人</div>
+                  <div class="v">{{ row.operator || '—' }}</div>
+                </div>
+              </div>
+              <div class="lh-card__ops" v-if="hasCtx(row)">
+                <el-popover width="320" trigger="click">
+                  <pre class="aud-mono" style="margin:0;white-space:pre-wrap">{{ pretty(row.context) }}</pre>
+                  <template #reference><el-button size="small" text type="primary">查看上下文</el-button></template>
+                </el-popover>
+              </div>
+            </div>
+          </template>
         </wd-data-grid>
       </el-tab-pane>
 
@@ -165,6 +224,34 @@
             <el-table-column prop="operator" label="执行人" width="120" />
             <el-table-column prop="executed_at" label="执行时间" width="180" />
             <template #empty><el-empty description="暂无迁移审计记录" :image-size="80" /></template>
+            <!-- ── 卡片模式（DataGrid modeSwitch 内建视图；统一 lh-card 结构） ── -->
+            <template #card-item="{ row }">
+              <div class="lh-card">
+                <div class="lh-card__head">
+                  <div class="lh-card__title">{{ row.package || ('#' + row.id) }}</div>
+                  <div class="lh-card__tags">
+                    <el-tag size="small" :type="row.direction === 'rollback' ? 'warning' : 'success'" effect="light">{{ row.direction }}</el-tag>
+                  </div>
+                  <div class="lh-card__extra">
+                    <div class="lh-card__stamp">{{ row.executed_at || '—' }}</div>
+                  </div>
+                </div>
+                <div class="lh-card__fields">
+                  <div class="lh-card__field">
+                    <div class="k">版本</div>
+                    <div class="v">v{{ row.version }}</div>
+                  </div>
+                  <div class="lh-card__field">
+                    <div class="k">执行人</div>
+                    <div class="v">{{ row.operator || '—' }}</div>
+                  </div>
+                  <div class="lh-card__field is-wide">
+                    <div class="k">SQL 摘要</div>
+                    <div class="v">{{ row.sql_summary || '—' }}</div>
+                  </div>
+                </div>
+              </div>
+            </template>
           </wd-data-grid>
         </template>
 
@@ -185,6 +272,7 @@
   <script src="/static/vendor/element-plus/index.full.min.js"></script>
   <script src="/static/vendor/icons/index.iife.min.js"></script>
   <script src="/static/vendor/workdesktop-ai/index.umd.js"></script>
+  <script src="/static/linhub/auth-guard.js?v=2"></script>
   <script>
     const WD = window.WorkDesktop;
     const ElementPlus = window.ElementPlus;

@@ -126,6 +126,8 @@ class ServiceGovernance extends AdminController
                 'class'   => (string) ($e['class'] ?? ''),
                 'version' => (string) ($e['version'] ?? ''),
                 'source'  => (string) ($e['source'] ?? ''),
+                // 服务类型：host 源取 services.php 声明（functional=功能服务|hosted=托管服务）；package 源默认功能服务
+                'type'    => $isPkg ? 'functional' : (string) ($list[$id]['type'] ?? ''),
                 'desc'    => $isPkg
                     ? ((string) ($pkg['desc'] ?? '') !== '' ? (string) $pkg['desc'] : '功能包托管服务')
                     : (string) ($list[$id]['desc'] ?? ''),

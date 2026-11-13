@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace linhub\host\services\attachment;
 
 use linhub\capability\auth\Identity;
+use linhub\host\services\logging\LoggingService;
 use linhub\host\services\support\PlatformStore;
 use think\facade\Env;
 
@@ -31,6 +32,16 @@ final class AttachmentService implements Attachment
     public function __construct(?PlatformStore $store = null)
     {
         $this->store = $store ?? new PlatformStore();
+    }
+
+    /** 日志记录：落 runtime host.log，失败不阻断业务。 */
+    private function journal(string $action, array $context = [], string $level = 'info'): void
+    {
+        try {
+            (new LoggingService())->{$level}('[attachment] ' . $action, $context);
+        } catch (\Throwable) {
+            // 日志失败不影响业务
+        }
     }
 
     public function store(string $ownerPackage, string $content, string $originName, array $meta = []): array
@@ -87,6 +98,14 @@ final class AttachmentService implements Attachment
             . $this->store->quote($now) . ', '
             . $this->store->quote($now) . ')'
         );
+
+        $this->journal('store', [
+            'token'  => $token,
+            'owner'  => $ownerPackage,
+            'name'   => $originName,
+            'size'   => $size,
+            'driver' => $this->driver()->name(),
+        ]);
 
         return $this->findByToken($token) ?? [];
     }
@@ -156,6 +175,12 @@ final class AttachmentService implements Attachment
             . ', updated_at=' . $this->store->quote($now)
             . ' WHERE token=' . $this->store->quote($token)
         );
+        $this->journal('delete', [
+            'token'    => $token,
+            'owner'    => (string) ($row['owner_pkg'] ?? ''),
+            'name'     => (string) ($row['origin_name'] ?? ''),
+            'as_admin' => $asAdmin,
+        ]);
     }
 
     public function findByToken(string $token): ?array
@@ -311,12 +336,14 @@ final class AttachmentService implements Attachment
             ['is_public' => true, 'uploader_id' => $operatorId, 'uploader_name' => '平台默认图'],
         );
         $this->putSetting(self::SETTING_KEY_FALLBACK_TOKEN, (string) ($meta['token'] ?? ''), 'string');
+        $this->journal('set_fallback_image', ['token' => (string) ($meta['token'] ?? ''), 'operator' => $operatorId]);
         return $meta;
     }
 
     public function resetFallbackImage(): void
     {
         $this->putSetting(self::SETTING_KEY_FALLBACK_TOKEN, '', 'string');
+        $this->journal('reset_fallback_image');
     }
 
     /** 当前已托管默认图 Token；未配置返回空串（AT-9 管理页预览用）。 */
@@ -362,6 +389,7 @@ final class AttachmentService implements Attachment
         if (array_key_exists('fallback_enabled', $settings)) {
             $this->putSetting(self::SETTING_KEY_FALLBACK_ENABLED, !empty($settings['fallback_enabled']) ? '1' : '0', 'string');
         }
+        $this->journal('save_settings', ['keys' => array_keys($settings)]);
     }
 
     public function clean(string $triggerType = 'manual', string $operatorId = ''): array
@@ -423,6 +451,16 @@ final class AttachmentService implements Attachment
             . $this->store->quote($operatorId) . ', '
             . $this->store->quote($now) . ')'
         );
+
+        $this->journal('clean', [
+            'trigger'     => $triggerType,
+            'driver'      => $driver->name(),
+            'scanned'     => $scanned,
+            'deleted'     => $deleted,
+            'orphan_files' => $orphanFiles,
+            'bytes_freed' => $bytesFreed,
+            'operator'    => $operatorId,
+        ]);
 
         return [
             'scanned'     => $scanned,

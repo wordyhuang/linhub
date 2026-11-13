@@ -2,30 +2,38 @@
 
 declare(strict_types=1);
 
+/*
+ * 文档创建时间：2026-10-20
+ * 最后修改时间：2026-11-11
+ * 当前版本：V2.1
+ * 适用对象：宿主管理端（admin 应用）
+ * 核心目标：角色管理 GUI——仅展示 5 个系统预设角色与管理成员绑定，角色资料只读、成员可调
+ * 文档简略描述：V2.1 成员口径放开：所有预设角色（含平台占位的超级管理员）成员均可调整；角色资料（名称/备注）只读。
+ */
+
 namespace app\admin\controller;
 
 use linhub\capability\auth\Identity;
 use linhub\host\rbac\RbacRoles;
 
 /**
- * 角色管理 GUI（G1 / T5.2 / J2 / J3）—— admin 应用
+ * 角色管理 GUI（G1 / T5.2 / J2 / J3）—— admin 应用（V2.1 角色资料只读、成员可调）
  *
- *  - GET  /admin/role/index    角色列表（空壳，配 wd-* 组件）
- *  - GET  /admin/role/rows     角色列表 JSON（四默认角色 + 每角色用户数）
- *  - GET  /admin/role/options  新增下拉的角色类型 JSON
- *  - POST /admin/role/save     新增(create) / 改名(update)，JSON
- *  - POST /admin/role/delete   删除（前端确认，后端只读角色拒绝），JSON
+ *  - GET  /admin/role/index     角色列表（空壳，配 wd-* 组件）
+ *  - GET  /admin/role/rows      角色列表 JSON（5 预设角色 + 每角色用户数）
+ *  - GET  /admin/role/users     成员选择数据源 JSON（全部用户 + 该角色已关联用户 id）
+ *  - POST /admin/role/usersSave 整体替换角色成员，JSON
  *
- * 角色仅承载类型标签语义（J2），【不】绑定权限（J3），页面不提供挂权限入口。
- * type 下拉仅允许 TYPE_NAMES 四枚举，后端二次白名单校验（含禁止自建超级管理员）。
- * 每个写操作成功路径写 AuditTrail（action=role.save / role.delete）。
+ * 角色仅承载预设身份语义（J2），【不】绑定权限（J3），页面不提供挂权限入口；
+ * 角色资料（名称/备注）只读、不可新增/改名/删除（V2.0 收缩）；成员绑定对所有预设角色均可调整（V2.1，含超管）。
+ * 成员保存成功路径写 AuditTrail（action=role.users）。
  */
 class Role extends AdminController
 {
     /**
-     * 角色列表：四默认角色 + 每角色用户数。
+     * 角色列表：5 预设角色 + 每角色用户数。
      *
-     * @param string $keyword 可选检索词，按角色名 / 类型名不区分大小写匹配
+     * @param string $keyword 可选检索词，按角色名 / 备注 / 角色 id 不区分大小写匹配
      */
     private function roleRows(string $keyword = ''): array
     {
@@ -42,38 +50,23 @@ class Role extends AdminController
         $kw = trim($keyword);
         $items = [];
         foreach ($this->bootstrap->roles()->all() as $r) {
-            $type = (string) ($r['type'] ?? '');
-            $id   = (string) ($r['id'] ?? '');
-            $typeName = (string) (RbacRoles::TYPE_NAMES[$type] ?? $type);
+            $id = (string) ($r['id'] ?? '');
             if ($kw !== ''
                 && mb_stripos((string) ($r['name'] ?? ''), $kw) === false
-                && mb_stripos($typeName, $kw) === false
-                && mb_stripos($type, $kw) === false) {
+                && mb_stripos((string) ($r['remark'] ?? ''), $kw) === false
+                && mb_stripos($id, $kw) === false) {
                 continue;
             }
             $items[] = [
                 'id'        => $id,
+                'type'      => RbacRoles::PRESET_KEYS[$id] ?? '',
                 'name'      => (string) ($r['name'] ?? ''),
-                'type'      => $type,
-                'typeName'  => $typeName,
+                'remark'    => (string) ($r['remark'] ?? ''),
                 'readonly'  => !empty($r['readonly']),
                 'userCount' => (int) ($userCounts[$id] ?? 0),
             ];
         }
         return $items;
-    }
-
-    /** 新增下拉仅允许可创建的角色类型（排除 SUPER_ADMIN 占位）。 */
-    private function createOptions(): array
-    {
-        $createOptions = [];
-        foreach (RbacRoles::TYPE_NAMES as $type => $name) {
-            if ($type === RbacRoles::SUPER_ADMIN) {
-                continue;
-            }
-            $createOptions[] = ['type' => $type, 'name' => $name];
-        }
-        return $createOptions;
     }
 
     /** 角色管理主页：渲染空壳，数据由 wd-* 组件经 JSON 接口加载。 */
@@ -99,33 +92,39 @@ class Role extends AdminController
     }
 
     /**
-     * JSON：指定角色下的成员用户列表（按角色 id 反查，供"查看成员"抽屉）。
+     * JSON：角色成员选择数据源（全部用户 + 该角色已关联用户 id，供 data-grid 勾选）。
      *
-     * @param string $keyword 可选检索词，按用户姓名 / refId 过滤
+     * data-grid 会把 apiParam 以 param[...] 嵌套传参，这里兼容嵌套与平铺两种写法。
      */
-    public function members()
+    public function users()
     {
         $gate = $this->gateForJson();
         if (!$gate instanceof Identity) {
             return $gate;
         }
-        $roleId  = (string) $this->request->get('role_id', '');
-        $keyword = trim((string) $this->request->get('keyword', ''));
-        if ($roleId === '') {
-            return $this->jsonFail('缺少角色 id');
-        }
-        // 角色须存在（兼容只读占位角色读取）
+        $param  = $this->request->get('param', []);
+        $param  = is_array($param) ? $param : [];
+        $roleId = (string) ($param['role_id'] ?? $this->request->get('role_id', ''));
+        $keyword = trim((string) ($param['keyword'] ?? $this->request->get('keyword', '')));
+        $onlySel = $param['only_selected'] ?? $this->request->get('only_selected', '');
+        $onlySelected = in_array($onlySel, [true, 1, '1', 'true', 'on'], true);
+
         $this->bootstrap->roles()->ensureDefaultRoles();
-        $role = $this->bootstrap->roles()->get($roleId);
-        if ($role === null) {
+        if ($roleId !== '' && $this->bootstrap->roles()->get($roleId) === null) {
             return $this->jsonFail('角色不存在');
         }
 
-        $kw    = $keyword;
-        $users = [];
-        foreach ($this->bootstrap->rbacUsers()->all() as $u) {
+        $users    = $this->bootstrap->rbacUsers();
+        $list     = [];
+        $selected = [];
+        $kw       = $keyword;
+        foreach ($users->all() as $u) {
             $uid = (string) ($u['id'] ?? '');
-            if (!in_array($roleId, $this->bootstrap->rbacUsers()->rolesOf($uid), true)) {
+            $has = $roleId !== '' && in_array($roleId, $users->rolesOf($uid), true);
+            if ($has) {
+                $selected[] = $uid;
+            }
+            if ($onlySelected && !$has) {
                 continue;
             }
             $name  = (string) ($u['name'] ?? '');
@@ -133,70 +132,34 @@ class Role extends AdminController
             if ($kw !== '' && mb_stripos($name, $kw) === false && mb_stripos($refId, $kw) === false) {
                 continue;
             }
-            $users[] = ['id' => $uid, 'name' => $name, 'refId' => $refId];
+            $list[] = [
+                'id'      => $uid,
+                'name'    => $name,
+                'refId'   => $refId,
+                'checked' => $has,
+            ];
         }
-        return $this->jsonOk(['role' => ['id' => $roleId, 'name' => (string) ($role['name'] ?? '')], 'list' => $users, 'total' => count($users)]);
+
+        $total    = count($list);
+        $page     = max(1, (int) $this->request->get('currentPage', 1));
+        $pageSize = (int) $this->request->get('pageSize', 20);
+        $pageSize = $pageSize > 0 ? min($pageSize, 500) : 20;
+        // 筛选后页码可能超界（如停在高页码时输入搜索词），回退到最后一页
+        $lastPage = max(1, (int) ceil($total / $pageSize));
+        $page     = min($page, $lastPage);
+        $list     = array_slice($list, ($page - 1) * $pageSize, $pageSize);
+
+        return $this->jsonOk([
+            'list'        => $list,
+            'total'       => $total,
+            'selected'    => $selected,
+            'currentPage' => $page,
+            'pageSize'    => $pageSize,
+        ]);
     }
 
-    /** JSON：新增下拉角色类型（排除超级管理员占位）。 */
-    public function options()
-    {
-        $gate = $this->gateForJson();
-        if (!$gate instanceof Identity) {
-            return $gate;
-        }
-        return $this->jsonOk(['createOptions' => $this->createOptions()]);
-    }
-
-    /** 新增 / 改名：type 白名单二次校验，成功记审计 role.save（JSON）。 */
-    public function save()
-    {
-        $gate = $this->gateForJson();
-        if (!$gate instanceof Identity) {
-            return $gate;
-        }
-        $identity = $gate;
-
-        $mode = (string) $this->request->post('mode', 'create');
-        $id   = (string) $this->request->post('id', '');
-        $type = (string) $this->request->post('type', '');
-        $name = trim((string) $this->request->post('name', ''));
-
-        if ($name === '') {
-            return $this->jsonFail('角色名称不能为空');
-        }
-
-        $roles = $this->bootstrap->roles();
-        try {
-            if ($mode === 'update') {
-                if ($id === '') {
-                    throw new \RuntimeException('缺少角色 id');
-                }
-                $roles->update($id, $name);
-                $target = $id;
-            } else {
-                // 后端白名单：仅允许 J2 四枚举且禁止自建超级管理员
-                if ($type === '' || !isset(RbacRoles::TYPE_NAMES[$type])) {
-                    throw new \RuntimeException('非法角色类型：' . $type);
-                }
-                if ($type === RbacRoles::SUPER_ADMIN) {
-                    throw new \RuntimeException('超级管理员由平台占位，不可自行创建');
-                }
-                $target = $roles->create($type, $name);
-            }
-            $this->bootstrap->auditTrail()->log('role.save', $target, (string) $identity->name, [
-                'mode' => $mode,
-                'type' => $type,
-                'name' => $name,
-            ]);
-            return $this->jsonOk(['id' => $target], $mode === 'update' ? '角色已改名' : '角色已创建');
-        } catch (\Throwable $e) {
-            return $this->jsonFail($e->getMessage());
-        }
-    }
-
-    /** 删除角色（前端确认；后端只读角色拒绝），成功记审计 role.delete（JSON）。 */
-    public function delete()
+    /** JSON：整体替换角色成员（勾选即加入该角色，取消勾选即移出该角色）。 */
+    public function usersSave()
     {
         $gate = $this->gateForJson();
         if (!$gate instanceof Identity) {
@@ -204,15 +167,46 @@ class Role extends AdminController
         }
         $identity = $gate;
 
-        $id = (string) $this->request->post('id', '');
+        $id  = (string) $this->request->post('id', '');
+        $ids = $this->request->post('users', []);
+        // 兼容逗号分隔字符串与数组两种传参，避免静默保存 0 名
+        $ids = is_array($ids)
+            ? array_values(array_unique(array_filter(array_map('strval', $ids))))
+            : array_values(array_unique(array_filter(array_map('trim', explode(',', (string) $ids)))));
         if ($id === '') {
             return $this->jsonFail('缺少角色 id');
         }
 
+        $roles = $this->bootstrap->roles();
+        $roles->ensureDefaultRoles();
+        $role = $roles->get($id);
+        if ($role === null) {
+            return $this->jsonFail('角色不存在');
+        }
+        if (!isset(RbacRoles::PRESET_ROLES[$id])) {
+            return $this->jsonFail('仅允许调整预设角色的成员');
+        }
+        // 角色资料只读，但成员绑定对所有预设角色均可调整（含平台占位的超级管理员）
+
         try {
-            $this->bootstrap->roles()->delete($id);
-            $this->bootstrap->auditTrail()->log('role.delete', $id, (string) $identity->name, []);
-            return $this->jsonOk(['id' => $id], '角色已删除');
+            $users = $this->bootstrap->rbacUsers();
+            foreach ($users->all() as $u) {
+                $uid = (string) ($u['id'] ?? '');
+                if ($uid === '') {
+                    continue;
+                }
+                $current = $users->rolesOf($uid);
+                $has     = in_array($id, $current, true);
+                $want    = in_array($uid, $ids, true);
+                if ($want && !$has) {
+                    $current[] = $id;
+                    $users->setRoles($uid, $current);
+                } elseif (!$want && $has) {
+                    $users->setRoles($uid, array_values(array_diff($current, [$id])));
+                }
+            }
+            $this->bootstrap->auditTrail()->log('role.users', $id, (string) $identity->name, ['count' => count($ids)]);
+            return $this->jsonOk(['id' => $id, 'count' => count($ids)], '成员已保存（' . count($ids) . ' 名）');
         } catch (\Throwable $e) {
             return $this->jsonFail($e->getMessage());
         }

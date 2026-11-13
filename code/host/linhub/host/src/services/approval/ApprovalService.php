@@ -94,9 +94,10 @@ final class ApprovalService implements Approval
 
     // —— 契约实现 ——
 
-    public function defineFlow(?string $package, array $flow): array
+    public function defineFlow(?string $package, array $flow, string $source = 'package'): array
     {
         $scope = $this->resolveScope($package);
+        $source = $source === 'admin' ? 'admin' : 'package';
         $definition = $this->normalizeFlow($flow);
         $this->validateFlow($definition);
 
@@ -109,16 +110,20 @@ final class ApprovalService implements Approval
         if ($existing === null) {
             $db->exec(
                 'INSERT INTO ' . PlatformStore::APPR_FLOW_TABLE
-                . ' (package, flow_key, name, definition, version, status, created_at, updated_at) VALUES ('
+                . ' (package, flow_key, name, definition, version, status, source, created_at, updated_at) VALUES ('
                 . $this->store->quote($scope) . ', '
                 . $this->store->quote($flowKey) . ', '
                 . $this->store->quote((string) $definition['name']) . ', '
                 . $this->store->quote($json) . ', 1, '
                 . "'active', "
+                . $this->store->quote($source) . ', '
                 . $this->store->quote($now) . ', '
                 . $this->store->quote($now) . ')'
             );
         } else {
+            if ((string) ($existing['source'] ?? 'package') === 'package' && $source === 'admin') {
+                throw new ApprovalState('系统定义的流程模板不可在后台修改：' . $scope . '/' . $flowKey);
+            }
             $db->exec(
                 'UPDATE ' . PlatformStore::APPR_FLOW_TABLE
                 . ' SET name=' . $this->store->quote((string) $definition['name'])
@@ -136,6 +141,25 @@ final class ApprovalService implements Approval
         }
         $this->journal('defineFlow', ['package' => $scope, 'flow_key' => $flowKey, 'version' => (int) $row['version']]);
         return $this->decorateFlow($row);
+    }
+
+    /** 流程模板列表：host 调用者不传包名时跨包全量，其余只返回本包。 */
+    public function flows(?string $package = null): array
+    {
+        $scope = $this->resolveScope($package, true);
+        $sql = 'SELECT * FROM ' . PlatformStore::APPR_FLOW_TABLE;
+        if ($scope !== '') {
+            $sql .= ' WHERE package=' . $this->store->quote($scope);
+        }
+        $sql .= ' ORDER BY package ASC, flow_key ASC, version DESC';
+        $rows = $this->store->db()->query($sql);
+        $items = [];
+        foreach ($rows as $row) {
+            if (is_array($row)) {
+                $items[] = $this->decorateFlow($row);
+            }
+        }
+        return $items;
     }
 
     public function submit(?string $package, string $flowKey, array $payload, array $options = []): string
@@ -180,62 +204,73 @@ final class ApprovalService implements Approval
             throw new ApprovalState('payload 超过单条上限 ' . self::MAX_PAYLOAD_BYTES . ' 字节（1MB）');
         }
 
-        $approvalNo = 'APR' . bin2hex(random_bytes(16));
         $now = date('c');
         $db = $this->store->db();
-        $this->resetQueues();
         $this->activatedSnapshots = [];
         $this->collectActivated = true;
         $instanceId = 0;
+        $approvalNo = '';
 
-        try {
-            $db->begin();
-            $db->exec(
-                'INSERT INTO ' . PlatformStore::APPR_INSTANCE_TABLE
-                . ' (approval_no, package, flow_key, flow_version, title, summary, payload, payload_size,'
-                . ' submitter_id, submitter_name, status, orphaned, submitted_at, finished_at, finish_comment) VALUES ('
-                . $this->store->quote($approvalNo) . ', '
-                . $this->store->quote($scope) . ', '
-                . $this->store->quote($flowKey) . ', '
-                . (int) $flowRow['version'] . ', '
-                . $this->store->quote($title) . ', '
-                . $this->store->quote($summary) . ', '
-                . $this->store->quote($json) . ', '
-                . strlen($json) . ', '
-                . $this->store->quote($submitterId) . ', '
-                . $this->store->quote($submitterName) . ", "
-                . "'pending', 0, "
-                . $this->store->quote($now) . ", '', '')"
-            );
-            $rows = $db->query(
-                'SELECT id FROM ' . PlatformStore::APPR_INSTANCE_TABLE
-                . ' WHERE approval_no=' . $this->store->quote($approvalNo) . ' LIMIT 1'
-            );
-            $instanceId = (int) ($rows[0]['id'] ?? 0);
-            if ($instanceId <= 0) {
-                throw new ApprovalState('审批单写入失败：' . $approvalNo);
-            }
-
-            $this->insertAction($instanceId, 0, $submitterId, $submitterName, 'submit', '', $now);
-            $this->runNode($instanceId, $definition, (string) $definition['entry'], [], $this->rootCtx(), [
-                'package' => $scope,
-                'flow_key' => $flowKey,
-                'approval_no' => $approvalNo,
-                'title' => $title,
-                'payload' => $payload,
-                'submitter_id' => $submitterId,
-                'submitter_name' => $submitterName,
-            ]);
-            $db->commit();
-        } catch (\Throwable $e) {
-            try {
-                $db->rollback();
-            } catch (\Throwable) {
-                // 回滚失败不掩盖原始异常
-            }
-            $this->collectActivated = false;
+        // 单据编号按「APR-日期-当日流水」取号；并发提交撞唯一键时重新取号重试（最多 5 次）。
+        for ($attempt = 1; ; $attempt++) {
+            $approvalNo = $this->nextApprovalNo();
             $this->resetQueues();
-            throw $e;
+            $this->activatedSnapshots = [];
+            $instanceId = 0;
+            try {
+                $db->begin();
+                $db->exec(
+                    'INSERT INTO ' . PlatformStore::APPR_INSTANCE_TABLE
+                    . ' (approval_no, package, flow_key, flow_version, title, summary, payload, payload_size,'
+                    . ' submitter_id, submitter_name, status, orphaned, submitted_at, finished_at, finish_comment) VALUES ('
+                    . $this->store->quote($approvalNo) . ', '
+                    . $this->store->quote($scope) . ', '
+                    . $this->store->quote($flowKey) . ', '
+                    . (int) $flowRow['version'] . ', '
+                    . $this->store->quote($title) . ', '
+                    . $this->store->quote($summary) . ', '
+                    . $this->store->quote($json) . ', '
+                    . strlen($json) . ', '
+                    . $this->store->quote($submitterId) . ', '
+                    . $this->store->quote($submitterName) . ", "
+                    . "'pending', 0, "
+                    . $this->store->quote($now) . ", '', '')"
+                );
+                $rows = $db->query(
+                    'SELECT id FROM ' . PlatformStore::APPR_INSTANCE_TABLE
+                    . ' WHERE approval_no=' . $this->store->quote($approvalNo) . ' LIMIT 1'
+                );
+                $instanceId = (int) ($rows[0]['id'] ?? 0);
+                if ($instanceId <= 0) {
+                    throw new ApprovalState('审批单写入失败：' . $approvalNo);
+                }
+
+                $this->insertAction($instanceId, 0, $submitterId, $submitterName, 'submit', '', $now);
+                $this->runNode($instanceId, $definition, (string) $definition['entry'], [], $this->rootCtx(), [
+                    'package' => $scope,
+                    'flow_key' => $flowKey,
+                    'approval_no' => $approvalNo,
+                    'title' => $title,
+                    'payload' => $payload,
+                    'submitter_id' => $submitterId,
+                    'submitter_name' => $submitterName,
+                ]);
+                $db->commit();
+                break;
+            } catch (\Throwable $e) {
+                try {
+                    $db->rollback();
+                } catch (\Throwable) {
+                    // 回滚失败不掩盖原始异常
+                }
+                $this->collectActivated = false;
+                $this->resetQueues();
+                if ($attempt < 5 && $this->isDuplicateApprovalNo($e)) {
+                    $this->collectActivated = true;
+                    continue;
+                }
+                throw $e;
+            }
         }
 
         $this->collectActivated = false;
@@ -267,6 +302,39 @@ final class ApprovalService implements Approval
         }
 
         return $approvalNo;
+    }
+
+    /**
+     * 生成单据编号：APR-YYYYMMDD-当日流水（如 APR-20261110-001）。
+     *
+     * 取当日前缀下最大编号递增，不足 3 位左侧补零；并发撞号由 submit() 捕获唯一键冲突后重新取号。
+     */
+    private function nextApprovalNo(): string
+    {
+        $prefix = 'APR-' . date('Ymd') . '-';
+        $rows = $this->store->db()->query(
+            'SELECT approval_no FROM ' . PlatformStore::APPR_INSTANCE_TABLE
+            . ' WHERE approval_no LIKE ' . $this->store->quote($prefix . '%')
+            . ' ORDER BY LENGTH(approval_no) DESC, approval_no DESC LIMIT 1'
+        );
+        $lastNo = (string) ($rows[0]['approval_no'] ?? '');
+        $seq = 1;
+        if ($lastNo !== '' && str_starts_with($lastNo, $prefix)) {
+            $suffix = substr($lastNo, strlen($prefix));
+            if ($suffix !== '' && ctype_digit($suffix)) {
+                $seq = (int) $suffix + 1;
+            }
+        }
+        return $prefix . str_pad((string) $seq, 3, '0', STR_PAD_LEFT);
+    }
+
+    /** 是否单据编号唯一键冲突（并发取号重试的判定条件）。 */
+    private function isDuplicateApprovalNo(\Throwable $e): bool
+    {
+        if ($e instanceof \PDOException && (string) $e->getCode() === '23000') {
+            return true;
+        }
+        return str_contains($e->getMessage(), 'Duplicate entry');
     }
 
     public function get(?string $package, string $approvalNo): ?array
@@ -305,6 +373,17 @@ final class ApprovalService implements Approval
         if ($status !== '') {
             $where[] = 'status=' . $this->store->quote($status);
         }
+        // approval_nos：单据编号白名单（逗号分隔），供「待办」等任务维度过滤复用
+        $nos = $filter['approval_nos'] ?? '';
+        if (is_string($nos) && trim($nos) !== '') {
+            $list = array_values(array_filter(array_map('trim', explode(',', $nos))));
+            if ($list !== []) {
+                $placeholders = implode(', ', array_map([$this->store, 'quote'], $list));
+                $where[] = 'approval_no IN (' . $placeholders . ')';
+            } else {
+                $where[] = '1=0';
+            }
+        }
         $flowKey = trim((string) ($filter['flow_key'] ?? ''));
         if ($flowKey !== '') {
             $where[] = 'flow_key=' . $this->store->quote($flowKey);
@@ -326,7 +405,13 @@ final class ApprovalService implements Approval
         }
         $dateTo = trim((string) ($filter['date_to'] ?? ''));
         if ($dateTo !== '') {
-            $where[] = 'submitted_at <= ' . $this->store->quote($dateTo);
+            if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $dateTo)) {
+                // 纯日期：submitted_at 存 date('c')（2026-10-29T...），<= 纯日期会漏掉当天；改为小于次日零点
+                $nextDay = date('Y-m-d', strtotime($dateTo . ' +1 day'));
+                $where[] = 'submitted_at < ' . $this->store->quote($nextDay);
+            } else {
+                $where[] = 'submitted_at <= ' . $this->store->quote($dateTo);
+            }
         }
         $orphaned = trim((string) ($filter['orphaned'] ?? ''));
         if ($orphaned === 'yes') {
@@ -550,6 +635,31 @@ final class ApprovalService implements Approval
         return ['total' => $total, 'page' => $page, 'size' => $size, 'items' => $items];
     }
 
+    /** 当前用户名下有活跃审批任务的单据编号集合（「待办」维度；与 myPending 同源匹配逻辑）。 */
+    public function myPendingNos(Identity $viewer): array
+    {
+        $db = $this->store->db();
+        $rows = $db->query(
+            'SELECT n.approver_snapshot, i.approval_no'
+            . ' FROM ' . PlatformStore::APPR_NODE_TABLE . ' n'
+            . ' INNER JOIN ' . PlatformStore::APPR_INSTANCE_TABLE . ' i ON i.id = n.instance_id'
+            . " WHERE n.status='active' AND n.node_type='approval'"
+            . " AND i.status='pending' AND i.orphaned=0"
+        );
+        $nos = [];
+        foreach ($rows as $row) {
+            $snapshot = $this->decodeList((string) ($row['approver_snapshot'] ?? ''));
+            if (!$this->identityInSnapshot($viewer, $snapshot)) {
+                continue;
+            }
+            $no = (string) ($row['approval_no'] ?? '');
+            if ($no !== '') {
+                $nos[$no] = true;
+            }
+        }
+        return array_keys($nos);
+    }
+
     public function registerResolver(string $name, string $handlerClass): void
     {
         $name = trim($name);
@@ -563,7 +673,8 @@ final class ApprovalService implements Approval
         self::$resolvers[$name] = $handlerClass;
     }
 
-    public function stats(): array
+    /** 用量统计；$viewer 传入时额外返回 todo（该身份名下活跃待办单据数，与 myPendingNos 同源）。 */
+    public function stats(?Identity $viewer = null): array
     {
         $db = $this->store->db();
         $table = PlatformStore::APPR_INSTANCE_TABLE;
@@ -588,6 +699,7 @@ final class ApprovalService implements Approval
         return [
             'total' => (int) ($t['c'] ?? 0),
             'pending' => (int) ($t['pending'] ?? 0),
+            'todo' => $viewer !== null ? count($this->myPendingNos($viewer)) : 0,
             'approved' => (int) ($t['approved'] ?? 0),
             'rejected' => (int) ($t['rejected'] ?? 0),
             'cancelled' => (int) ($t['cancelled'] ?? 0),
@@ -610,7 +722,7 @@ final class ApprovalService implements Approval
 
     // —— 实现类扩展接口（不进 Approval 契约） ——
 
-    /** 撤回并记录真实操作人（审批中心控制器用）；$actor=null 时以调用方包名兜底。 */
+    /** 撤回并记录真实操作人（审批中心控制器用）；$actor=null 时以调用方包名兜底。显式身份撤回仅限提交人本人。 */
     public function cancelAs(?Identity $actor, ?string $package, string $approvalNo, string $comment = ''): bool
     {
         $instance = $this->instanceByNo(trim($approvalNo));
@@ -620,6 +732,9 @@ final class ApprovalService implements Approval
         $this->assertExplicitPackage($package, (string) $instance['package']);
         $this->assertInstanceAccess((string) $instance['package']);
         $this->assertOperable($instance);
+        if ($actor !== null && $actor->id !== (string) ($instance['submitter_id'] ?? '')) {
+            throw new ApprovalDenied('仅提交人本人可撤回该单据：' . $approvalNo);
+        }
 
         $instanceId = (int) $instance['id'];
         $db = $this->store->db();
@@ -670,10 +785,70 @@ final class ApprovalService implements Approval
 
     /**
      * 我的已办：我 approve/reject 过的单据（按单据去重，取我最近一次动作）。
+     * $action 传 'approve' / 'reject' 时仅返回对应动作的单据（工作台「已同意 / 已驳回」页签）。
      *
      * @return array{total:int, page:int, size:int, items:list<array<string,mixed>>}
      */
-    public function myHandled(Identity $viewer, int $page = 1, int $size = 20): array
+    public function myHandled(Identity $viewer, int $page = 1, int $size = 20, string $action = ''): array
+    {
+        $matched = $this->handledMatched($viewer);
+        $action = in_array($action, ['approve', 'reject'], true) ? $action : '';
+        if ($action !== '') {
+            $matched = array_filter(
+                $matched,
+                static fn (array $item): bool => (string) ($item['my_action'] ?? '') === $action
+            );
+        }
+
+        $page = max(1, $page);
+        $size = max(1, min(200, $size));
+        $total = count($matched);
+        return [
+            'total' => $total,
+            'page' => $page,
+            'size' => $size,
+            'items' => array_slice(array_values($matched), ($page - 1) * $size, $size),
+        ];
+    }
+
+    /**
+     * 我的工作台计数摘要：待办单数 + 已办按最近动作分类计数（工作台页签徽标与角色首页统计卡共用）。
+     *
+     * @return array{todo:int, handled:int, approved:int, rejected:int}
+     */
+    public function myWorkbenchSummary(Identity $viewer): array
+    {
+        $matched = $this->handledMatched($viewer);
+        $approved = 0;
+        $rejected = 0;
+        foreach ($matched as $item) {
+            if ((string) ($item['my_action'] ?? '') === 'approve') {
+                $approved++;
+            } else {
+                $rejected++;
+            }
+        }
+        return [
+            'todo'     => count($this->myPendingNos($viewer)),
+            'handled'  => count($matched),
+            'approved' => $approved,
+            'rejected' => $rejected,
+        ];
+    }
+
+    /**
+     * 更新审批服务设置（契约方法，供功能包调用）：白名单合并语义，见 Approval::updateSettings。
+     * 与平台「审批服务-服务设置」页同源（ApprovalSettings::save），非白名单键被忽略。
+     */
+    public function updateSettings(array $input): array
+    {
+        $saved = (new ApprovalSettings())->save($input);
+        $this->journal('settings_update', ['keys' => array_keys($input)]);
+        return $saved;
+    }
+
+    /** myHandled / myWorkbenchSummary 共用：我 approve/reject 过的单据（按单据去重，取最近一次动作，动作时间倒序）。 */
+    private function handledMatched(Identity $viewer): array
     {
         $db = $this->store->db();
         $rows = $db->query(
@@ -698,16 +873,7 @@ final class ApprovalService implements Approval
             $item['my_acted_at'] = (string) $row['my_acted_at'];
             $matched[$no] = $item;
         }
-
-        $page = max(1, $page);
-        $size = max(1, min(200, $size));
-        $total = count($matched);
-        return [
-            'total' => $total,
-            'page' => $page,
-            'size' => $size,
-            'items' => array_slice(array_values($matched), ($page - 1) * $size, $size),
-        ];
+        return $matched;
     }
 
     /** 当前用户能否对该单据执行审批（审批中心详情页按钮置灰依据）。 */
@@ -1157,6 +1323,12 @@ final class ApprovalService implements Approval
                 $ids[] = $userId;
             }
         }
+        $groups = array_values(array_filter(array_map('strval', (array) ($source['groups'] ?? []))));
+        if ($groups !== []) {
+            foreach ($this->usersWithGroups($groups) as $userId) {
+                $ids[] = $userId;
+            }
+        }
         $resolver = trim((string) ($source['resolver'] ?? ''));
         if ($resolver !== '') {
             $handler = self::$resolvers[$resolver] ?? '';
@@ -1207,6 +1379,27 @@ final class ApprovalService implements Approval
         $want = array_flip($roleIds);
         $out = [];
         foreach ($rbac->section(RbacStorage::USER_ROLES) as $userId => $owned) {
+            if (array_intersect_key($want, array_flip(array_map('strval', (array) $owned))) !== []) {
+                $out[] = (string) $userId;
+            }
+        }
+        return $out;
+    }
+
+    /** 指定权限组下的本地用户 id 列表（反向索引 USER_GROUPS，多组合并）。 */
+    private function usersWithGroups(array $groupIds): array
+    {
+        $groupIds = array_values(array_unique(array_filter(array_map('strval', $groupIds), static fn (string $v): bool => trim($v) !== '')));
+        if ($groupIds === []) {
+            return [];
+        }
+        $rbac = $this->rbac();
+        if ($rbac === null) {
+            return [];
+        }
+        $want = array_flip($groupIds);
+        $out = [];
+        foreach ($rbac->section(RbacStorage::USER_GROUPS) as $userId => $owned) {
             if (array_intersect_key($want, array_flip(array_map('strval', (array) $owned))) !== []) {
                 $out[] = (string) $userId;
             }
@@ -1474,6 +1667,7 @@ final class ApprovalService implements Approval
         }
 
         $nodes = [];
+        $layout = [];
         foreach ($rawNodes as $raw) {
             if (!is_array($raw)) {
                 throw new ApprovalFlowInvalid('节点定义须为对象');
@@ -1484,6 +1678,11 @@ final class ApprovalService implements Approval
             }
             if (isset($nodes[$id])) {
                 throw new ApprovalFlowInvalid("节点 {$id}：id 重复");
+            }
+            $x = $raw['x'] ?? null;
+            $y = $raw['y'] ?? null;
+            if (is_numeric($x) && is_numeric($y)) {
+                $layout[$id] = ['x' => (int) $x, 'y' => (int) $y];
             }
             $type = (string) ($raw['type'] ?? 'approval');
             if (!in_array($type, ['approval', 'exclusive', 'parallel'], true)) {
@@ -1506,15 +1705,19 @@ final class ApprovalService implements Approval
                     array_map(static fn ($v): string => trim((string) $v), (array) ($ap['roles'] ?? [])),
                     static fn (string $v): bool => $v !== ''
                 ));
+                $groups = array_values(array_filter(
+                    array_map(static fn ($v): string => trim((string) $v), (array) ($ap['groups'] ?? [])),
+                    static fn (string $v): bool => $v !== ''
+                ));
                 $resolver = trim((string) ($ap['resolver'] ?? ''));
-                if ($users === [] && $roles === [] && $resolver === '') {
-                    throw new ApprovalFlowInvalid("节点 {$id}：approvers 至少需提供 users / roles / resolver 之一");
+                if ($users === [] && $roles === [] && $groups === [] && $resolver === '') {
+                    throw new ApprovalFlowInvalid("节点 {$id}：approvers 至少需提供 users / roles / groups / resolver 之一");
                 }
                 $mode = (string) ($raw['mode'] ?? 'any');
                 if (!in_array($mode, ['any', 'all'], true)) {
                     throw new ApprovalFlowInvalid("节点 {$id}：mode 只能是 any（或签）或 all（会签）");
                 }
-                $node['approvers'] = ['users' => $users, 'roles' => $roles, 'resolver' => $resolver];
+                $node['approvers'] = ['users' => $users, 'roles' => $roles, 'groups' => $groups, 'resolver' => $resolver];
                 $node['mode'] = $mode;
                 $node['next'] = $this->normalizeNext($raw['next'] ?? null, $id);
             } elseif ($type === 'exclusive') {
@@ -1579,7 +1782,11 @@ final class ApprovalService implements Approval
             throw new ApprovalFlowInvalid("entry 节点 {$entry} 不存在");
         }
 
-        return ['flow_key' => $flowKey, 'name' => $name, 'entry' => $entry, 'nodes' => $nodes];
+        $definition = ['flow_key' => $flowKey, 'name' => $name, 'entry' => $entry, 'nodes' => $nodes];
+        if ($layout !== []) {
+            $definition['layout'] = $layout;
+        }
+        return $definition;
     }
 
     private function normalizeNext(mixed $next, string $nodeId): ?string
@@ -1968,6 +2175,7 @@ final class ApprovalService implements Approval
             'definition' => is_array($definition) ? $definition : [],
             'version' => (int) ($row['version'] ?? 1),
             'status' => (string) ($row['status'] ?? 'active'),
+            'source' => (string) ($row['source'] ?? 'package'),
             'created_at' => (string) ($row['created_at'] ?? ''),
             'updated_at' => (string) ($row['updated_at'] ?? ''),
         ];

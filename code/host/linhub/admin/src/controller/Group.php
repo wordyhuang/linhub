@@ -39,6 +39,7 @@ class Group extends AdminController
             $rows[] = [
                 'id'        => $gid,
                 'name'      => (string) ($g['name'] ?? ''),
+                'remark'    => (string) ($g['remark'] ?? ''),
                 'roles'     => array_values((array) ($g['roles'] ?? [])),
                 'permCount' => count((array) ($g['perms'] ?? [])),
                 'permMap'   => array_values((array) ($g['perms'] ?? [])),
@@ -56,8 +57,8 @@ class Group extends AdminController
         foreach ($this->bootstrap->permissions()->all() as $p) {
             $rolesRef = array_values((array) ($p['roles'] ?? []));
             $visibleFor = [];
-            foreach (RbacRoles::TYPE_NAMES as $t => $tn) {
-                $visibleFor[$t] = $v->isVisible((string) ($p['code'] ?? ''), [$tn]);
+            foreach (RbacRoles::PRESET_KEYS as $rid => $key) {
+                $visibleFor[$rid] = $v->isVisible((string) ($p['code'] ?? ''), [$key]);
             }
             $permissions[] = [
                 'code'        => (string) ($p['code'] ?? ''),
@@ -103,9 +104,14 @@ class Group extends AdminController
             return $gate;
         }
 
+        // 视图以 o.type 作为选项值/回显匹配键；权限组 roles 存预设角色英文键。
+        // 超级管理员为平台占位只读角色，不进入选取列表（选取仅 4 个）
         $roleOptions = [];
-        foreach (RbacRoles::TYPE_NAMES as $type => $name) {
-            $roleOptions[] = ['type' => $type, 'name' => $name];
+        foreach (RbacRoles::PRESET_KEYS as $rid => $key) {
+            if ($key === RbacRoles::SUPER_ADMIN) {
+                continue;
+            }
+            $roleOptions[] = ['type' => $key, 'name' => RbacRoles::PRESET_ROLES[$rid] ?? $key];
         }
 
         $permMap = [];
@@ -136,6 +142,9 @@ class Group extends AdminController
             return $this->jsonFail('权限组名称不能为空');
         }
         $roles = $this->splitList($this->request->post('roles', []));
+        // 备注：未传（null）时编辑沿用现有值，创建落空串
+        $remarkPost = $this->request->post('remark', null);
+        $remark = $remarkPost === null ? null : trim((string) $remarkPost);
 
         try {
             $groups = $this->bootstrap->permissionGroups();
@@ -145,14 +154,14 @@ class Group extends AdminController
                 }
                 // 沿用现有角色（未传 roles 时）或整体替换
                 $curRoles = $roles ?: $groups->rolesOf($id);
-                if (!$groups->update($id, $name, $groups->get($id)['perms'] ?? [], $curRoles)) {
+                if (!$groups->update($id, $name, $groups->get($id)['perms'] ?? [], $curRoles, $remark)) {
                     throw new \RuntimeException('权限组不存在');
                 }
                 $target = $id;
             } else {
-                $target = $groups->create($name, [], $roles);
+                $target = $groups->create($name, [], $roles, null, (string) $remark);
             }
-            $this->bootstrap->auditTrail()->log('group.save', $target, (string) $identity->name, ['mode' => $mode, 'name' => $name]);
+            $this->bootstrap->auditTrail()->log('group.save', $target, (string) $identity->name, ['mode' => $mode, 'name' => $name, 'remark' => (string) $remark]);
             return $this->jsonOk(['id' => $target], $mode === 'update' ? '权限组已改名' : '权限组已创建');
         } catch (\Throwable $e) {
             return $this->jsonFail($e->getMessage());
@@ -192,15 +201,14 @@ class Group extends AdminController
         // 后端校验：挂接码须对该权限组针对角色的并集可见（J7-b 语义）；未设角色视为不限角色
         try {
             $groups = $this->bootstrap->permissionGroups();
-            $roleNames = [];
-            foreach ($groups->rolesOf($id) as $rt) {
-                if (isset(RbacRoles::TYPE_NAMES[$rt])) {
-                    $roleNames[] = RbacRoles::TYPE_NAMES[$rt];
-                }
-            }
-            if ($roleNames !== []) {
+            // V2.0：权限组 roles 存预设角色英文键，直接参与可见性匹配
+            $roleKeys = array_values(array_filter(
+                array_map('strval', $groups->rolesOf($id)),
+                fn ($k) => in_array($k, RbacRoles::PRESET_KEYS, true)
+            ));
+            if ($roleKeys !== []) {
                 $vis = PermissionVisibility::fromRegistry($this->bootstrap->permissions());
-                $hidden = array_values(array_filter($codes, fn ($c) => !$vis->isVisible((string) $c, $roleNames)));
+                $hidden = array_values(array_filter($codes, fn ($c) => !$vis->isVisible((string) $c, $roleKeys)));
                 if ($hidden !== []) {
                     return $this->jsonFail('所选权限项对当前权限组角色不可见：' . implode(', ', $hidden));
                 }
@@ -225,26 +233,59 @@ class Group extends AdminController
         return array_values(array_unique(array_filter(array_map('strval', $list))));
     }
 
-    /** JSON：全量用户列表 + 指定权限组已选用户 id（选人表格数据源）。 */
+    /** JSON：分页用户列表 + 指定权限组已选用户 id（选人表格数据源）。 */
     public function users()
     {
         $gate = $this->gateForJson();
         if (!$gate instanceof Identity) {
             return $gate;
         }
-        $groupId = (string) $this->request->get('group_id', '');
+        // data-grid 会把 apiParam 以 param[...] 嵌套传参，这里兼容嵌套与平铺两种写法
+        $param   = $this->request->get('param', []);
+        $param   = is_array($param) ? $param : [];
+        $groupId = (string) ($param['group_id'] ?? $this->request->get('group_id', ''));
+        $keyword = trim((string) ($param['keyword'] ?? $this->request->get('keyword', '')));
+        $onlySel = $param['only_selected'] ?? $this->request->get('only_selected', '');
+        $onlySelected = in_array($onlySel, [true, 1, '1', 'true', 'on'], true);
         $selected = $groupId === '' ? [] : $this->bootstrap->permissionGroups()->userIdsOf($groupId);
 
+        $kw = $keyword;
         $list = [];
         foreach ($this->bootstrap->rbacUsers()->all() as $u) {
+            $uid     = (string) ($u['id'] ?? '');
+            $checked = in_array($uid, $selected, true);
+            if ($onlySelected && !$checked) {
+                continue;
+            }
+            $name  = (string) ($u['name'] ?? '');
+            $refId = (string) ($u['ref_id'] ?? '');
+            if ($kw !== '' && mb_stripos($name, $kw) === false && mb_stripos($refId, $kw) === false) {
+                continue;
+            }
             $list[] = [
-                'id'     => (string) ($u['id'] ?? ''),
-                'name'   => (string) ($u['name'] ?? ''),
-                'refId'  => (string) ($u['ref_id'] ?? ''),
-                'checked'=> in_array((string) ($u['id'] ?? ''), $selected, true),
+                'id'     => $uid,
+                'name'   => $name,
+                'refId'  => $refId,
+                'checked'=> $checked,
             ];
         }
-        return $this->jsonOk(['list' => $list, 'total' => count($list), 'selected' => $selected]);
+
+        $total    = count($list);
+        $page     = max(1, (int) $this->request->get('currentPage', 1));
+        $pageSize = (int) $this->request->get('pageSize', 20);
+        $pageSize = $pageSize > 0 ? min($pageSize, 500) : 20;
+        // 筛选后页码可能超界（如停在高页码时输入搜索词），回退到最后一页
+        $lastPage = max(1, (int) ceil($total / $pageSize));
+        $page     = min($page, $lastPage);
+        $list     = array_slice($list, ($page - 1) * $pageSize, $pageSize);
+
+        return $this->jsonOk([
+            'list'        => $list,
+            'total'       => $total,
+            'selected'    => $selected,
+            'currentPage' => $page,
+            'pageSize'    => $pageSize,
+        ]);
     }
 
     /** 整体替换权限组下的用户集（组→用户反向挂接），记审计 group.users。 */
@@ -258,7 +299,8 @@ class Group extends AdminController
 
         $id     = (string) $this->request->post('id', '');
         $ids    = $this->request->post('users', []);
-        $ids    = is_array($ids) ? array_values(array_map('strval', $ids)) : [];
+        // 兼容逗号分隔字符串与数组两种传参，避免静默保存 0 名
+        $ids    = $this->splitList($ids);
 
         if ($id === '') {
             return $this->jsonFail('缺少权限组 id');

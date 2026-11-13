@@ -15,6 +15,7 @@ use think\facade\Route;
 Route::get('attachment/download', '\app\index\controller\Attach@download');
 
 Route::get('inbox/unreadCount', '\app\index\controller\Notice@unreadCount');
+Route::get('inbox/approvalPendingCount', '\app\index\controller\Notice@approvalPendingCount');
 Route::get('inbox/list', '\app\index\controller\Notice@list');
 Route::post('inbox/read', '\app\index\controller\Notice@read');
 Route::post('inbox/readAll', '\app\index\controller\Notice@readAll');

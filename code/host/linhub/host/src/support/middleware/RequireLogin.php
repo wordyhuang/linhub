@@ -2,19 +2,23 @@
 
 declare(strict_types=1);
 
-namespace app\admin\middleware;
+namespace linhub\host\support\middleware;
 
 use linhub\host\support\HostBootstrap;
 use Closure;
 
 /**
- * admin 应用登录校验（中后台统一守卫）
+ * 平台统一登录守卫（中后台唯一门禁实现）。
  *
- * 约定：admin 应用下所有内容均需登录；仅 Auth 控制器的 login/doLogin 放行
- * （登录页与登录提交本身）。未登录：普通页面请求 → 302 重定向 /admin/auth/login；
- * 异步请求（isAjax 或 Accept: application/json，兼容 axios 1.x 不带 X-Requested-With）
- * → 返回标准 JSON {code:-401,data:null,message}，由前端弹窗提示。
- * 免登录的公开功能请自建独立应用承载，不要放进 admin。
+ * 适用面：
+ *  - admin 应用：应用级中间件全量挂载（原 app\admin\middleware\RequireLogin 已收敛到本类）；
+ *  - 功能包路由：PackageRouteLoader 对 access=admin 的包统一挂载，功能包不再自建门禁。
+ *
+ * 放行白名单：登录页与登录提交本身（auth/login、auth/dologin）。
+ * 未登录：普通页面请求 → 302 /admin/auth/login?redirect=原路径；异步请求（isAjax 或
+ * Accept: application/json，兼容 axios 1.x 不带 X-Requested-With）→ 标准 JSON
+ * {code:-401,data:null,message}，由前端 auth-guard.js 弹登录确认框。
+ * 业务码取 -401：workdesktop-ai 约定 code >= successCode(默认0) 为成功，正 401 会被误判成功。
  */
 class RequireLogin
 {
@@ -38,12 +42,10 @@ class RequireLogin
         $bootstrap = new HostBootstrap();
         $identity  = $bootstrap->currentUser(HostBootstrap::authService());
         if ($identity === null) {
-            // 异步请求不重定向，返回标准 JSON 对象（HTTP 200 + body.code）。
-            // isAjax 仅认 X-Requested-With，而 axios 1.x 默认不带该头，
-            // 但其 Accept 以 application/json 开头，故用 isJson 兜底识别。
-            // 业务码取 -401：workdesktop-ai 约定 code >= successCode(默认0) 为成功，
-            // 正 401 会被误判成功，必须用负数才会走 fail 分支，由 WD.request 弹 message 提示。
-            if ($request->isAjax() || $request->isJson()) {
+            // 页面导航的 Accept 含 text/html；API 请求（axios/XHR/fetch 默认 */* 或 application/json）
+            // 一律回 JSON -401，避免前端因 302 拿到登录页 HTML 而解析失败、弹不出登录确认框。
+            $accept = strtolower((string) $request->header('accept', ''));
+            if ($request->isJson() || $request->isAjax() || !str_contains($accept, 'text/html')) {
                 return json([
                     'code'    => -401,
                     'data'    => null,

@@ -19,5 +19,10 @@ class AppService extends Service
     {
         // 装配已启用功能包的路由与命名空间自动加载（A-router）。
         (new \linhub\host\integration\PackageRouteLoader($this->app))->boot();
+
+        // Lite 档请求尾触发：只登记回调，配置与 DB 连接推迟到请求结束后。
+        \linhub\host\services\scheduler\SchedulerTriggerSource::attachLazy(
+            static fn () => new \linhub\host\services\scheduler\SchedulerService()
+        );
     }
 }

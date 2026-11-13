@@ -7,7 +7,12 @@
             "menu.superadmin.systeminfo",
             "menu.superadmin.site",
             "menu.superadmin.review",
-            "menu.superadmin.ps"
+            "menu.superadmin.ps",
+            "lin-crm.customer",
+            "lin-crm.lead",
+            "lin-crm.customer.list",
+            "lin-crm.lead.pool",
+            "lin-crm.opportunity"
         ]
     }
 }

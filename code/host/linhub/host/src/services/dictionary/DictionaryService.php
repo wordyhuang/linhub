@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace linhub\host\services\dictionary;
 
+use linhub\host\rbac\AuditLog;
 use linhub\host\services\support\PlatformStore;
 
 /**
@@ -12,6 +13,10 @@ use linhub\host\services\support\PlatformStore;
  * 存储于 lg_mgt_dict_item：namespace 为归属功能包短名，dict_key 为业务 key；
  * value 标量按 string/int/float/bool 记录类型，数组/对象以 JSON 字符串 + json 类型持久化。
  * 无参构造（自读 env 建 PlatformStore），满足 ServiceInjector 的 app->make()。
+ *
+ * 审计留痕：put（新增/修改）与 remove（删除）自动写平台统一操作日志
+ * （data/log/audit.json，管理端「审计日志-操作日志」Tab 可检索），记录动作、
+ * 命名空间、key、变更前后值摘要与调用方来源；日志写失败不阻断主操作。
  */
 final class DictionaryService implements Dictionary
 {
@@ -21,6 +26,8 @@ final class DictionaryService implements Dictionary
     }
 
     private PlatformStore $store;
+
+    private ?AuditLog $audit = null;
 
     public function put(string $package, string $key, mixed $value, array $meta = []): array
     {
@@ -60,6 +67,7 @@ final class DictionaryService implements Dictionary
             );
         }
 
+        $this->logChange($existing === null ? 'create' : 'update', $namespace, $key, $type, $stored, $existing, $remark);
         return $this->decorate($this->rawEntry($namespace, $key));
     }
 
@@ -81,6 +89,7 @@ final class DictionaryService implements Dictionary
             throw new DictionaryDenied('只有托管功能包可删除该字典数据');
         }
         $this->store->db()->exec('DELETE FROM ' . PlatformStore::DICT_TABLE . ' WHERE id=' . (int) $existing['id']);
+        $this->logChange('delete', $namespace, $key, (string) $existing['value_type'], (string) $existing['value'], $existing, (string) ($existing['remark'] ?? ''));
         return true;
     }
 
@@ -212,6 +221,68 @@ final class DictionaryService implements Dictionary
             throw new \InvalidArgumentException('功能包命名空间不能为空');
         }
         return $ns;
+    }
+
+    /* ── 审计留痕（数据字典变更 → 平台统一操作日志 audit.json） ── */
+
+    /** 惰性获取平台操作日志实例（与 HostBootstrap::auditLog() 同一文件，管理端审计页直读）。 */
+    private function auditLog(): AuditLog
+    {
+        return $this->audit ??= new AuditLog(
+            str_replace('\\', '/', dirname(__DIR__, 5)) . '/data/log/audit.json'
+        );
+    }
+
+    /** 调用方功能包短名（调试回溯定位 plugins/<short>，与 RecycleBinService 同法）。 */
+    private function callerFromTrace(): string
+    {
+        $root = rtrim(str_replace('\\', '/', dirname(__DIR__, 6) . '/plugins'), '/') . '/';
+        foreach (debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS) as $frame) {
+            $file = str_replace('\\', '/', (string) ($frame['file'] ?? ''));
+            if ($file === '' || strpos($file, $root) !== 0) {
+                continue;
+            }
+            $short = explode('/', substr($file, strlen($root)), 2)[0];
+            if ($short !== '' && preg_match('/^[A-Za-z0-9_.\-]+$/', $short)) {
+                return $short;
+            }
+        }
+        return '';
+    }
+
+    /**
+     * 写入一条变更日志。动作映射：create 新增 / update 修改 / delete 删除；
+     * 记录变更前后值摘要（超 300 字符截断）。日志写失败静默忽略，不阻断主操作。
+     */
+    private function logChange(string $action, string $namespace, string $key, string $type, string $value, ?array $old, string $remark): void
+    {
+        try {
+            $actionText = ['create' => '新增', 'update' => '修改', 'delete' => '删除'][$action] ?? $action;
+            $caller = $this->callerFromTrace();
+            $context = [
+                'action'    => $action,
+                'namespace' => $namespace,
+                'dict_key'  => $key,
+                'value'     => ['value_type' => $type, 'value' => self::summary($value)],
+                'remark'    => $remark,
+            ];
+            if ($old !== null && $action !== 'create') {
+                $context['old'] = ['value_type' => (string) $old['value_type'], 'value' => self::summary((string) $old['value'])];
+            }
+            $this->auditLog()->info(
+                '数据字典' . $actionText . ' [' . $namespace . '] ' . $key,
+                $context,
+                $caller !== '' ? $caller : 'host',
+                $caller !== '' ? 'pkg:' . $caller : 'host'
+            );
+        } catch (\Throwable) {
+        }
+    }
+
+    /** 值摘要：超 300 字符截断（避免日志文件被大 JSON 撑爆）。 */
+    private static function summary(string $raw): string
+    {
+        return mb_strlen($raw) > 300 ? mb_substr($raw, 0, 300) . '…(截断)' : $raw;
     }
 
     private function assertKey(string $key): void

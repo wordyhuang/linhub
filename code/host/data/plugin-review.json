@@ -84,10 +84,10 @@
         "title": "林销 · 进销存",
         "version": "1.1.0",
         "dir": "lgg-pkg-lin-trade",
-        "fingerprint": "c612ec854742b65101c47355dfde37183eb25ccf52cd22a04e859f8c6c487329",
+        "fingerprint": "20e070063b41f1d8a02f97ffbd3b0a1b23e6b34610f4d289ed55470b5c472912",
         "status": "approved",
         "reviewer": "黄",
-        "reviewed_at": "2026-10-27T21:12:37+08:00",
+        "reviewed_at": "2026-11-03T13:26:28+08:00",
         "comment": "",
         "history": [
             {
@@ -107,18 +107,24 @@
                 "reviewer": "黄",
                 "reviewed_at": "2026-10-27T21:12:37+08:00",
                 "comment": ""
+            },
+            {
+                "status": "approved",
+                "reviewer": "黄",
+                "reviewed_at": "2026-11-03T13:26:28+08:00",
+                "comment": ""
             }
         ]
     },
     "lin-crm@1.0.0": {
         "short": "lin-crm",
-        "title": "林客 CRM",
+        "title": "林客 · 销售团队 CRM",
         "version": "1.0.0",
         "dir": "lgg-pkg-lin-crm",
-        "fingerprint": "4e7d4a5a37d4a23ecd82e35bdf741c8283ff3ca8889dba0fbc0e94f1fd338e0b",
+        "fingerprint": "723d27a524fc2b2de8162915d2269f2cd7893ecb79fd4f5f015b9c537c469945",
         "status": "approved",
         "reviewer": "黄",
-        "reviewed_at": "2026-10-27T23:56:02+08:00",
+        "reviewed_at": "2026-11-05T23:59:22+08:00",
         "comment": "",
         "history": [
             {
@@ -137,6 +143,24 @@
                 "status": "approved",
                 "reviewer": "黄",
                 "reviewed_at": "2026-10-27T23:56:02+08:00",
+                "comment": ""
+            },
+            {
+                "status": "approved",
+                "reviewer": "黄",
+                "reviewed_at": "2026-10-29T18:01:55+08:00",
+                "comment": ""
+            },
+            {
+                "status": "approved",
+                "reviewer": "黄",
+                "reviewed_at": "2026-11-05T19:33:29+08:00",
+                "comment": ""
+            },
+            {
+                "status": "approved",
+                "reviewer": "黄",
+                "reviewed_at": "2026-11-05T23:59:22+08:00",
                 "comment": ""
             }
         ]
@@ -186,6 +210,25 @@
                 "status": "approved",
                 "reviewer": "黄",
                 "reviewed_at": "2026-10-27T21:12:37+08:00",
+                "comment": ""
+            }
+        ]
+    },
+    "lin-sales@1.0.0": {
+        "short": "lin-sales",
+        "title": "林销 · 进销存",
+        "version": "1.0.0",
+        "dir": "lgg-pkg-lin-sales",
+        "fingerprint": "6b9e22a1b501294c593b39ece58afb096ef0b381c97400dc0be2b4c60ca169dd",
+        "status": "approved",
+        "reviewer": "黄",
+        "reviewed_at": "2026-11-07T07:56:17+08:00",
+        "comment": "",
+        "history": [
+            {
+                "status": "approved",
+                "reviewer": "黄",
+                "reviewed_at": "2026-11-07T07:56:17+08:00",
                 "comment": ""
             }
         ]

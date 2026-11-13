@@ -8,6 +8,7 @@
   <link rel="icon" type="image/svg+xml" href="/brand/favicon.svg">
   <link rel="stylesheet" href="/static/vendor/element-plus/index.css">
   <link rel="stylesheet" href="/static/vendor/workdesktop-ai/style.css">
+  <link rel="stylesheet" href="/static/linhub/cards.css">
   <style>
     html, body, #app { height: 100%; margin: 0; }
     body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif; }
@@ -25,7 +26,7 @@
 
   <script type="text/x-template" id="mr-tpl">
     <div class="mr-page">
-      <wd-panel :border="true">
+      <wd-panel description-align="right" :border="true">
         <wd-tips type="box" style="margin-bottom:12px">
           站内消息服务（IM-14）投递记录：只读查看平台与各功能包发出的消息主体，及发送时解析固化的收件人快照与已读状态，用于投递排障。消息不支持在此删除或撤回。
         </wd-tips>
@@ -85,6 +86,45 @@
             </template>
           </el-table-column>
           <template #empty><el-empty description="暂无消息记录" :image-size="80" /></template>
+          <!-- ── 卡片清单模式（DataGrid 内建 modeSwitch 视图；统一 lh-card 结构） ── -->
+          <template #card-item="{ row }">
+            <div class="lh-card">
+              <div class="lh-card__head">
+                <div class="lh-card__title">{{ row.title || '—' }}</div>
+                <div class="lh-card__tags">
+                  <el-tag size="small" effect="plain">{{ targetLabel(row.target_type) }}</el-tag>
+                </div>
+                <div class="lh-card__extra">
+                  <div class="lh-card__stamp">{{ row.created_at }}</div>
+                </div>
+              </div>
+              <div class="lh-card__fields">
+                <div class="lh-card__field">
+                  <div class="k">msg_key</div>
+                  <div class="v"><span class="mr-mono">{{ row.msg_key || '—' }}</span></div>
+                </div>
+                <div class="lh-card__field">
+                  <div class="k">来源包</div>
+                  <div class="v"><span class="mr-mono">{{ row.source_pkg || '—' }}</span></div>
+                </div>
+                <div class="lh-card__field">
+                  <div class="k">发送人</div>
+                  <div class="v">{{ row.sender_name || row.sender_id || '系统' }}</div>
+                </div>
+                <div class="lh-card__field">
+                  <div class="k">投递 / 已读</div>
+                  <div class="v">{{ row.recipient_count }} / {{ row.read_count }}</div>
+                </div>
+                <div v-if="targetRefText(row.target_ref)" class="lh-card__field is-wide">
+                  <div class="k">目标</div>
+                  <div class="v"><span class="mr-mono">{{ targetRefText(row.target_ref) }}</span></div>
+                </div>
+              </div>
+              <div class="lh-card__ops">
+                <el-button size="small" text type="primary" @click="openDetail(row)">收件人</el-button>
+              </div>
+            </div>
+          </template>
         </wd-data-grid>
 
         <div class="mr-pager">
@@ -151,6 +191,7 @@
   <script src="/static/vendor/element-plus/index.full.min.js"></script>
   <script src="/static/vendor/icons/index.iife.min.js"></script>
   <script src="/static/vendor/workdesktop-ai/index.umd.js"></script>
+  <script src="/static/linhub/auth-guard.js?v=2"></script>
   <script>
     const WD = window.WorkDesktop;
     const ElementPlus = window.ElementPlus;

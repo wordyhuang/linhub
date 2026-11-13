@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace linhub\host\services\translation;
 
 use linhub\host\migration\DbGateway;
+use linhub\host\services\logging\LoggingService;
 use linhub\host\services\support\PlatformStore;
 
 /**
@@ -77,6 +78,7 @@ final class TranslationSeeder
             }
         }
 
+        $this->journal('import', ['package' => $short, 'count' => $count]);
         TranslatorService::flushCache();
         return $count;
     }
@@ -124,6 +126,7 @@ final class TranslationSeeder
             throw new \RuntimeException('翻译种子覆盖失败：' . $e->getMessage(), 0, $e);
         }
 
+        $this->journal('overwrite', ['package' => $short, 'count' => $count]);
         TranslatorService::flushCache();
         return $count;
     }
@@ -145,8 +148,10 @@ final class TranslationSeeder
             'DELETE FROM ' . PlatformStore::TRANSLATION_TABLE
             . ' WHERE namespace=' . $this->store->quote($short)
         );
+        $deleted = (int) ($rows[0]['c'] ?? 0);
+        $this->journal('purge', ['package' => $short, 'count' => $deleted]);
         TranslatorService::flushCache();
-        return (int) ($rows[0]['c'] ?? 0);
+        return $deleted;
     }
 
     /**
@@ -236,6 +241,16 @@ final class TranslationSeeder
     }
 
     // —— 内部实现 ——
+
+    /** 日志记录：落 runtime host.log，失败不阻断业务。 */
+    private function journal(string $action, array $context = [], string $level = 'info'): void
+    {
+        try {
+            (new LoggingService())->{$level}('[translation] ' . $action, $context);
+        } catch (\Throwable) {
+            // 日志失败不影响业务
+        }
+    }
 
     /** @return array<string, int> "lang\x1fkey" => id */
     private function existingIds(string $short): array

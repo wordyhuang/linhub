@@ -25,7 +25,7 @@
 
   <script type="text/x-template" id="an-tpl">
     <div class="an-page" v-loading="loadingOpts" element-loading-text="加载接收对象...">
-      <wd-panel :border="true">
+      <wd-panel description-align="right" :border="true">
         <wd-tips type="box" style="margin-bottom:12px">
           站内消息服务（IM-15）系统公告群发：向指定用户、角色或用户组发送公告，三类目标可混合。服务端在发送时解析角色/组成员并固化去重为收件人快照，实际接收人数以服务端解析结果为准。
         </wd-tips>
@@ -124,6 +124,7 @@
   <script src="/static/vendor/element-plus/index.full.min.js"></script>
   <script src="/static/vendor/icons/index.iife.min.js"></script>
   <script src="/static/vendor/workdesktop-ai/index.umd.js"></script>
+  <script src="/static/linhub/auth-guard.js?v=2"></script>
   <script>
     const WD = window.WorkDesktop;
     const ElementPlus = window.ElementPlus;

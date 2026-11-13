@@ -26,7 +26,7 @@
 
   <script type="text/x-template" id="ap-detail-tpl">
     <div class="ap-page" v-loading="loading">
-      <wd-panel :border="true">
+      <wd-panel description-align="right" :border="true">
         <template #title>
           <div style="display:flex;align-items:center;gap:8px">
             <span>审批单详情</span>
@@ -138,6 +138,7 @@
   <script src="/static/vendor/element-plus/index.full.min.js"></script>
   <script src="/static/vendor/icons/index.iife.min.js"></script>
   <script src="/static/vendor/workdesktop-ai/index.umd.js"></script>
+  <script src="/static/linhub/auth-guard.js?v=2"></script>
   <script>
     const WD = window.WorkDesktop;
     const ElementPlus = window.ElementPlus;

@@ -23,7 +23,7 @@
 
   <script type="text/x-template" id="st-tpl">
     <div class="st-page" v-loading="loading" element-loading-text="加载中...">
-      <wd-panel :border="true">
+      <wd-panel description-align="right" :border="true">
         <wd-tips type="box" style="margin-bottom:12px">
           附件托管服务（AT-11）存储驱动与限制的只读运行态视图。存储密钥（七牛 AK/SK）与路径等配置统一由服务器 .env（ATTACH_*）管理，本页不回显任何密钥原文，仅展示是否已配置。
         </wd-tips>
@@ -111,6 +111,7 @@
   <script src="/static/vendor/element-plus/index.full.min.js"></script>
   <script src="/static/vendor/icons/index.iife.min.js"></script>
   <script src="/static/vendor/workdesktop-ai/index.umd.js"></script>
+  <script src="/static/linhub/auth-guard.js?v=2"></script>
   <script>
     const WD = window.WorkDesktop;
     const ElementPlus = window.ElementPlus;

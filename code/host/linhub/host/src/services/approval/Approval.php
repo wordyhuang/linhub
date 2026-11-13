@@ -17,7 +17,7 @@ use linhub\capability\auth\Identity;
  * 流程定义 DSL（flow 结构，defineFlow 入参）：
  *  - flow_key / name / entry(首节点 id，必须存在) / nodes[]
  *  - 节点 type：approval（审批节点）/ exclusive（排他网关）/ parallel（并行网关）
- *  - approval 节点：approvers{users[],roles[],resolver} 至少一来源（混合时解析合并去重）、
+ *  - approval 节点：approvers{users[],roles[],groups[],resolver} 至少一来源（混合时解析合并去重）、
  *    mode any(或签)/all(会签)、next(下一节点 id，null = 流程终点)
  *  - exclusive 节点：branches[]，每支 {condition, next}；有且仅有一个 condition=null 默认分支；
  *    运行时按声明顺序取首个命中分支，无命中走默认
@@ -28,8 +28,9 @@ use linhub\capability\auth\Identity;
  *
  * 快照语义（双快照）：
  *  - payload 快照：submit 时内容快照落库，后续不受包侧源数据变动影响；
- *  - 审批人快照：节点激活时将 users 直接取用、roles 经 RBAC 解析、resolver 调用
- *    注册的解析器类，合并去重落库；快照后角色变动不影响在途节点。
+ *  - 审批人快照：节点激活时将 users 直接取用、roles 经 RBAC 解析、groups 展开为
+ *    权限组成员用户、resolver 调用注册的解析器类，合并去重落库；快照后角色/权限组成员
+ *    变动不影响在途节点。
  *
  * 状态机：
  *  - 单据 pending → approved/rejected/cancelled（终态）；包卸载 → pending + orphaned=1 冻结；
@@ -57,9 +58,20 @@ interface Approval
      * 注册/更新流程模板（覆盖式更新，version 自增）；校验失败抛 ApprovalFlowInvalid。
      *
      * $flow 结构见类注释 DSL 说明；flow_key 包内唯一。
-     * 返回流程定义记录（含 package/flow_key/version/definition 等）。
+     * $source：'package' 系统定义（功能包代码注册，默认）/ 'admin' 后台超管自定义；
+     * 系统定义模板不可被后台来源（admin）覆盖，违例抛 ApprovalState。
+     * 返回流程定义记录（含 package/flow_key/version/source/definition 等）。
      */
-    public function defineFlow(?string $package, array $flow): array;
+    public function defineFlow(?string $package, array $flow, string $source = 'package'): array;
+
+    /**
+     * 流程模板列表（只读）：返回当前调用包 scope 下的全部流程模板——
+     * 既含包代码注册的（source='package'，功能包自有审批流程），也含后台超管
+     * 自定义的（source='admin'，系统审批流程）。返回元素含 package/flow_key/name/
+     * definition（已解码数组）/version/status/source/created_at/updated_at。
+     * 仅 host 调用方可传 $package=null 跨包全量；功能包固定返回本包（包隔离）。
+     */
+    public function flows(?string $package = null): array;
 
     /**
      * 提交审批单：payload 快照落库，首节点激活。
@@ -125,4 +137,19 @@ interface Approval
 
     /** 平台用量统计（PS 看板口径）：总数/在办/按状态/按包聚合。 */
     public function stats(): array;
+
+    /**
+     * 更新审批服务设置（服务全局，与平台「审批服务-服务设置」页同源同白名单）：
+     * 白名单合并语义——仅更新传入键，未传键保持不变；非白名单键被忽略。
+     * 白名单与默认值见 ApprovalSettings::DEFAULTS：
+     *  - workbench_enabled        bool 是否启用审批工作台页面入口（默认 true）
+     *  - workbench_api_enabled    bool 是否启用我的待办/已办数据接口（默认 true）
+     *  - workbench_stats_enabled  bool 角色首页是否显示个人审批统计卡（默认 false）
+     *  - notify_enabled           bool 是否开启审批通知（工作台右上角审批通知入口，默认 true）
+     * 返回更新后的全量设置（键 => bool），调用方可直接读回当前生效值。
+     *
+     * @param array<string, mixed> $input 待更新键值（仅白名单键生效）
+     * @throws \Throwable 字典持久化异常向上抛（由调用方决定降级/提示）
+     */
+    public function updateSettings(array $input): array;
 }

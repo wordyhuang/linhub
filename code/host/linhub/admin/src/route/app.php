@@ -63,13 +63,11 @@ Route::get('permission/index', 'permission/index');
 Route::get('permission/rows', 'permission/rows');
 Route::get('permission/options', 'permission/options');
 
-// —— 角色管理（G1） ——
+// —— 角色管理（G1，V2.0 仅预设角色，角色不可增删改） ——
 Route::get('role/index', 'role/index');
 Route::get('role/rows', 'role/rows');
-Route::get('role/members', 'role/members');
-Route::get('role/options', 'role/options');
-Route::post('role/save', 'role/save');
-Route::post('role/delete', 'role/delete');
+Route::get('role/users', 'role/users');
+Route::post('role/usersSave', 'role/usersSave');
 
 // —— 权限组管理（G2） ——
 Route::get('group/index', 'group/index');
@@ -161,22 +159,62 @@ Route::post('recyclebin_admin/purge', 'recyclebin_admin/purge');
 Route::post('recyclebin_admin/purgeBatch', 'recyclebin_admin/purgeBatch');
 Route::post('recyclebin_admin/cleanExpired', 'recyclebin_admin/cleanExpired');
 
-// —— 平台公共服务：AP 审批中心（我的待办 / 我的已办 / 全部单据 / 详情 / 审批动作） ——
+// —— 平台公共服务：SC 异步任务托管（概览 / 周期定义 / 执行实例 / 设置 / 自检 / 部署命令） ——
+Route::get('scheduler_admin/index', 'scheduler_admin/index');
+Route::get('scheduler_admin/overview', 'scheduler_admin/overview');
+Route::get('scheduler_admin/defs', 'scheduler_admin/defs');
+Route::get('scheduler_admin/runs', 'scheduler_admin/runs');
+Route::get('scheduler_admin/settings', 'scheduler_admin/settings');
+Route::get('scheduler_admin/probe', 'scheduler_admin/probe');
+Route::get('scheduler_admin/installCommands', 'scheduler_admin/installCommands');
+Route::post('scheduler_admin/pauseDef', 'scheduler_admin/pauseDef');
+Route::post('scheduler_admin/resumeDef', 'scheduler_admin/resumeDef');
+Route::post('scheduler_admin/deleteDef', 'scheduler_admin/deleteDef');
+Route::post('scheduler_admin/triggerNow', 'scheduler_admin/triggerNow');
+Route::post('scheduler_admin/cancelRun', 'scheduler_admin/cancelRun');
+Route::post('scheduler_admin/settingsSave', 'scheduler_admin/settingsSave');
+Route::post('scheduler_admin/settingsReset', 'scheduler_admin/settingsReset');
+Route::post('scheduler_admin/tickNow', 'scheduler_admin/tickNow');
+
+// —— 平台公共服务：AP 审批中心（审批工作台 / 全部单据 / 详情 / 审批动作 / 流程设计） ——
 Route::get('approval_admin/index', 'approval_admin/index');
-Route::get('approval_admin/todo', 'approval_admin/todo');
-Route::get('approval_admin/done', 'approval_admin/done');
+Route::get('approval_admin/workbench', 'approval_admin/workbench');
 Route::get('approval_admin/detail', 'approval_admin/detail');
+Route::get('approval_admin/flowIndex', 'approval_admin/flowIndex');
+Route::get('approval_admin/flowEditor', 'approval_admin/flowEditor');
 Route::get('approval_admin/rows', 'approval_admin/rows');
+Route::get('approval_admin/stats', 'approval_admin/stats');
 Route::get('approval_admin/pendingRows', 'approval_admin/pendingRows');
 Route::get('approval_admin/handledRows', 'approval_admin/handledRows');
 Route::get('approval_admin/detailData', 'approval_admin/detailData');
+Route::get('approval_admin/flowList', 'approval_admin/flowList');
+Route::get('approval_admin/flowMeta', 'approval_admin/flowMeta');
+Route::post('approval_admin/flowSave', 'approval_admin/flowSave');
 Route::post('approval_admin/approve', 'approval_admin/approve');
 Route::post('approval_admin/reject', 'approval_admin/reject');
 Route::post('approval_admin/cancel', 'approval_admin/cancel');
+Route::get('approval_admin/settings', 'approval_admin/settings');
+Route::get('approval_admin/settingsData', 'approval_admin/settingsData');
+Route::post('approval_admin/settingsSave', 'approval_admin/settingsSave');
 
 // —— 平台公共服务：LS-6 登录态查看（只读） ——
 Route::get('login_state_admin/index', 'login_state_admin/index');
 Route::get('login_state_admin/snapshot', 'login_state_admin/snapshot');
+
+// —— 平台公共服务：PT 单据打印模板（模板管理 / 试打 / 编辑预览 / 统一打印票据入口） ——
+Route::get('printtpl_admin/index', 'printtpl_admin/index');
+Route::get('printtpl_admin/editor', 'printtpl_admin/editor');
+Route::get('printtpl_admin/rows', 'printtpl_admin/rows');
+Route::get('printtpl_admin/detail', 'printtpl_admin/detail');
+Route::get('printtpl_admin/versions', 'printtpl_admin/versions');
+Route::get('printtpl_admin/print', 'printtpl_admin/print');
+Route::get('printtpl_admin/printTicket', 'printtpl_admin/printTicket');
+Route::post('printtpl_admin/save', 'printtpl_admin/save');
+Route::post('printtpl_admin/toggle', 'printtpl_admin/toggle');
+Route::post('printtpl_admin/delete', 'printtpl_admin/delete');
+Route::post('printtpl_admin/copy', 'printtpl_admin/copy');
+Route::post('printtpl_admin/rollback', 'printtpl_admin/rollback');
+Route::post('printtpl_admin/preview', 'printtpl_admin/preview');
 
 // —— 全局设置（站点名称 / 网络备案号 / logo，仅超管） ——
 Route::get('site_admin/index', 'site_admin/index');

@@ -9,6 +9,7 @@ Route::get('attachment/download', 'attach/download');
 
 // -- 外框架通知中心（IM-7~IM-13）：接口内部校验登录态 --
 Route::get('inbox/unreadCount', 'notice/unreadCount');
+Route::get('inbox/approvalPendingCount', 'notice/approvalPendingCount');
 Route::get('inbox/list', 'notice/list');
 Route::post('inbox/read', 'notice/read');
 Route::post('inbox/readAll', 'notice/readAll');

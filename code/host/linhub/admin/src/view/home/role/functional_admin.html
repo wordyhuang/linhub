@@ -23,19 +23,47 @@
 
     .home {
       padding: 24px;
-      max-width: 1080px;
+      max-width: 1320px;
       margin: 0 auto;
     }
 
+    /* —— 顶部欢迎区 —— */
     .hero {
+      position: relative;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+      /* hero 背景随皮肤主题变化：主色取 --wd-color-primary（切肤时由 workdesktop-ai 注入主题样式），深/浅两端用 color-mix 派生 */
+      background: linear-gradient(135deg,
+        color-mix(in srgb, var(--wd-color-primary, #0066CC) 60%, #000) 0%,
+        var(--wd-color-primary, #0066CC) 60%,
+        color-mix(in srgb, var(--wd-color-primary, #0066CC) 70%, #fff) 100%);
+      color: #fff;
+      border-radius: 16px;
+      padding: 26px 28px;
+      margin-bottom: 20px;
+      box-shadow: 0 10px 24px color-mix(in srgb, var(--wd-color-primary, #0066CC) 18%, transparent);
+    }
+
+    .hero::after {
+      content: '';
+      position: absolute;
+      right: -40px;
+      top: -70px;
+      width: 220px;
+      height: 220px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, .08);
+      pointer-events: none;
+    }
+
+    .hero-main {
       display: flex;
       align-items: center;
       gap: 16px;
-      background: linear-gradient(135deg, #0A3D6B 0%, #0066CC 100%);
-      color: #fff;
-      border-radius: 12px;
-      padding: 28px;
-      margin-bottom: 20px;
+      min-width: 0;
     }
 
     .hero img {
@@ -44,32 +72,82 @@
       flex: none;
     }
 
-    .hero h1 {
+    .hero-text h1 {
       margin: 0 0 6px;
       font-size: 22px;
       font-weight: 700;
     }
 
-    .hero p {
+    .hero-text p {
       margin: 0;
       font-size: 14px;
+      line-height: 1.6;
       opacity: .9;
+      max-width: 640px;
+    }
+
+    .hero-side {
+      position: relative;
+      z-index: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 10px;
+      flex: none;
     }
 
     .role-tag {
-      margin-left: auto;
-      flex: none;
       font-size: 13px;
       font-weight: 600;
       background: rgba(255, 255, 255, .18);
       padding: 6px 14px;
       border-radius: 999px;
+      white-space: nowrap;
+    }
+
+    .hero-clock {
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .hero-date {
+      font-size: 12px;
+      opacity: .85;
+    }
+
+    .hero-time {
+      font-size: 26px;
+      font-weight: 600;
+      letter-spacing: .5px;
+      line-height: 1.2;
+    }
+
+    /* —— 主体两栏布局 —— */
+    .layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 320px;
+      gap: 20px;
+      align-items: start;
+    }
+
+    .col-main {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+    }
+
+    .col-side {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      min-width: 0;
     }
 
     .section-head {
       display: flex;
       align-items: center;
       justify-content: space-between;
+      gap: 12px;
       margin: 4px 0 12px;
     }
 
@@ -78,41 +156,144 @@
       font-weight: 600;
     }
 
-    .user-info {
+    .section-actions {
       display: flex;
       align-items: center;
-      gap: 14px;
-      background: #fff;
-      border: 1px solid #e5e7eb;
-      border-radius: 12px;
-      padding: 14px 18px;
-      margin-bottom: 20px;
+      gap: 10px;
     }
 
-    .user-info .uavatar {
+    .section-count {
+      font-size: 12px;
+      color: var(--wd-text-color-secondary, #6b7280);
+    }
+
+    /* 右侧信息面板：容器统一用 wd-panel mode="card"，不再自绘 div 卡片 */
+
+    /* 我的账号 */
+    .account-top {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+
+    .uavatar {
       background: rgba(0, 102, 204, .1);
       color: #0066CC;
       flex: none;
     }
 
-    .user-info .uname {
+    .acc-name {
       font-size: 15px;
       font-weight: 600;
       margin-bottom: 2px;
+      word-break: break-all;
     }
 
-    .user-info .umeta {
-      font-size: 13px;
+    .acc-role {
+      font-size: 12px;
       color: var(--wd-text-color-secondary, #6b7280);
-      display: flex;
-      align-items: center;
     }
 
-    .user-info .uactions {
-      margin-left: auto;
+    .meta-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      border-top: 1px dashed #eef1f5;
+      padding-top: 12px;
+      margin-bottom: 14px;
+    }
+
+    .meta-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      font-size: 13px;
+    }
+
+    .meta-row .k {
+      color: var(--wd-text-color-secondary, #6b7280);
       flex: none;
+    }
+
+    .meta-row .v {
+      font-weight: 500;
+      text-align: right;
+      word-break: break-all;
+    }
+
+    .uactions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+
+    /* 使用提示 */
+    .tips-list {
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .tips-list li {
       display: flex;
       gap: 8px;
+      font-size: 13px;
+      color: #4b5563;
+      line-height: 1.6;
+    }
+
+    .tips-list .dot {
+      flex: none;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #0066CC;
+      margin-top: 7px;
+    }
+
+    /* 审批统计卡（服务设置开启「工作台统计」后显示）：容器为 wd-panel mode="card" */
+    .ap-panel {
+      margin-bottom: 20px;
+    }
+
+    .ap-stats-items {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+    }
+
+    .ap-stat {
+      text-align: center;
+      padding: 8px 0;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: background .15s ease;
+    }
+
+    .ap-stat:hover {
+      background: rgba(0, 102, 204, .06);
+    }
+
+    .ap-stat .ap-num {
+      font-size: 24px;
+      font-weight: 600;
+      line-height: 1.2;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .ap-num-todo { color: #E6A23C; }
+    .ap-num-done { color: #909399; }
+    .ap-num-approved { color: #67C23A; }
+    .ap-num-rejected { color: #F56C6C; }
+
+    .ap-stat .ap-lbl {
+      font-size: 12px;
+      color: var(--wd-text-color-secondary, #6b7280);
+      margin-top: 2px;
     }
 
     .perm-summary {
@@ -127,10 +308,105 @@
       color: #0066CC;
     }
 
+    /* —— 最近操作：容器为 wd-panel mode="card" —— */
+    .recent-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 2px;
+      border-bottom: 1px dashed #f1f3f5;
+      font-size: 13px;
+    }
+
+    .recent-item:last-child {
+      border-bottom: 0;
+    }
+
+    .recent-time {
+      color: #9ca3af;
+      font-size: 12px;
+      flex: none;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .recent-op {
+      flex: none;
+      color: #0066CC;
+      background: rgba(0, 102, 204, .08);
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 12px;
+      max-width: 120px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .recent-msg {
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      min-width: 0;
+      color: var(--wd-text-color-secondary, #6b7280);
+    }
+
+    .recent-action {
+      flex: none;
+      font-family: ui-monospace, Consolas, monospace;
+      font-size: 11px;
+      color: #0066CC;
+      background: rgba(0, 102, 204, .08);
+      padding: 2px 8px;
+      border-radius: 6px;
+      max-width: 220px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .empty-recent {
+      text-align: center;
+      padding: 22px 0;
+      color: #9ca3af;
+      font-size: 13px;
+    }
+
+    /* 平台信息 */
+    .plat-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      font-size: 13px;
+      padding: 8px 0;
+      border-bottom: 1px dashed #f1f3f5;
+    }
+
+    .plat-row:last-child {
+      border-bottom: 0;
+      padding-bottom: 0;
+    }
+
+    .plat-row .k {
+      color: var(--wd-text-color-secondary, #6b7280);
+      flex: none;
+    }
+
+    .plat-row .v {
+      font-variant-numeric: tabular-nums;
+      text-align: right;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    /* —— 功能入口卡片：横向卡（图标左 / 文案右） —— */
     .grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-      gap: 16px;
+      grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+      gap: 14px;
+      margin-bottom: 20px;
     }
 
     .entry {
@@ -147,21 +423,32 @@
       transform: translateY(-2px);
     }
 
+    .entry .el-card__body {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 16px;
+    }
+
     .entry .ico {
-      width: 40px;
-      height: 40px;
+      width: 42px;
+      height: 42px;
       border-radius: 10px;
+      flex: none;
       display: flex;
       align-items: center;
       justify-content: center;
       font-size: 20px;
       background: rgba(0, 102, 204, .1);
       color: #0066CC;
-      margin-bottom: 12px;
+    }
+
+    .entry .etext {
+      min-width: 0;
     }
 
     .entry h3 {
-      margin: 0 0 6px;
+      margin: 0 0 4px;
       font-size: 15px;
       display: flex;
       align-items: center;
@@ -170,9 +457,12 @@
 
     .entry p {
       margin: 0;
-      font-size: 13px;
+      font-size: 12px;
       color: var(--wd-text-color-secondary, #6b7280);
-      line-height: 1.6;
+      line-height: 1.5;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
 
     .empty {
@@ -183,7 +473,7 @@
       font-size: 14px;
     }
 
-    /* 工作台插入锚点（功能包插槽） */
+    /* 工作台插入锚点（功能包插槽）：卡片容器统一 wd-panel mode="card" */
     .slot-zone {
       display: flex;
       flex-direction: column;
@@ -191,32 +481,11 @@
     }
 
     .slot-zone-top {
-      margin-bottom: 24px;
+      margin-bottom: 20px;
     }
 
     .slot-zone-bottom {
-      margin-top: 24px;
-    }
-
-    .slot-card {
-      border: 1px solid #e5e7eb;
-      border-radius: 10px;
-      background: #fff;
-      overflow: hidden;
-    }
-
-    .slot-head {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 10px 14px;
-      border-bottom: 1px solid #f1f3f5;
-    }
-
-    .slot-title {
-      font-size: 14px;
-      font-weight: 600;
-      color: var(--wd-text-color, #1f2329);
+      margin-top: 20px;
     }
 
     .slot-frame {
@@ -329,38 +598,229 @@
       font-size: 12px;
       color: var(--wd-text-color-secondary, #6b7280);
     }
+
+    /* —— 响应式：窄屏收敛为单栏 —— */
+    @media (max-width: 1024px) {
+      .layout {
+        grid-template-columns: minmax(0, 1fr);
+      }
+
+      .col-side {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        align-items: start;
+      }
+
+      .ap-stats-items {
+        grid-template-columns: repeat(2, 1fr);
+      }
+    }
+
+    @media (max-width: 640px) {
+      .home {
+        padding: 16px;
+      }
+
+      .hero {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+
+      .hero-side {
+        flex-direction: row;
+        align-items: center;
+        justify-content: space-between;
+        width: 100%;
+      }
+
+      .hero-time {
+        font-size: 20px;
+      }
+
+      .grid {
+        grid-template-columns: 1fr;
+      }
+
+      .col-side {
+        grid-template-columns: 1fr;
+      }
+    }
   </style>
 </head>
 
 <body>
   <div class="home"></div>
 
-  <script type="text/x-template" id="super-admin-tpl">
+  <script type="text/x-template" id="functional-admin-tpl">
   <div class="hero">
-    <img src="/brand/mark.svg" alt="林枢">
-    <div>
-      <h1>你好，{{ name }}</h1>
-      <p>平台最高权限入口，统筹功能包、权限、审计与运维。</p>
-    </div>
-    <span class="role-tag">{{ roleLabel }}</span>
-  </div>
-
-  <div class="user-info">
-    <el-avatar :size="40" class="uavatar">
-      <el-icon :size="22"><UserFilled /></el-icon>
-    </el-avatar>
-    <div class="udesc">
-      <div class="uname">{{ name }}</div>
-      <div class="umeta">
-        <span>账号：{{ userId }}</span>
-        <el-divider direction="vertical" />
-        <span>角色：{{ roleLabel }}</span>
+    <div class="hero-main">
+      <img src="/brand/mark.svg" alt="林枢">
+      <div class="hero-text">
+        <h1>{{ greet }}，{{ name }}</h1>
+        <p>今天是 {{ todayText }} · 负责业务功能域的管理与配置，统筹功能入口、权限与日常运营。</p>
       </div>
     </div>
-    <div class="uactions">
-      <el-button size="small" :icon="Key" @click="openPerms">查看权限</el-button>
-      <el-button size="small" :icon="Edit" @click="openProfile">修改</el-button>
+    <div class="hero-side">
+      <span class="role-tag">{{ roleLabel }}</span>
+      <div class="hero-clock">
+        <div class="hero-date">实时时钟</div>
+        <div class="hero-time">{{ clockText }}</div>
+      </div>
     </div>
+  </div>
+
+  <div class="layout">
+    <!-- 左侧主区：插槽 → 我的审批 → 功能入口 → 最近操作 → 插槽 -->
+    <div class="col-main">
+      <div v-if="zones['home.top'].length" class="slot-zone slot-zone-top">
+        <wd-panel v-for="s in zones['home.top']" :key="s.id" :title="s.title" :border="true" mode="card">
+          <iframe
+            :src="s.render"
+            class="slot-frame"
+            loading="lazy"
+            @load="onSlotFrameLoad($event, s.id)"
+          ></iframe>
+        </wd-panel>
+      </div>
+
+      <wd-panel v-if="apStats" title="我的审批" description="点击各项打开审批工作台对应页签" description-align="right" :border="true" mode="card" class="ap-panel">
+        <div class="ap-stats-items">
+          <div class="ap-stat" @click="openApprovalTab('todo')">
+            <div class="ap-num ap-num-todo">{{ fmt(apStats.todo) }}</div>
+            <div class="ap-lbl">待办</div>
+          </div>
+          <div class="ap-stat" @click="openApprovalTab('done')">
+            <div class="ap-num ap-num-done">{{ fmt(apStats.handled) }}</div>
+            <div class="ap-lbl">已办</div>
+          </div>
+          <div class="ap-stat" @click="openApprovalTab('approved')">
+            <div class="ap-num ap-num-approved">{{ fmt(apStats.approved) }}</div>
+            <div class="ap-lbl">已同意</div>
+          </div>
+          <div class="ap-stat" @click="openApprovalTab('rejected')">
+            <div class="ap-num ap-num-rejected">{{ fmt(apStats.rejected) }}</div>
+            <div class="ap-lbl">已驳回</div>
+          </div>
+        </div>
+      </wd-panel>
+
+      <div class="section-head">
+        <span class="section-title">我的功能入口</span>
+        <div class="section-actions">
+          <span class="section-count">共 {{ entries.length }} 个入口</span>
+          <el-button size="small" :icon="Setting" @click="openCustom">定制</el-button>
+        </div>
+      </div>
+
+      <div class="grid">
+        <div class="entry" v-for="m in entries" :key="m.id" @click="openTab(m.path, m.title)">
+          <el-card shadow="hover">
+            <div class="ico"><el-icon><component :is="iconOf(m.icon)" /></el-icon></div>
+            <div class="etext">
+              <h3>{{ m.title }}</h3>
+              <p>{{ isPkg(m) ? '来自功能包「' + m.short + '」的功能入口。' : '平台内置功能入口。' }}</p>
+            </div>
+          </el-card>
+        </div>
+        <div v-if="entries.length === 0" class="empty">
+          暂无功能入口，点击上方「定制」添加。
+        </div>
+      </div>
+
+      <wd-panel v-if="statsReady" title="最近操作" description="平台操作留痕 · 最新 8 条" description-align="right" :border="true" mode="card">
+        <div class="recent-list">
+          <div v-for="(r, i) in stats.recent" :key="i" class="recent-item">
+            <span class="recent-time">{{ r.time }}</span>
+            <span class="recent-op" :title="r.operator">{{ r.operator || '系统' }}</span>
+            <span class="recent-action">{{ r.action || '—' }}</span>
+            <span class="recent-msg" :title="r.target">{{ r.target || '—' }}</span>
+          </div>
+          <div v-if="stats.recent.length === 0" class="empty-recent">暂无操作留痕</div>
+        </div>
+      </wd-panel>
+
+      <div v-if="zones['home.bottom'].length" class="slot-zone slot-zone-bottom">
+        <wd-panel v-for="s in zones['home.bottom']" :key="s.id" :title="s.title" :border="true" mode="card">
+          <iframe
+            :src="s.render"
+            class="slot-frame"
+            loading="lazy"
+            @load="onSlotFrameLoad($event, s.id)"
+          ></iframe>
+        </wd-panel>
+      </div>
+    </div>
+
+    <!-- 右侧信息区：账号 → 右侧插入点 → 平台信息 → 使用提示 -->
+    <aside class="col-side">
+      <wd-panel title="我的账号" description="个人信息" description-align="right" :border="true" mode="card">
+        <div class="account-top">
+          <el-avatar :size="44" class="uavatar">
+            <el-icon :size="22"><UserFilled /></el-icon>
+          </el-avatar>
+          <div class="udesc">
+            <div class="acc-name">{{ name }}</div>
+            <div class="acc-role">{{ roleLabel }}</div>
+          </div>
+        </div>
+        <div class="meta-list">
+          <div class="meta-row">
+            <span class="k">登录账号</span>
+            <span class="v">{{ userId }}</span>
+          </div>
+          <div class="meta-row">
+            <span class="k">角色</span>
+            <span class="v">{{ roleLabel }}</span>
+          </div>
+        </div>
+        <div class="uactions">
+          <el-button size="small" :icon="Key" style="width: 100%;" @click="openPerms">查看权限</el-button>
+          <wd-drawer-button size="small" :icon="Edit" label="修改资料" title="修改用户信息" mode="dialog" drawer-size="420px" @open="openProfile">
+            <el-form label-width="72px" @submit.prevent>
+              <el-form-item label="账号">
+                <el-input :model-value="userId" disabled />
+              </el-form-item>
+              <el-form-item label="显示名称">
+                <el-input v-model="profileName" maxlength="30" show-word-limit placeholder="请输入显示名称" />
+              </el-form-item>
+            </el-form>
+            <template #footer="f">
+              <el-button @click="f.close">取消</el-button>
+              <el-button type="primary" :loading="saving" @click="saveProfile(f)">保存</el-button>
+            </template>
+          </wd-drawer-button>
+        </div>
+      </wd-panel>
+
+      <div v-if="zones['home.right'].length" class="slot-zone">
+        <wd-panel v-for="s in zones['home.right']" :key="s.id" :title="s.title" :border="true" mode="card">
+          <iframe
+            :src="s.render"
+            class="slot-frame"
+            loading="lazy"
+            @load="onSlotFrameLoad($event, s.id)"
+          ></iframe>
+        </wd-panel>
+      </div>
+
+      <wd-panel title="平台信息" description="只读" description-align="right" :border="true" mode="card">
+        <div class="plat-row"><span class="k">PHP 版本</span><span class="v">{{ stats.platform.php || '—' }}</span></div>
+        <div class="plat-row"><span class="k">操作系统</span><span class="v">{{ stats.platform.os || '—' }}</span></div>
+        <div class="plat-row"><span class="k">服务器时间</span><span class="v">{{ stats.platform.time || '—' }}</span></div>
+        <div class="plat-row"><span class="k">功能入口</span><span class="v">{{ fmt(entries.length) }} 个</span></div>
+        <div class="plat-row"><span class="k">首页插槽</span><span class="v">{{ fmt(slotsCount) }} 个</span></div>
+      </wd-panel>
+
+      <wd-panel title="使用提示" :border="true" mode="card">
+        <ul class="tips-list">
+          <li><span class="dot"></span><span>「最近操作」汇总平台最新操作留痕，进入首页时自动加载。</span></li>
+          <li><span class="dot"></span><span>点击「定制」可调整首页功能入口及展示顺序。</span></li>
+          <li><span class="dot"></span><span>点击审批数字可直接打开审批工作台对应页签。</span></li>
+          <li><span class="dot"></span><span>显示名称可在「修改资料」中更改，登录账号保持不变。</span></li>
+          <li><span class="dot"></span><span>功能入口按当前角色权限显示，权限变更后刷新首页即可看到最新入口。</span></li>
+        </ul>
+      </wd-panel>
+    </aside>
   </div>
 
   <el-dialog v-model="permDlg" title="我的权限清单" width="640px">
@@ -401,69 +861,6 @@
       <el-button type="primary" @click="permDlg = false">关闭</el-button>
     </template>
   </el-dialog>
-
-  <el-dialog v-model="profileDlg" title="修改用户信息" width="420px">
-    <el-form label-width="72px" @submit.prevent>
-      <el-form-item label="账号">
-        <el-input :model-value="userId" disabled />
-      </el-form-item>
-      <el-form-item label="显示名称">
-        <el-input v-model="profileName" maxlength="30" show-word-limit placeholder="请输入显示名称" />
-      </el-form-item>
-    </el-form>
-    <template #footer>
-      <el-button @click="profileDlg = false">取消</el-button>
-      <el-button type="primary" :loading="saving" @click="saveProfile">保存</el-button>
-    </template>
-  </el-dialog>
-
-  <div v-if="zones['home.top'].length" class="slot-zone slot-zone-top">
-    <div v-for="s in zones['home.top']" :key="s.id" class="slot-card">
-      <div class="slot-head">
-        <span class="slot-title">{{ s.title }}</span>
-      </div>
-      <iframe
-        :src="s.render"
-        class="slot-frame"
-        loading="lazy"
-        @load="onSlotFrameLoad($event, s.id)"
-      ></iframe>
-    </div>
-  </div>
-
-  <div class="section-head">
-    <span class="section-title">超管功能入口</span>
-    <el-button size="small" :icon="Setting" @click="openCustom">定制</el-button>
-  </div>
-
-  <div class="grid">
-    <div class="entry" v-for="m in entries" :key="m.id" @click="openTab(m.path, m.title)">
-      <el-card shadow="hover">
-        <div class="ico"><el-icon><component :is="iconOf(m.icon)" /></el-icon></div>
-        <h3>
-          {{ m.title }}
-        </h3>
-        <p>{{ isPkg(m) ? '来自功能包「' + m.short + '」的功能入口。' : '平台内置超管功能入口。' }}</p>
-      </el-card>
-    </div>
-    <div v-if="entries.length === 0" class="empty">
-      暂无功能入口，点击右上角「定制」添加。
-    </div>
-  </div>
-
-  <div v-if="zones['home.bottom'].length" class="slot-zone slot-zone-bottom">
-    <div v-for="s in zones['home.bottom']" :key="s.id" class="slot-card">
-      <div class="slot-head">
-        <span class="slot-title">{{ s.title }}</span>
-      </div>
-      <iframe
-        :src="s.render"
-        class="slot-frame"
-        loading="lazy"
-        @load="onSlotFrameLoad($event, s.id)"
-      ></iframe>
-    </div>
-  </div>
 
   <el-drawer v-model="drawer" title="定制功能入口" size="380px" :destroy-on-close="false">
     <div class="drawer-sub">已选入口（拖拽可排序）</div>
@@ -515,17 +912,20 @@
   <script src="/static/vendor/vue/vue.global.prod.js"></script>
   <script src="/static/vendor/element-plus/index.full.min.js"></script>
   <script src="/static/vendor/icons/index.iife.min.js"></script>
-  <script src="/static/linhub/home-link.js?v=2"></script>
+  <script src="/static/vendor/workdesktop-ai/index.umd.js"></script>
+  <script src="/static/linhub/auth-guard.js?v=2"></script>
+  <script src="/static/linhub/home-link.js?v=3"></script>
   <script>
     const SERVER_OPTIONS = {$optionsJson|raw};
     const SERVER_DEFAULT = {$defaultJson|raw};
     const SERVER_SELECTED = {$selectedJson|raw};
     const SERVER_SLOTS = {$slotsJson|raw};
+    const APPROVAL_STATS = {$approvalStatsJson|raw};
 
     const app = Vue.createApp({
-      template: '#super-admin-tpl',
+      template: '#functional-admin-tpl',
       setup() {
-        const { ref, computed } = Vue;
+        const { ref, computed, onMounted, onUnmounted } = Vue;
         const icons = window.ElementPlusIconsVue || {};
 
         const nameRef = ref('{$displayName}');
@@ -536,10 +936,10 @@
         const entries = ref(SERVER_SELECTED);
         const zones = Vue.reactive({
           'home.top': SERVER_SLOTS['home.top'] || [],
+          'home.right': SERVER_SLOTS['home.right'] || [],
           'home.bottom': SERVER_SLOTS['home.bottom'] || [],
         });
         const drawer = ref(false);
-        const profileDlg = ref(false);
         const profileName = ref(nameRef.value);
         const permDlg = ref(false);
         const permRows = ref([]);
@@ -548,6 +948,67 @@
         const saving = ref(false);
         const draft = ref([]);
         const dragIndex = ref(-1);
+
+        // —— 顶部实时日期与时钟 ——
+        const WEEK_LABELS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+        const nowRef = ref(new Date());
+        let clockTimer = null;
+        const pad2 = (n) => String(n).padStart(2, '0');
+        const todayText = computed(() => {
+          const d = nowRef.value;
+          return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日 ${WEEK_LABELS[d.getDay()]}`;
+        });
+        const clockText = computed(() => {
+          const d = nowRef.value;
+          return `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
+        });
+
+        onMounted(() => {
+          clockTimer = setInterval(() => { nowRef.value = new Date(); }, 1000);
+        });
+        onUnmounted(() => {
+          if (clockTimer) clearInterval(clockTimer);
+          clockTimer = null;
+        });
+
+        const greet = computed(() => {
+          const h = nowRef.value.getHours();
+          if (h < 6) return '夜深了';
+          if (h < 12) return '上午好';
+          if (h < 14) return '中午好';
+          if (h < 18) return '下午好';
+          return '晚上好';
+        });
+
+        // —— 最近操作与平台信息：加载 /admin/home/stats ——
+        const stats = Vue.reactive({
+          recent: [],
+          platform: { php: '', os: '', time: '' },
+        });
+        const statsReady = ref(false);
+
+        // 数字千分位
+        const fmt = (v) => {
+          const n = Number(v);
+          if (!isFinite(n)) return '0';
+          return n.toLocaleString('zh-CN');
+        };
+
+        const slotsCount = computed(() => zones['home.top'].length + zones['home.bottom'].length);
+
+        async function loadStats() {
+          try {
+            const res = await fetch('/admin/home/stats').then((r) => r.json());
+            if (res.code !== 0) throw new Error(res.message || '加载平台信息失败');
+            const d = res.data || {};
+            stats.recent = d.recent || [];
+            stats.platform = { ...stats.platform, ...(d.platform || {}) };
+            statsReady.value = true;
+          } catch (e) {
+            window.ElementPlus.ElMessage.error(e.message);
+          }
+        }
+        loadStats();
 
         const iconOf = (icon) => icons[icon] || icons.Menu;
         // 第三方功能包入口（平台内置菜单不标来源）
@@ -664,7 +1125,6 @@
 
         function openProfile() {
           profileName.value = nameRef.value;
-          profileDlg.value = true;
         }
 
         async function openPerms() {
@@ -683,7 +1143,7 @@
           }
         }
 
-        async function saveProfile() {
+        async function saveProfile(f) {
           const value = profileName.value.trim();
           if (value === '') {
             window.ElementPlus.ElMessage.error('显示名称不能为空');
@@ -694,7 +1154,7 @@
             const res = await post({ name: value }, '/admin/home/profileSave');
             if (res.code !== 0) throw new Error(res.message || '保存失败');
             nameRef.value = res.data.name;
-            profileDlg.value = false;
+            if (f) f.close();
             window.ElementPlus.ElMessage.success('已更新用户信息');
           } catch (e) {
             window.ElementPlus.ElMessage.error(e.message);
@@ -706,12 +1166,15 @@
         return {
           name: nameRef, userId, roleLabel,
           entries, zones, drawer, saving, chosen, available, draft, dragIndex,
-          profileDlg, profileName, permDlg, permRows, permTotal, permKeyword, permTree,
+          profileName, permDlg, permRows, permTotal, permKeyword, permTree,
+          greet, todayText, clockText, slotsCount,
+          stats, statsReady, fmt,
           Setting: icons.Setting, Rank: icons.Rank, Edit: icons.Edit, Key: icons.Key, Search: icons.Search,
           iconOf, isPkg, openCustom, addChosen, removeChosen,
           onDragStart, onDragOver, onDrop, onDragEnd: () => { dragIndex.value = -1; },
           onSlotFrameLoad,
           save, resetDefault, openProfile, saveProfile, openPerms,
+          apStats: APPROVAL_STATS, openApprovalTab: window.linhubOpenApprovalWorkbench,
           openTab: window.linhubOpenTab,
         };
       }
@@ -720,6 +1183,7 @@
       app.component(cname, comp);
     }
     app.use(window.ElementPlus);
+    app.use(window.WorkDesktop.WorkDesktop);
     app.mount('.home');
   </script>
 </body>

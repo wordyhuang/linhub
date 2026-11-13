@@ -43,9 +43,17 @@ return [
     ['id' => 'menu.superadmin.loginstate',      'parent' => 'menu.superadmin.platform', 'title' => '登录状态',   'route' => '/admin/LoginStateAdmin/index',    'icon' => 'View',         'order' => 40, 'perms' => ['host:loginstate:view']],
     ['id' => 'menu.superadmin.translation',     'parent' => 'menu.superadmin.platform', 'title' => '翻译管理',   'route' => '/admin/translation_admin/index',  'icon' => 'Collection',   'order' => 45, 'perms' => ['host:translation:manage']],
     ['id' => 'menu.superadmin.recyclebin',      'parent' => 'menu.superadmin.platform', 'title' => '回收站',     'route' => '/admin/recyclebin_admin/index',   'icon' => 'DeleteFilled', 'order' => 46, 'perms' => ['host:recyclebin:view']],
+    ['id' => 'menu.superadmin.printtpl',        'parent' => 'menu.superadmin.platform', 'title' => '打印模板',   'route' => '/admin/printtpl_admin/index',     'icon' => 'Printer',      'order' => 47, 'perms' => ['host:printtpl:view']],
+    ['id' => 'menu.superadmin.scheduler',       'parent' => 'menu.superadmin.platform', 'title' => '任务调度',   'route' => '/admin/scheduler_admin/index',    'icon' => 'Timer',        'order' => 48, 'perms' => ['host:scheduler:manage']],
     ['id' => 'menu.superadmin.inbox',           'parent' => 'menu.superadmin.platform', 'title' => '站内消息',   'route' => '',                               'icon' => 'ChatDotRound', 'order' => 50, 'perms' => []],
     ['id' => 'menu.superadmin.inbox.records',   'parent' => 'menu.superadmin.inbox',    'title' => '消息投递记录','route' => '/admin/MessageAdmin/records',    'icon' => 'ChatDotRound', 'order' => 10, 'perms' => ['host:message:view']],
     ['id' => 'menu.superadmin.inbox.announce',  'parent' => 'menu.superadmin.inbox',    'title' => '群发公告',   'route' => '/admin/MessageAdmin/announce',    'icon' => 'Promotion',    'order' => 20, 'perms' => ['host:message:send']],
+
+    // 日志服务：运行日志工作台 / 日志审计（复用 audit）/ 日志设置
+    ['id' => 'menu.superadmin.logsvc',              'parent' => 'menu.superadmin.platform', 'title' => '日志服务',   'route' => '',                            'icon' => 'Tickets',   'order' => 55, 'perms' => []],
+    ['id' => 'menu.superadmin.logsvc.workbench',    'parent' => 'menu.superadmin.logsvc',   'title' => '工作台',     'route' => '/admin/LogCenter/index',      'icon' => 'Odometer',  'order' => 10, 'perms' => ['host:audit:view']],
+    ['id' => 'menu.superadmin.audit',               'parent' => 'menu.superadmin.logsvc',   'title' => '日志审计',   'route' => '/admin/audit/index',          'icon' => 'Document',  'order' => 20, 'perms' => ['host:audit:view']],
+    ['id' => 'menu.superadmin.logsvc.settings',     'parent' => 'menu.superadmin.logsvc',   'title' => '日志设置',   'route' => '/admin/LogCenter/settings',   'icon' => 'Setting',   'order' => 30, 'perms' => ['host:logging:manage']],
 
     // LLM 网关：模型管理 / 调用日志 / 调试台 / caller 配额
     ['id' => 'menu.superadmin.llm',                 'parent' => 'menu.superadmin.platform', 'title' => 'LLM 网关',   'route' => '',                               'icon' => 'MagicStick',  'order' => 60, 'perms' => []],
@@ -54,20 +62,24 @@ return [
     ['id' => 'menu.superadmin.llm.debug',           'parent' => 'menu.superadmin.llm',       'title' => '调试台',     'route' => '/admin/LlmDebugAdmin/index',      'icon' => 'SetUp',       'order' => 30, 'perms' => ['host:llm:debug:use']],
     ['id' => 'menu.superadmin.llm.quota',          'parent' => 'menu.superadmin.llm',       'title' => '调用方配额', 'route' => '/admin/LlmQuotaAdmin/index',      'icon' => 'Scaling',     'order' => 40, 'perms' => ['host:llm:quota:view']],
 
-    // 关于系统（平台环境信息只读看板）
-    ['id' => 'menu.superadmin.systeminfo',          'parent' => 'menu.superadmin.platform', 'title' => '关于系统',   'route' => '/admin/SystemInfo/index',         'icon' => 'InfoFilled',  'order' => 70, 'perms' => ['host:systeminfo:view']],
-
     // 数据安全分组：归档备份 / Schema 看板
     ['id' => 'menu.superadmin.datasec',     'parent' => 'menu.superadmin',   'title' => '数据安全',   'route' => '',                        'icon' => 'Umbrella',      'order' => 40, 'perms' => []],
     ['id' => 'menu.superadmin.backup',      'parent' => 'menu.superadmin.datasec', 'title' => '归档备份', 'route' => '/admin/backup/index',   'icon' => 'FolderOpened',  'order' => 10, 'perms' => ['host:backup:view']],
     ['id' => 'menu.superadmin.schema',      'parent' => 'menu.superadmin.datasec', 'title' => 'Schema 看板','route' => '/admin/schema/diff',    'icon' => 'Coin',          'order' => 20, 'perms' => ['host:schema:view']],
 
     // 审批中心：平台审批服务（AP）的审批人视角入口（D11 一级菜单）
-    ['id' => 'menu.superadmin.approval',        'parent' => 'menu.superadmin',   'title' => '审批中心',   'route' => '',                                    'icon' => 'Finished',      'order' => 50, 'perms' => []],
-    ['id' => 'menu.superadmin.approval.todo',   'parent' => 'menu.superadmin.approval', 'title' => '我的待办', 'route' => '/admin/ApprovalAdmin/todo',   'icon' => 'AlarmClock',    'order' => 10, 'perms' => ['host:approval:view']],
-    ['id' => 'menu.superadmin.approval.done',   'parent' => 'menu.superadmin.approval', 'title' => '我的已办', 'route' => '/admin/ApprovalAdmin/done',   'icon' => 'CircleCheck',   'order' => 20, 'perms' => ['host:approval:view']],
+    ['id' => 'menu.superadmin.approval',        'parent' => 'menu.superadmin',   'title' => '审批服务',   'route' => '',                                    'icon' => 'Finished',      'order' => 50, 'perms' => []],
     ['id' => 'menu.superadmin.approval.all',    'parent' => 'menu.superadmin.approval', 'title' => '全部单据', 'route' => '/admin/ApprovalAdmin/index',  'icon' => 'Document',      'order' => 30, 'perms' => ['host:approval:manage']],
+    ['id' => 'menu.superadmin.approval.flows',  'parent' => 'menu.superadmin.approval', 'title' => '审批流程', 'route' => '/admin/ApprovalAdmin/flowIndex', 'icon' => 'List',      'order' => 35, 'perms' => ['host:approval:manage']],
+    ['id' => 'menu.superadmin.approval.design', 'parent' => 'menu.superadmin.approval', 'title' => '流程设计', 'route' => '/admin/ApprovalAdmin/flowEditor', 'icon' => 'SetUp',     'order' => 45, 'perms' => ['host:approval:manage']],
+    ['id' => 'menu.superadmin.approval.settings', 'parent' => 'menu.superadmin.approval', 'title' => '服务设置', 'route' => '/admin/ApprovalAdmin/settings', 'icon' => 'Setting', 'order' => 50, 'perms' => ['host:approval:manage']],
 
-    ['id' => 'menu.superadmin.audit',       'parent' => 'menu.superadmin',   'title' => '日志审计',   'route' => '/admin/audit/index',      'icon' => 'Document',      'order' => 100, 'perms' => ['host:audit:view']],
     ['id' => 'menu.superadmin.site',        'parent' => 'menu.superadmin',   'title' => '全局设置',   'route' => '/admin/site_admin/index',   'icon' => 'Setting',       'order' => 110, 'perms' => ['host:setting:manage']],
+
+
+    ['id' => 'menu.approval.workbench', 'parent' => 'menu.approval', 'title' => '审批工作台', 'route' => '/admin/ApprovalAdmin/workbench', 'icon' => 'AlarmClock', 'order' => 10, 'perms' => []],
+    
+    // 关于系统（平台环境信息只读看板）
+    ['id' => 'menu.superadmin.systeminfo',          'parent' => 'menu.superadmin', 'title' => '关于系统',   'route' => '/admin/SystemInfo/index',         'icon' => 'InfoFilled',  'order' => 120, 'perms' => ['host:systeminfo:view']],
+
 ];

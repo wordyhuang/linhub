@@ -8,6 +8,7 @@ use linhub\capability\auth\Identity;
 use linhub\host\home\HomeCustomization;
 use linhub\host\integration\IntegrationManager;
 use linhub\host\integration\IntegrationRegistry;
+use linhub\host\integration\PackageRouteLoader;
 use linhub\host\lifecycle\BackupManager;
 use linhub\host\lifecycle\PackageInstaller;
 use linhub\host\lifecycle\PackageRemover;
@@ -22,12 +23,16 @@ use linhub\host\migration\PdoGateway;
 use linhub\host\package\PackageIntegrity;
 use linhub\host\package\PackagePacker;
 use linhub\host\package\PackageScaffold;
+use linhub\host\services\PlatformDataImporter;
+use linhub\host\services\PlatformDataPacker;
+use linhub\host\services\ServiceRegistry;
 use linhub\host\services\approval\ApprovalService;
 use linhub\host\services\messaging\MessagingService;
+use linhub\host\services\printtpl\PrintTplService;
 use linhub\host\services\recyclebin\RecycleBinService;
+use linhub\host\services\scheduler\SchedulerService;
 use linhub\host\support\HostBootstrap;
 use linhub\host\services\support\PlatformStore;
-use linhub\host\services\translation\TranslationSeeder;
 use linhub\host\Version;
 use think\facade\Env;
 use think\facade\Session;
@@ -38,10 +43,12 @@ use think\facade\Session;
  *  - GET  /admin/package/index          功能包管理页（空壳，数据由 wd-* 组件经 JSON 接口加载）
  *  - GET  /admin/package/rows           总览：hostVersion + 已安装包 + 暂存可安装包
  *  - POST /admin/package/create         在暂存区新建功能包骨架
- *  - POST /admin/package/install        从暂存目录安装一个功能包
+ *  - POST /admin/package/install        从暂存目录安装一个功能包（同步执行，进度可通过 GET progress 轮询）
+ *  - GET  /admin/package/progress       查询安装任务进度（install 执行中的阶段/百分比）
  *  - POST /admin/package/enable         启用
  *  - POST /admin/package/disable        禁用
  *  - POST /admin/package/upgrade        从暂存区同 short 目录升级
+ *  - POST /admin/package/reinstall      更新配置（重载）已安装包的接入装配与路由
  *  - POST /admin/package/remove         删除（需 confirm，高危二次确认）
  *  - POST /admin/package/pack           打包并触发下载（二进制下载，非 JSON）
  *
@@ -454,6 +461,8 @@ class Package extends AdminController
                 'platform'     => self::constraintPairs($manifest['platform'] ?? []),
                 'provides'     => array_values((array) ($manifest['services']['provides'] ?? [])),
                 'requires'     => array_values((array) ($manifest['services']['requires'] ?? [])),
+                // 宿主服务依赖的具体信息（简介/版本/来源/提供方/契约与参数），供详情页悬停查看
+                'requiresDetail' => $this->requiresDetail($manifest['services']['requires'] ?? []),
                 'subscribes'   => array_values((array) ($manifest['subscribes'] ?? [])),
                 'files'        => array_values((array) ($manifest['resources']['files'] ?? [])),
             ],
@@ -485,6 +494,87 @@ class Package extends AdminController
             }
         }
         return $out;
+    }
+
+    /**
+     * 宿主服务依赖的具体信息：把 manifest services.requires（列表或「id => 约束」map）
+     * 逐项解析为可展示行，并按宿主清单（services.php）+ 已启用功能包 provides 填充详情。
+     *
+     * @return list<array{id:string,constraint:string,founded:bool,source:string,version:string,desc:string,
+     *                     type:string,contract:string,impl:string,params:array,provider:string,providerShort:string}>
+     */
+    private function requiresDetail(mixed $requires): array
+    {
+        $rows = [];
+        foreach ((array) $requires as $k => $v) {
+            if (is_int($k)) {
+                $id = (string) $v;
+                $constraint = '';
+            } else {
+                $id = (string) $k;
+                $constraint = (string) $v;
+            }
+            if ($id === '') {
+                continue;
+            }
+            $row = [
+                'id' => $id, 'constraint' => $constraint, 'founded' => false, 'source' => '',
+                'version' => '', 'desc' => '', 'type' => '', 'contract' => '', 'impl' => '',
+                'params' => [], 'provider' => '', 'providerShort' => '',
+            ];
+            $host = ServiceRegistry::hostList()[$id] ?? null;
+            if ($host !== null) {
+                $row['founded']   = true;
+                $row['source']    = 'host';
+                $row['version']   = (string) ($host['version'] ?? '');
+                $row['desc']      = (string) ($host['desc'] ?? '');
+                $row['type']      = (string) ($host['type'] ?? '');
+                $row['contract']  = (string) ($host['contract'] ?? '');
+                $row['impl']      = (string) ($host['impl'] ?? '');
+                $rows[] = $row;
+                continue;
+            }
+            $provided = ServiceRegistry::packageProvides($this->stateFile(), $this->loadRoot())[$id] ?? null;
+            if ($provided !== null) {
+                $owner = $this->serviceProvider($id);
+                $row['founded']       = true;
+                $row['source']        = 'package';
+                $row['version']       = (string) ($provided['version'] ?? '');
+                $row['desc']          = (string) ($provided['desc'] ?? '');
+                $row['contract']      = (string) ($provided['class'] ?? '');
+                $row['params']        = (array) ($provided['params'] ?? []);
+                $row['provider']      = (string) ($owner['title'] ?? '');
+                $row['providerShort'] = (string) ($owner['short'] ?? '');
+            }
+            $rows[] = $row;
+        }
+        return $rows;
+    }
+
+    /**
+     * 查找提供某宿主服务的已启用功能包（返回 title/short）；未找到返回空数组。
+     *
+     * @return array{title?:string,short?:string}
+     */
+    private function serviceProvider(string $id): array
+    {
+        foreach ((new PackageStateStore($this->stateFile()))->read() as $name => $rec) {
+            if ((string) ($rec['state'] ?? '') !== 'enabled') {
+                continue;
+            }
+            $short = (string) ($rec['short'] ?? '');
+            $src   = $this->resolveSourceDir($short, (array) $rec);
+            if ($src === null) {
+                continue;
+            }
+            $mf = $this->readReturningArray($src . '/manifest.php');
+            foreach ((array) ($mf['services']['provides'] ?? []) as $p) {
+                if ((string) (($p = (array) $p)['id'] ?? '') === $id) {
+                    return ['title' => (string) ($mf['title'] ?? ''), 'short' => $short];
+                }
+            }
+        }
+        return [];
     }
 
     /**
@@ -715,9 +805,15 @@ class Package extends AdminController
         if ($type !== 'app' && $type !== 'lib') {
             $type = 'app';
         }
+        // 包门禁：admin（需登录中后台）|public（免登录公开接口）
+        $access = (string) $this->request->post('access', 'admin');
+        if ($access !== 'admin' && $access !== 'public') {
+            $access = 'admin';
+        }
+        $description = trim((string) $this->request->post('description', ''));
 
         try {
-            $dir = PackageScaffold::scaffold($short, $title, $this->stagingRoot(), $version, $type);
+            $dir = PackageScaffold::scaffold($short, $title, $this->stagingRoot(), $version, $type, $access, $description);
             return $this->jsonOk(['dir' => basename($dir)], '已生成功能包骨架：' . basename($dir));
         } catch (\Throwable $e) {
             return $this->jsonFail($e->getMessage());
@@ -732,8 +828,17 @@ class Package extends AdminController
             return $gate;
         }
 
+        // 安装属长任务：客户端/网关断开后仍继续执行到底，且不占用 PHP 执行时限
+        @ignore_user_abort(true);
+        @set_time_limit(0);
+
+        // 前端生成的进度任务标识；为空时（旧调用）不影响安装，仅无进度
+        $task = (string) $this->request->post('task', '');
+        $this->writeProgress($task, 'running', 3, '正在校验安装目标...');
+
         $target = (string) $this->request->post('target', '');
         if ($target === '' || !str_starts_with($target, 'lgg-pkg-')) {
+            $this->failProgress($task, '无效的安装目标');
             return $this->jsonFail('无效的安装目标', 422);
         }
         $dir = $this->stagingRoot() . '/' . $target;
@@ -742,30 +847,49 @@ class Package extends AdminController
         $realStaging = rtrim(str_replace('\\', '/', realpath($this->stagingRoot()) ?: ''), '/') . '/';
         $realDir     = str_replace('\\', '/', realpath($dir) ?: '');
         if ($realDir === '' || !is_dir($dir) || stripos($realDir, $realStaging) !== 0) {
+            $this->failProgress($task, '无效的安装目标');
             return $this->jsonFail('无效的安装目标', 422);
         }
 
         // 需求 F 接入审核门禁：该版本必须已审核通过且包内容指纹未变
         $gateMsg = $this->reviewGateMessage($dir);
         if ($gateMsg !== null) {
+            $this->failProgress($task, $gateMsg);
             return $this->jsonFail($gateMsg, 423);
         }
 
         try {
             // 迁移槽位：连接数据库并注入建表执行器（缺失会导致建表被静默跳过，表不生成）
+            $this->writeProgress($task, 'running', 10, '正在连接数据库...');
             $conn = $this->connect();
             if (!$conn['ok']) {
+                $this->failProgress($task, '安装前无法连接数据库，不能执行建表迁移');
                 return $this->jsonFail('安装前无法连接数据库，不能执行建表迁移', 500);
             }
             $dbGate = $conn['gateway'];
-            $migrate = (new MigrationManager($this->loadRoot(), $dbGate))->installHandler();
+            $this->writeProgress($task, 'running', 20, '正在校验 / 备份 / 落地功能包源码...');
+
+            // 迁移与接入槽位各包一层进度上报（两段是安装耗时主体）
+            $migrateInner = (new MigrationManager($this->loadRoot(), $dbGate))->installHandler();
+            $migrate = function (...$args) use ($migrateInner, $task): void {
+                $this->writeProgress($task, 'running', 45, '正在执行数据库迁移（建表）...');
+                $migrateInner(...$args);
+                $this->writeProgress($task, 'running', 62, '数据库迁移完成');
+            };
+            $integrateInner = IntegrationManager::installHandler($this->loadRoot(), HostBootstrap::defaultRegistryFile(), [], $dbGate);
+            $integrate = function (...$args) use ($integrateInner, $task): void {
+                $this->writeProgress($task, 'running', 68, '正在接入菜单 / 权限 / 工作台 / 服务数据...');
+                $integrateInner(...$args);
+                $this->writeProgress($task, 'running', 88, '接入装配完成');
+            };
+
             $result = (new PackageInstaller(
                 new PackageStateStore($this->stateFile()),
                 new BackupManager($this->backupRoot()),
                 $this->loadRoot(),
                 Version::current(),
                 $migrate,
-                IntegrationManager::installHandler($this->loadRoot(), HostBootstrap::defaultRegistryFile(), [], $dbGate),
+                $integrate,
             ))->install($dir);
             $name = (string) ($result['record']['name'] ?? $target);
             $short = (string) ($result['record']['short'] ?? '');
@@ -773,12 +897,96 @@ class Package extends AdminController
                 $short = substr((string) $target, strlen('lgg-pkg-'));
             }
             $version = (string) ($result['record']['version'] ?? '');
+            // 安装完成里程碑：新包即时装配（PSR-4 + 订阅进总线），使其能收到自身 installed 广播（协议 4.5.1 V1.7）
+            $this->writeProgress($task, 'running', 92, '正在挂载路由与广播安装事件...');
+            PackageRouteLoader::attach($short);
             MessagingService::broadcastLifecycle(MessagingService::EVENT_INSTALLED, $short, ['version' => $version]);
             $this->appendDefaultShortcuts($short);
-            return $this->jsonOk(['name' => $name], '已安装：' . $name);
+            // 数据随包导入统计（IntegrationManager::integrate 内写入静态槽，单请求生命周期）
+            $stats = PlatformDataImporter::$lastStats;
+            $dataN = count($stats['services']);
+            $message = '已安装：' . $name . ($dataN > 0 ? "，导入 {$dataN} 项服务数据" : '');
+            $this->writeProgress($task, 'done', 100, $message);
+            return $this->jsonOk([
+                'name' => $name,
+                'data_import' => $stats['services'],
+                'data_import_warnings' => $stats['warnings'],
+            ], $message);
         } catch (\Throwable $e) {
+            $this->failProgress($task, $e->getMessage());
             return $this->jsonFail($e->getMessage());
         }
+    }
+
+    /** JSON：查询安装任务进度（前端轮询；任务文件为安装结果的事实源，POST 被网关断开时仍可收敛）。 */
+    public function progress()
+    {
+        $gate = $this->gateForJson();
+        if (!$gate instanceof Identity) {
+            return $gate;
+        }
+        $task = (string) $this->request->get('task', '');
+        if (!$this->validTaskId($task)) {
+            return $this->jsonFail('无效的任务标识', 422);
+        }
+        $file = $this->taskDir() . '/' . $task . '.json';
+        if (!is_file($file)) {
+            return $this->jsonOk(['status' => 'unknown', 'percent' => 0, 'step' => '']);
+        }
+        $data = json_decode((string) @file_get_contents($file), true);
+        return $this->jsonOk(is_array($data) ? $data : ['status' => 'unknown', 'percent' => 0, 'step' => '']);
+    }
+
+    /** 安装任务进度文件目录（code/host/runtime/package-tasks）。 */
+    private function taskDir(): string
+    {
+        $dir = $this->baseDir() . '/runtime/package-tasks';
+        if (!is_dir($dir)) {
+            @mkdir($dir, 0775, true);
+        }
+        return $dir;
+    }
+
+    /** 任务标识白名单：仅字母数字与中划线，防路径逃逸。 */
+    private function validTaskId(string $task): bool
+    {
+        return $task !== '' && preg_match('/^[0-9a-zA-Z-]{8,64}$/', $task) === 1;
+    }
+
+    /** 写安装进度（临时文件 + rename 原子替换，前端轮询读取）。task 非法时静默跳过（兼容无 task 的旧调用）。 */
+    private function writeProgress(string $task, string $status, int $percent, string $step, array $extra = []): void
+    {
+        if (!$this->validTaskId($task)) {
+            return;
+        }
+        $payload = array_merge([
+            'task'       => $task,
+            'status'     => $status,
+            'percent'    => max(0, min(100, $percent)),
+            'step'       => $step,
+            'updated_at' => date('Y-m-d H:i:s'),
+        ], $extra);
+        $file = $this->taskDir() . '/' . $task . '.json';
+        $tmp  = $file . '.tmp';
+        if (@file_put_contents($tmp, json_encode($payload, JSON_UNESCAPED_UNICODE)) === false) {
+            return;
+        }
+        @rename($tmp, $file);
+    }
+
+    /** 记录安装失败：进度停在最后已知百分比，附带失败原因供前端展示。 */
+    private function failProgress(string $task, string $message): void
+    {
+        if (!$this->validTaskId($task)) {
+            return;
+        }
+        $percent = 0;
+        $file = $this->taskDir() . '/' . $task . '.json';
+        if (is_file($file)) {
+            $prev = json_decode((string) @file_get_contents($file), true);
+            $percent = (int) ($prev['percent'] ?? 0);
+        }
+        $this->writeProgress($task, 'failed', $percent, '安装失败', ['message' => $message]);
     }
 
     /**
@@ -866,7 +1074,81 @@ class Package extends AdminController
             $to = (string) ($result['record']['version'] ?? '');
             MessagingService::broadcastLifecycle(MessagingService::EVENT_UPGRADED, $short, ['from_version' => (string) ($rec['version'] ?? ''), 'to_version' => $to]);
             $this->appendDefaultShortcuts($short);
-            return $this->jsonOk(['version' => $to], '已升级到 v' . $to);
+            // 数据随包导入统计（IntegrationManager::integrate 内写入静态槽，单请求生命周期）
+            $stats = PlatformDataImporter::$lastStats;
+            $dataN = count($stats['services']);
+            return $this->jsonOk([
+                'version' => $to,
+                'data_import' => $stats['services'],
+                'data_import_warnings' => $stats['warnings'],
+            ], '已升级到 v' . $to . ($dataN > 0 ? "，导入 {$dataN} 项服务数据" : ''));
+        } catch (\Throwable $e) {
+            return $this->jsonFail($e->getMessage());
+        }
+    }
+
+    /**
+     * JSON：更新配置（重载）已安装功能包：按当前已落地源码重跑接入装配并重挂路由。
+     * 历史接口名 reinstall 保留（外部调用兼容），UI 语义为「更新配置」。
+     *
+     * 适用场景：手工改动了包内 menus.php / permissions.php / workspace.php 等声明文件，
+     * 或调整了 resource/approvals/*.json 审批流程声明后，让宿主重新登记（覆盖式写入注册表），
+     * 无需走「卸载 → 安装」全流程。版本与启用状态不变，单据数据不受影响。
+     * 翻译种子按升级口径全量覆盖、服务数据按 manifest 声明重导、审批声明 upsert 重载
+     * （均为 upsert/覆盖语义，可重复执行）。
+     */
+    public function reinstall()
+    {
+        $gate = $this->gateForJson();
+        if (!$gate instanceof Identity) {
+            return $gate;
+        }
+        try {
+            $name = (string) $this->request->post('name', '');
+            $rec  = (new PackageStateStore($this->stateFile()))->get($name);
+            if ($rec === null) {
+                return $this->jsonFail('功能包不存在或未安装', 404);
+            }
+            if ((string) ($rec['state'] ?? '') === 'disabled') {
+                return $this->jsonFail('功能包已禁用（源码在隔离区），请先启用再更新配置', 422);
+            }
+            $short = (string) ($rec['short'] ?? '');
+            $src   = $this->resolveSourceDir($short, (array) $rec);
+            if ($src === null || !is_file(rtrim($src, '/\\') . '/manifest.php')) {
+                return $this->jsonFail('未找到功能包源码（manifest.php 缺失），无法更新配置', 404);
+            }
+            $manifest = $this->readReturningArray(rtrim($src, '/\\') . '/manifest.php');
+            if ((string) ($manifest['short'] ?? '') !== $short) {
+                return $this->jsonFail('manifest 的 short 与登记信息不一致，拒绝更新配置', 422);
+            }
+
+            // 接入装配：菜单/权限/工作台/界面替换/快捷入口覆盖式重登记 + 翻译/服务数据/resource/approvals 审批声明重载（DB 缺失时自动跳过并在警告中提示）
+            $conn   = $this->connect();
+            $dbGate = $conn['ok'] ? $conn['gateway'] : null;
+            $im = new IntegrationManager(
+                new IntegrationRegistry(HostBootstrap::defaultRegistryFile()),
+                [],
+                null,
+                null,
+                $dbGate,
+            );
+            $im->upgrade($this->loadRoot(), $manifest);
+            $warnings = $im->warnings();
+            if (!$conn['ok']) {
+                $warnings[] = '数据库不可用，已跳过翻译种子/服务数据/审批声明的刷新';
+            }
+
+            // 重挂 PSR-4 与路由（composer/manifest 可能已变动）
+            PackageRouteLoader::attach($short);
+
+            $stats = PlatformDataImporter::$lastStats;
+            return $this->jsonOk([
+                'name'                 => (string) ($rec['name'] ?? $name),
+                'version'              => (string) ($rec['version'] ?? ''),
+                'warnings'             => $warnings,
+                'data_import'          => $stats['services'],
+                'data_import_warnings' => $stats['warnings'],
+            ], '已更新配置：' . (string) ($rec['name'] ?? $name));
         } catch (\Throwable $e) {
             return $this->jsonFail($e->getMessage());
         }
@@ -1049,23 +1331,29 @@ class Package extends AdminController
             // 否则源码与状态虽已删除，注册表中的菜单仍会注入导航，出现"卸载后菜单还在"的幽灵菜单。
             IntegrationManager::removeHandler(HostBootstrap::defaultRegistryFile())($short);
 
-            // 翻译词条清除（卸载即删该包 namespace）；DB 不可用时容忍为孤儿行，不阻断卸载
-            $purged = 0;
+            // 服务数据清除（统一出口）：按 manifest.data.services 的 remove_on_uninstall（默认 true）调驱动 purge，
+            // 含翻译词条清除（translation 驱动）；DB 不可用时容忍为孤儿行，不阻断卸载
+            $dataPurged = [];
             $purgeError = '';
             try {
                 $conn = $this->connect();
                 if ($conn['ok']) {
-                    $purged = (new TranslationSeeder(new PlatformStore($conn['gateway'])))->purgePackage($short);
+                    $dataPurged = PlatformDataImporter::purgeOnRemove($manifest, $short, $conn['gateway']);
                 }
             } catch (\Throwable $e) {
                 $purgeError = $e->getMessage();
             }
+            $purged = (int) ($dataPurged['translation'] ?? 0);
 
             // 回收站条目打孤儿态（数据保留，重装同名包自动接管）；DB 不可用时容忍失败，不阻断卸载
             $orphaned = 0;
             $orphanError = '';
             $approvalOrphaned = 0;
             $approvalOrphanError = '';
+            $printOrphaned = 0;
+            $printOrphanError = '';
+            $schedulerOrphaned = false;
+            $schedulerError = '';
             try {
                 $conn = $this->connect();
                 if ($conn['ok']) {
@@ -1074,10 +1362,21 @@ class Package extends AdminController
                     $approvalOrphaned = (new ApprovalService(
                         new PlatformStore($conn['gateway'])
                     ))->orphanPackage($short);
+                    // 打印模板打孤儿态：包级私有模板冻结、未用票据失效，重装同名包自动接管
+                    $printOrphaned = PrintTplService::instance(
+                        new PlatformStore($conn['gateway'])
+                    )->orphanPackage($short);
+                    // 任务调度打孤儿态：周期定义与历史实例冻结，重装同名包自动接管
+                    (new SchedulerService(
+                        new PlatformStore($conn['gateway'])
+                    ))->orphanPackage($short);
+                    $schedulerOrphaned = true;
                 }
             } catch (\Throwable $e) {
                 $orphanError = $e->getMessage();
                 $approvalOrphanError = $e->getMessage();
+                $printOrphanError = $e->getMessage();
+                $schedulerError = $e->getMessage();
             }
 
             MessagingService::broadcastLifecycle(MessagingService::EVENT_REMOVED, $short, ['name' => $name]);
@@ -1086,14 +1385,21 @@ class Package extends AdminController
                 'data_handling' => $handle,
                 'translations_cleared' => $purged,
                 'translation_error' => $purgeError,
+                'service_data_purged' => $dataPurged,
                 'recycle_bin_orphaned' => $orphaned,
                 'recycle_bin_error' => $orphanError,
                 'approval_orphaned' => $approvalOrphaned,
                 'approval_error' => $approvalOrphanError,
+                'print_tpl_orphaned' => $printOrphaned,
+                'print_tpl_error' => $printOrphanError,
+                'scheduler_orphaned' => $schedulerOrphaned,
+                'scheduler_error' => $schedulerError,
             ], '功能包已卸载' . ($handle === 'drop' ? '，数据表已回滚删除' : '，数据表已保留')
                 . ($purged > 0 ? "，已清除 {$purged} 条翻译词条" : '')
                 . ($orphaned > 0 ? "，回收站 {$orphaned} 条数据已转托管" : '')
-                . ($approvalOrphaned > 0 ? "，审批单据 {$approvalOrphaned} 条已冻结" : ''));
+                . ($approvalOrphaned > 0 ? "，审批单据 {$approvalOrphaned} 条已冻结" : '')
+                . ($printOrphaned > 0 ? "，打印模板 {$printOrphaned} 个已冻结" : '')
+                . ($schedulerOrphaned ? '，任务定义与实例已冻结' : ''));
         } catch (\Throwable $e) {
             return $this->jsonFail($e->getMessage());
         }
@@ -1175,15 +1481,19 @@ class Package extends AdminController
             }
             try {
                 $packShort = substr((string) $target, strlen('lgg-pkg-'));
+                // 数据随包导出（P1）：manifest 声明 data（且 enable≠false）时经平台服务驱动导出服务数据，注入包内 data/
+                $extra = $this->buildPackageData($dir, $packShort);
+                $dataN = $this->countExportedServices($extra);
                 if (class_exists(\ZipArchive::class)) {
-                    $zip = PackagePacker::pack($dir, $this->stagingRoot());
+                    $zip = PackagePacker::pack($dir, $this->stagingRoot(), null, $extra);
                     MessagingService::broadcastLifecycle(MessagingService::EVENT_PACKED, $packShort);
                     return download($zip, basename($zip));
                 }
                 $pack = rtrim($this->packOutRoot(), '/\\') . '/' . $target;
-                PackagePacker::packToDir($dir, $pack);
+                PackagePacker::packToDir($dir, $pack, $extra);
                 MessagingService::broadcastLifecycle(MessagingService::EVENT_PACKED, $packShort);
-                Session::flash('linhub_msg', ['type' => 'success', 'text' => '未启用 ext-zip，已生成目录包：' . $pack]);
+                Session::flash('linhub_msg', ['type' => 'success', 'text' => '未启用 ext-zip，已生成目录包：' . $pack
+                    . ($dataN > 0 ? "（含 {$dataN} 项服务数据）" : '')]);
                 return redirect('/admin/package/index');
             } catch (\Throwable $e) {
                 Session::flash('linhub_msg', ['type' => 'error', 'text' => $e->getMessage()]);
@@ -1195,13 +1505,42 @@ class Package extends AdminController
         return redirect('/admin/package/index');
     }
 
+    /**
+     * 数据随包导出（P1）：manifest 声明 data 段（且 enable≠false）时，经平台服务驱动导出服务数据文件集。
+     * DB 不可用时抛错拒绝（避免产出缺数据的误导性包）；未声明 data 段返回空集，打包行为与原来一致。
+     *
+     * @return array<string,string> 相对包根路径 => 文件内容（data/<id>.json 与 data/index.json）
+     */
+    private function buildPackageData(string $dir, string $short): array
+    {
+        $manifest = $this->readReturningArray(rtrim($dir, '/\\') . '/manifest.php');
+        $data = $manifest['data'] ?? null;
+        if (!is_array($data) || (($data['enable'] ?? true) === false)) {
+            return [];
+        }
+        $conn = $this->connect();
+        if (!$conn['ok']) {
+            throw new \RuntimeException('manifest 声明了数据随包（data.enable），但数据库不可用，无法导出服务数据');
+        }
+        return PlatformDataPacker::build($short, $manifest, $conn['gateway']);
+    }
+
+    /** 从导出文件集中解析 data/index.json，取随包导出的服务数（用于响应消息展示）。 */
+    private function countExportedServices(array $extra): int
+    {
+        $idx = json_decode((string) ($extra['data/index.json'] ?? ''), true);
+        return is_array($idx) ? count((array) ($idx['services'] ?? [])) : 0;
+    }
+
     /** 已安装功能包列表（补充标题/描述；禁用包源码在隔离区，回退 disabled_dir 读 manifest）。 */
     private function listInstalled(): array
     {
+        // 菜单校验结果来自注册表实际登记（valid=false 的声明在包详情-菜单面板有明细）
+        $registry = (new IntegrationRegistry(HostBootstrap::defaultRegistryFile()))->read();
         $rows = [];
         foreach ((new PackageStateStore($this->stateFile()))->read() as $name => $rec) {
+            $state = (string) ($rec['state'] ?? '');
             $title = (string) ($rec['name'] ?? $name);
-            $desc  = '';
             $src   = (string) ($rec['source_dir'] ?? '');
             if (!is_file(rtrim($src, '/\\') . '/manifest.php')) {
                 $alt = (string) ($rec['disabled_dir'] ?? '');
@@ -1209,13 +1548,15 @@ class Package extends AdminController
                     $src = $alt;
                 }
             }
-            $mf    = $src !== '' && is_file(rtrim($src, '/\\') . '/manifest.php')
-                ? (array) @include rtrim($src, '/\\') . '/manifest.php'
-                : [];
+            $mfFile = rtrim($src, '/\\') . '/manifest.php';
+            $mf = $src !== '' && is_file($mfFile) ? (array) @include $mfFile : [];
             if ($mf !== []) {
                 $title = (string) ($mf['title'] ?? $title);
                 $desc  = (string) ($mf['description'] ?? '');
+            } else {
+                $desc = '';
             }
+            $issues = $this->packageIssues($state, $src, $mfFile, $mf, (array) $rec, $registry);
             // 可升级：暂存区存在同 short 且版本不同的包
             $upgrade = $this->findUpgrade((string) ($rec['short'] ?? ''), (string) ($rec['version'] ?? ''));
             // 可回退：备份区存在版本不同于当前版本的历史备份
@@ -1226,14 +1567,56 @@ class Package extends AdminController
                 'title'           => $title,
                 'description'     => $desc,
                 'version'         => (string) ($rec['version'] ?? ''),
-                'state'           => (string) ($rec['state'] ?? ''),
+                'state'           => $state,
                 'installed_at'    => (string) ($rec['installed_at'] ?? ''),
                 'upgrade_dir'     => $upgrade['dir'] ?? '',
                 'upgrade_version' => $upgrade['version'] ?? '',
                 'rollback_versions' => $rollbackVersions,
+                'issues'          => $issues,
             ];
         }
         return array_values($rows);
+    }
+
+    /**
+     * 逐包健康检查：基于登记记录与文件系统事实返回问题清单（不重扫描、不改状态）。
+     *
+     *  - error：源码丢失 / manifest.php 无法加载 / short 与登记不一致 —— 功能包已不可用或接入异常
+     *  - warn：禁用隔离目录未登记 / 注册表中存在未通过校验的菜单声明
+     *
+     * @return list<array{level: string, message: string}>
+     */
+    private function packageIssues(string $state, string $src, string $mfFile, array $mf, array $rec, array $registry): array
+    {
+        $issues = [];
+        $short  = (string) ($rec['short'] ?? '');
+
+        if ($state === 'disabled') {
+            $alt = (string) ($rec['disabled_dir'] ?? '');
+            if ($alt === '' || !is_dir($alt)) {
+                $issues[] = ['level' => 'warn', 'message' => '禁用隔离目录未登记或不存在，包说明信息可能不完整'];
+            }
+        }
+        if ($src === '' || !is_file($mfFile)) {
+            $issues[] = ['level' => 'error', 'message' => '源码丢失：' . ($src !== '' ? $src : '登记的 source_dir 为空') . ' 下未找到 manifest.php，功能包路由与接入已不可用'];
+        } elseif ($mf === []) {
+            $issues[] = ['level' => 'error', 'message' => 'manifest.php 无法加载（语法错误或未返回数组），功能包声明信息不可用'];
+        } elseif ($short !== '' && (string) ($mf['short'] ?? '') !== $short) {
+            $issues[] = ['level' => 'error', 'message' => 'manifest 的 short（' . (string) ($mf['short'] ?? '') . '）与登记 short（' . $short . '）不一致'];
+        }
+
+        if ($short !== '' && isset($registry[$short]['menus']) && is_array($registry[$short]['menus'])) {
+            $invalid = 0;
+            foreach ($registry[$short]['menus'] as $menu) {
+                if (is_array($menu) && empty($menu['valid'])) {
+                    $invalid++;
+                }
+            }
+            if ($invalid > 0) {
+                $issues[] = ['level' => 'warn', 'message' => $invalid . ' 个菜单声明未通过校验（图标无效或 parent 指向未知，详见包详情-菜单面板）'];
+            }
+        }
+        return $issues;
     }
 
     /** 在暂存区查找同 short 且版本不同的可升级包。 */

@@ -8,9 +8,13 @@ use linhub\capability\auth\Identity;
 use linhub\host\home\HomeCustomization;
 use linhub\host\home\UserProfile;
 use linhub\host\lifecycle\PlatformUpdater;
+use linhub\host\rbac\RbacRoles;
 use linhub\host\services\attachment\AttachmentService;
+use linhub\host\services\approval\ApprovalService;
+use linhub\host\services\approval\ApprovalSettings;
 use linhub\host\services\dictionary\DictionaryService;
 use linhub\host\services\inbox\InboxService;
+use linhub\host\services\setting\SiteSettingService;
 use linhub\host\support\HostBootstrap;
 
 /**
@@ -37,11 +41,47 @@ class Home extends AdminController
 
         $userPerms = $this->bootstrap->userPerms($identity, HostBootstrap::authService());
         $tree      = $this->bootstrap->menuTreeFor($identity);
-        $slots     = $this->bootstrap->workspace()->slotsAllowedBy($userPerms);
+        // 插槽按权限 + 角色类型双重过滤（角色白名单命中才可见）
+        $slots     = $this->bootstrap->workspace()->slotsAllowedBy(
+            $userPerms,
+            $this->bootstrap->roleTypesFor($identity),
+        );
+
+        $isSuperAdmin = HostBootstrap::authService()->isSuperAdmin($identity);
+
+        // 审批通知入口开关（fail-soft：字典服务异常时兜底开启，避免误隐藏入口）
+        $approvalNotifyEnabled = true;
+        try {
+            $approvalNotifyEnabled = (new ApprovalSettings())->notifyEnabled();
+        } catch (\Throwable) {
+            $approvalNotifyEnabled = true;
+        }
+
+        // 外观与引导：允许换肤时用户私人皮肤优先于平台默认，否则统一用平台默认皮肤
+        // （用户显式保存过 'default' 与未设置等价——均回退平台默认皮肤；
+        //   收窄前遗留的清单外皮肤（business/tech 等）同样回退平台默认）
+        $siteSettings  = new SiteSettingService();
+        $skinAllowed   = $siteSettings->skinChangeAllowed();
+        $userSkin      = (string) ($this->userProfile()->getSkin((string) $identity->id) ?? '');
+        $effectiveSkin = ($skinAllowed && $userSkin !== '' && $userSkin !== 'default' && SiteSettingService::isSkinAllowed($userSkin))
+            ? $userSkin : $siteSettings->defaultSkin();
 
         // wdState：供前端 workdesktop-ai（WdStation）直接消费的 JSON 数据（分组菜单/用户/插槽）
         $wdState = $this->adminWdState($identity, [
             'roleHomePath' => $this->bootstrap->homePathFor($identity, HostBootstrap::authService()),
+            // 超管可在首页 tab 下拉切换查看各角色工作台
+            'isSuperAdmin' => $isSuperAdmin,
+            'roleHomes'    => $isSuperAdmin ? $this->roleHomeOptions() : [],
+            // 工作台皮肤：用户私人配置优先，未设置或换肤关闭时用平台默认皮肤
+            'skin' => $effectiveSkin,
+            // 皮肤切换清单白名单（前端色板按此过滤，与全局设置默认皮肤下拉同源）
+            'allowedSkins' => SiteSettingService::ALLOWED_SKINS,
+            // 右上角皮肤切换入口是否显示（全局设置「允许用户更换皮肤」，默认允许）
+            'skinAllowed' => $skinAllowed,
+            // 右上角「系统指导」按钮是否显示（全局设置，默认显示）
+            'guideEnabled' => $siteSettings->guideEnabled(),
+            // 右上角审批通知入口是否显示（服务设置「开启审批通知」，默认开启）
+            'approvalNotifyEnabled' => $approvalNotifyEnabled,
             'slots' => array_map(static fn (array $s): array => [
                 'title'  => (string) ($s['title'] ?? ''),
                 'render' => (string) ($s['render'] ?? ''),
@@ -84,6 +124,41 @@ class Home extends AdminController
     }
 
     /**
+     * 超管可切换的角色工作台列表（按角色优先级排序：超管 → 系统管理员 → 功能管理员 → 审核员 → 工作者）。
+     * 仅供首页 tab 下拉菜单消费，key 为预设角色英文键小写标识，path 为对应独立首页路径。
+     *
+     * @return list<array{key:string,label:string,path:string}>
+     */
+    private function roleHomeOptions(): array
+    {
+        // 审核员复用工作者首页（ROLE_HOME_PATHS 同路径），不单独出 tab
+        $names = [
+            RbacRoles::WORKER           => '工作者',
+            RbacRoles::FUNCTIONAL_ADMIN => '功能管理员',
+            RbacRoles::SYSTEM_ADMIN     => '系统管理员',
+            RbacRoles::SUPER_ADMIN      => '超级管理员',
+        ];
+        $out = [];
+        foreach ([
+            RbacRoles::SUPER_ADMIN,
+            RbacRoles::SYSTEM_ADMIN,
+            RbacRoles::FUNCTIONAL_ADMIN,
+            RbacRoles::WORKER,
+        ] as $type) {
+            $path = (string) (HostBootstrap::ROLE_HOME_PATHS[$type] ?? '');
+            if ($path === '') {
+                continue;
+            }
+            $out[] = [
+                'key'   => strtolower($type),
+                'label' => ($names[$type] ?? $type) . '工作台',
+                'path'  => $path,
+            ];
+        }
+        return $out;
+    }
+
+    /**
      * 超管首页统计面板（只读）：用户 / 使用情况 / 服务使用 三块聚合。
      * GET /admin/home/stats
      */
@@ -101,14 +176,23 @@ class Home extends AdminController
             'inbox'      => (new InboxService())->stats(),
         ];
 
-        return $this->jsonOk(self::homeStatsPayload(
+        $payload = self::homeStatsPayload(
             $this->bootstrap->rbacUsers()->all(),
             $this->bootstrap->roles()->all(),
             $this->bootstrap->permissionGroups()->all(),
             $this->bootstrap->permissions()->all(),
             $this->bootstrap->auditTrail()->all(),
             $serviceStats,
-        ));
+        );
+
+        // 平台信息块（只读展示）：运行环境摘要
+        $payload['platform'] = [
+            'php'  => PHP_VERSION,
+            'os'   => PHP_OS_FAMILY,
+            'time' => date('Y-m-d H:i'),
+        ];
+
+        return $this->jsonOk($payload);
     }
 
     /**
@@ -181,6 +265,34 @@ class Home extends AdminController
         $this->bootstrap->saveLoginToSession($updated);
 
         return $this->jsonOk(['name' => $updated->name]);
+    }
+
+    /**
+     * 保存当前用户工作台皮肤。入参 skin（空串恢复默认）；保存到用户私人配置（profile.json）。
+     */
+    public function skinSave()
+    {
+        $identity = $this->identity();
+        if ($identity === null) {
+            return $this->jsonFail('未登录或会话已失效', -401);
+        }
+
+        $skin = trim((string) $this->request->param('skin', ''));
+        if ($skin !== '' && !preg_match('/^[\w-]{1,32}$/', $skin)) {
+            return $this->jsonFail('非法的皮肤标识', 422);
+        }
+        // 平台只提供白名单内皮肤（清单外直接拒绝，防止绕过前端清单写入遗留 key）
+        $svc = new SiteSettingService();
+        if ($skin !== '' && !SiteSettingService::isSkinAllowed($skin)) {
+            return $this->jsonFail('平台未提供该皮肤', 422);
+        }
+        // 换肤关闭时仅拦截「换到其他皮肤」；恢复默认（空串）始终允许
+        if ($skin !== '' && !$svc->skinChangeAllowed()) {
+            return $this->jsonFail('平台已关闭皮肤更换功能', 403);
+        }
+
+        $this->userProfile()->saveSkin((string) $identity->id, $skin);
+        return $this->jsonOk(['skin' => $skin === '' ? 'default' : $skin]);
     }
 
     /** 用户资料存储（data/home/profile.json）。 */
@@ -373,36 +485,52 @@ class Home extends AdminController
         // 应用用户自定义显示名（未定制则用身份自带名称）
         $displayName = $this->userProfile()->getName((string) $identity->id) ?? $identity->name;
 
-        // 工作台插入锚点：仅下发 render 为合法同源 URL 且当前用户可见的插槽（按 zone 分组、order 升序）
-        $allowed = $this->bootstrap->workspace()->slotsAllowedBy($userPerms);
+        // 工作台插入锚点：仅下发 render 为合法同源 URL、权限可见且角色命中的插槽（按 zone 分组、order 升序）
+        $allowed = $this->bootstrap->workspace()->slotsAllowedBy(
+            $userPerms,
+            $this->bootstrap->roleTypesFor($identity),
+        );
         $zones   = self::homeZones($allowed);
         $zonesJson = json_encode($zones, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 
+        // 个人审批统计卡（fail-soft：任一异常不阻断首页渲染；三开关同开才下发数据）
+        $approvalStatsJson = 'null';
+        try {
+            $apSettings = new ApprovalSettings();
+            if ($apSettings->workbenchEnabled() && $apSettings->workbenchApiEnabled() && $apSettings->workbenchStatsEnabled()) {
+                $summary = (new ApprovalService())->myWorkbenchSummary($identity);
+                $approvalStatsJson = json_encode($summary, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            }
+        } catch (\Throwable) {
+            $approvalStatsJson = 'null';
+        }
+
         return $this->app->view->fetch('home/role/' . $tpl, [
-            'identity'     => $identity,
-            'displayName'  => $displayName,
-            'roleLabel'    => $roleLabel,
-            'options'      => $options,
-            'selected'     => $selected,
-            'optionsJson'  => json_encode(array_values($options), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
-            'defaultJson'  => json_encode(array_values($groups['default']), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
-            'selectedJson' => json_encode(array_values($selected), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
-            'slotsJson'    => $zonesJson,
-            'homeKey'      => $homeKey,
+            'identity'          => $identity,
+            'displayName'       => $displayName,
+            'roleLabel'         => $roleLabel,
+            'options'           => $options,
+            'selected'          => $selected,
+            'optionsJson'       => json_encode(array_values($options), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+            'defaultJson'       => json_encode(array_values($groups['default']), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+            'selectedJson'      => json_encode(array_values($selected), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+            'slotsJson'         => $zonesJson,
+            'homeKey'           => $homeKey,
+            'approvalStatsJson' => $approvalStatsJson,
         ]);
     }
 
     /**
-     * 把用户可见插槽按锚点（zone）分组为 home.top / home.bottom 两块。
+     * 把用户可见插槽按锚点（zone）分组为 home.top / home.right / home.bottom 三块。
      * 仅保留 render 为同源绝对路径（以单个 / 开头）的插槽，剔除种子/未知区与非法地址；
      * 每组内按 order 升序。输出项只含前端渲染所需字段。
      *
      * @param list<array<string,mixed>> $slots
-     * @return array{'home.top':list<array{id:string,title:string,render:string,order:int}>,'home.bottom':list<array{id:string,title:string,render:string,order:int}>}
+     * @return array{'home.top':list<array{id:string,title:string,render:string,order:int}>,'home.right':list<array{id:string,title:string,render:string,order:int}>,'home.bottom':list<array{id:string,title:string,render:string,order:int}>}
      */
     private static function homeZones(array $slots): array
     {
-        $zones = ['home.top' => [], 'home.bottom' => []];
+        $zones = ['home.top' => [], 'home.right' => [], 'home.bottom' => []];
         foreach ($slots as $s) {
             $id     = (string) ($s['id'] ?? '');
             $render = (string) ($s['render'] ?? '');
@@ -431,6 +559,7 @@ class Home extends AdminController
      *   - users   用户块：用户总数 / 角色数 / 权限组数 / 权限点数
      *   - usage   使用情况块：今日操作数 / 今日活跃操作人（去重）/ 近 7 天操作趋势 / 操作类型 Top5
      *   - services 服务使用块：附件 / 字典 / 消息 的关键计数
+     *   - recent   最近操作块：最新 8 条留痕（时间 / 操作人 / 动作 / 对象）
      *
      * @param list<array<string,mixed>> $users
      * @param list<array<string,mixed>> $roles
@@ -499,6 +628,17 @@ class Home extends AdminController
             'topActions'  => $topActions,
         ];
 
+        // —— 最近操作块：最新 8 条留痕（新→旧） ——
+        $recent = [];
+        foreach (array_slice(array_reverse($trail), 0, 8) as $e) {
+            $recent[] = [
+                'time'     => substr((string) ($e['created_at'] ?? ''), 0, 16),
+                'operator' => (string) ($e['operator'] ?? ''),
+                'action'   => (string) ($e['action'] ?? ''),
+                'target'   => (string) ($e['target'] ?? ''),
+            ];
+        }
+
         // —— 服务使用块：从各服务 stats() 提取计数 ——
         $attachment = (array) ($serviceStats['attachment'] ?? []);
         $dictionary = (array) ($serviceStats['dictionary'] ?? []);
@@ -524,6 +664,7 @@ class Home extends AdminController
             'users'    => $usersBlock,
             'usage'    => $usageBlock,
             'services' => $servicesBlock,
+            'recent'   => $recent,
         ];
     }
 }

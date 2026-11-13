@@ -25,14 +25,22 @@
 /code/host/data/plugin-packout/
 /code/host/data/plugin-staging/
 /code/host/data/plugin-disabled/
+/code/host/data/
 
+# ── 插件目录 ──
+/code/plugins/
 # ── 编辑器与系统文件 ──
 .idea/
 .vscode/
 .DS_Store
 Thumbs.db
+.playwright-cli/
 
 # ── 本地协作与记忆文件（不随仓库分发）──
 /AGENTS.md
 /memory.md
 /.workbuddy/
+/.playwrite-cli/
+/.screenshots/
+
+

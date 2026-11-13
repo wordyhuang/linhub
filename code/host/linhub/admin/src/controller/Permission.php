@@ -45,10 +45,10 @@ class Permission extends AdminController
             $items = array_values(array_filter($items, static fn (array $p): bool => $p['open'] || in_array($role, $p['roles'], true)));
         }
 
-        // 筛选下拉：四种角色类型（G1 数据源，值用显示名以便与 roles 声明匹配）
+        // 筛选下拉：5 个预设角色英文键（与权限项 roles 声明同一口径）
         $roleOptions = [];
-        foreach (RbacRoles::TYPE_NAMES as $type => $name) {
-            $roleOptions[] = ['type' => $type, 'name' => $name];
+        foreach (RbacRoles::PRESET_KEYS as $key) {
+            $roleOptions[] = ['type' => $key, 'name' => RbacRoles::PRESET_ROLES['role_' . strtolower($key)] ?? $key];
         }
 
         return $this->jsonOk(['list' => $items, 'total' => count($items), 'roleOptions' => $roleOptions]);
@@ -62,8 +62,8 @@ class Permission extends AdminController
             return $gate;
         }
         $roleOptions = [];
-        foreach (RbacRoles::TYPE_NAMES as $type => $name) {
-            $roleOptions[] = ['type' => $type, 'name' => $name];
+        foreach (RbacRoles::PRESET_KEYS as $key) {
+            $roleOptions[] = ['type' => $key, 'name' => RbacRoles::PRESET_ROLES['role_' . strtolower($key)] ?? $key];
         }
         return $this->jsonOk(['roleOptions' => $roleOptions]);
     }

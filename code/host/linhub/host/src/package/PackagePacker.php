@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace linhub\host\package;
 
+use linhub\host\manifest\ManifestError;
 use linhub\host\manifest\ManifestValidator;
 
 /**
@@ -12,6 +13,9 @@ use linhub\host\manifest\ManifestValidator;
  * 将源码 + manifest + 资源按《功能包协议规范》目录结构打包为可安装交付单元。
  * 产物支持两种形态：zip（系统装有 ext-zip 时）或标准目录副本（始终可用）。
  * 入包前对 manifest 做一次校验，保证产物内含完整合法清单（G1）。
+ *
+ * 数据随包（P1）：源目录顶层 data/ 为数据随包导出产物目录，不入源扫描；
+ * 由调用方经 PlatformDataPacker 生成文件集后以 $extraFiles（相对路径 => 内容）注入包内。
  */
 final class PackagePacker
 {
@@ -24,6 +28,7 @@ final class PackagePacker
         'workspace.php',
         'ui_replace.php',
         'shortcuts.php',
+        'tasks.php',
         'src',
         'migrations',
         'resources',
@@ -35,15 +40,18 @@ final class PackagePacker
      *
      * @param string $packageDir 功能包源码目录（含 manifest.php）
      * @param string $outputDir  输出目录
+     * @param string|null $filename 产物文件名；缺省 lgg-pkg-{short}-v{version}.zip
+     * @param array<string,string> $extraFiles 附加注入文件（相对包根路径 => 内容），如数据随包导出产物
      * @return string 生成的 zip 绝对路径
      * @throws \RuntimeException 缺少 manifest 或校验失败、ext-zip 不可用
      */
-    public static function pack(string $packageDir, string $outputDir, ?string $filename = null): string
+    public static function pack(string $packageDir, string $outputDir, ?string $filename = null, array $extraFiles = []): string
     {
         $manifest = self::readManifest($packageDir);
-        $errors = (new ManifestValidator())->validate($manifest);
+        $reasons = [];
+        $errors = (new ManifestValidator())->validate($manifest, $reasons, $packageDir);
         if ($errors !== []) {
-            throw new \RuntimeException('打包前 manifest 校验失败：' . implode(',', $errors));
+            throw new \RuntimeException('打包前 manifest 校验失败：' . implode(',', ManifestError::render($errors, $reasons)));
         }
 
         if (!class_exists(\ZipArchive::class)) {
@@ -64,6 +72,10 @@ final class PackagePacker
         }
 
         self::addDir($zip, $packageDir, '');
+        // 附加注入文件（数据随包导出产物等）：路径分隔统一为 /
+        foreach ($extraFiles as $rel => $content) {
+            $zip->addFromString(ltrim(str_replace('\\', '/', (string) $rel), '/'), (string) $content);
+        }
         $zip->close();
 
         return $zipPath;
@@ -72,21 +84,23 @@ final class PackagePacker
     /**
      * 生成标准目录包（不依赖更改进 zip 扩展）。
      *
+     * @param array<string,string> $extraFiles 附加注入文件（相对包根路径 => 内容），如数据随包导出产物
      * @return string 目标目录绝对路径
      */
-    public static function packToDir(string $packageDir, string $targetDir): string
+    public static function packToDir(string $packageDir, string $targetDir, array $extraFiles = []): string
     {
         $manifest = self::readManifest($packageDir);
-        $errors = (new ManifestValidator())->validate($manifest);
+        $reasons = [];
+        $errors = (new ManifestValidator())->validate($manifest, $reasons, $packageDir);
         if ($errors !== []) {
-            throw new \RuntimeException('打包前 manifest 校验失败：' . implode(',', $errors));
+            throw new \RuntimeException('打包前 manifest 校验失败：' . implode(',', ManifestError::render($errors, $reasons)));
         }
 
         if (!is_dir($targetDir) && !mkdir($targetDir, 0775, true) && !is_dir($targetDir)) {
             throw new \RuntimeException("无法创建目标目录：{$targetDir}");
         }
 
-        foreach (self::listSourceItems($packageDir) as $item) {
+        foreach (self::listSourceItems($packageDir, true) as $item) {
             $src = rtrim($packageDir, '/\\') . '/' . $item;
             $dst = rtrim($targetDir, '/\\') . '/' . $item;
             if (is_dir($src)) {
@@ -95,6 +109,12 @@ final class PackagePacker
                 self::ensureParent($dst);
                 copy($src, $dst);
             }
+        }
+        // 附加注入文件（数据随包导出产物等）：路径分隔统一为 /
+        foreach ($extraFiles as $rel => $content) {
+            $dst = rtrim($targetDir, '/\\') . '/' . ltrim(str_replace('\\', '/', (string) $rel), '/');
+            self::ensureParent($dst);
+            file_put_contents($dst, (string) $content);
         }
         return $targetDir;
     }
@@ -113,11 +133,15 @@ final class PackagePacker
     }
 
     /** 列出要入包的顶层交付项（过滤运行时产物）。 */
-    private static function listSourceItems(string $packageDir): array
+    private static function listSourceItems(string $packageDir, bool $excludeData = false): array
     {
         $items = [];
         foreach (scandir($packageDir) ?: [] as $entry) {
             if ($entry === '.' || $entry === '..' || $entry === '.git' || $entry === 'vendor') {
+                continue;
+            }
+            // 顶层 data/ 为数据随包导出产物目录（由 PlatformDataPacker 生成、经 $extraFiles 注入），不入源扫描
+            if ($excludeData && $entry === 'data') {
                 continue;
             }
             $items[] = $entry;
@@ -129,7 +153,8 @@ final class PackagePacker
 
     private static function addDir(\ZipArchive $zip, string $baseDir, string $relative): void
     {
-        foreach (self::listSourceItems($baseDir) as $item) {
+        // 仅顶层排除 data/（递归子目录中同名目录不受影响，避免误伤 resources/data 等静态资源）
+        foreach (self::listSourceItems($baseDir, $relative === '') as $item) {
             $full = rtrim($baseDir, '/\\') . '/' . $item;
             $rel = $relative === '' ? $item : $relative . '/' . $item;
             if (is_dir($full)) {

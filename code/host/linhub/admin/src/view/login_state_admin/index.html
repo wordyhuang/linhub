@@ -23,7 +23,7 @@
 
   <script type="text/x-template" id="ls-tpl">
     <div class="ls-page" v-loading="loading" element-loading-text="加载中...">
-      <wd-panel :border="true">
+      <wd-panel description-align="right" :border="true">
         <wd-tips type="box" style="margin-bottom:12px">
           登录状态服务（LS-6）实时只读快照：展示当前访问者在本次请求中被各功能包读取到的身份实际值。游客态同样可正常查看，不抛异常。
         </wd-tips>
@@ -95,6 +95,7 @@
   <script src="/static/vendor/element-plus/index.full.min.js"></script>
   <script src="/static/vendor/icons/index.iife.min.js"></script>
   <script src="/static/vendor/workdesktop-ai/index.umd.js"></script>
+  <script src="/static/linhub/auth-guard.js?v=2"></script>
   <script>
     const WD = window.WorkDesktop;
     const ElementPlus = window.ElementPlus;

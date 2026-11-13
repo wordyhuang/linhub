@@ -21,21 +21,22 @@ final class RbacPermissionGroup
         $this->store = $store;
     }
 
-    /** 创建权限组（可同时挂接权限项与针对角色）。 */
-    public function create(string $name, array $permCodes = [], array $roleTypes = [], ?string $id = null): string
+    /** 创建权限组（可同时挂接权限项与针对角色，可附备注）。 */
+    public function create(string $name, array $permCodes = [], array $roleTypes = [], ?string $id = null, string $remark = ''): string
     {
         $gid = $id ?: 'group_' . substr(md5((string) microtime(true)), 0, 10);
         $this->store->put(RbacStorage::GROUPS, $gid, [
-            'id'    => $gid,
-            'name'  => $name,
-            'roles' => array_values(array_unique($roleTypes)),
-            'perms' => array_values(array_unique($permCodes)),
+            'id'     => $gid,
+            'name'   => $name,
+            'roles'  => array_values(array_unique($roleTypes)),
+            'perms'  => array_values(array_unique($permCodes)),
+            'remark' => $remark,
         ]);
         return $gid;
     }
 
-    /** 更新权限组名称与权限项（整组替换）；$roleTypes 为 null 时沿用现有针对角色。 */
-    public function update(string $id, string $name, array $permCodes, ?array $roleTypes = null): bool
+    /** 更新权限组名称与权限项（整组替换）；$roleTypes/$remark 为 null 时沿用现有值。 */
+    public function update(string $id, string $name, array $permCodes, ?array $roleTypes = null, ?string $remark = null): bool
     {
         $group = $this->store->find(RbacStorage::GROUPS, $id);
         if ($group === null) {
@@ -43,10 +44,11 @@ final class RbacPermissionGroup
         }
         $roles = $roleTypes ?? (array) ($group['roles'] ?? []);
         $this->store->put(RbacStorage::GROUPS, $id, [
-            'id'    => $id,
-            'name'  => $name,
-            'roles' => array_values(array_unique($roles)),
-            'perms' => array_values(array_unique($permCodes)),
+            'id'     => $id,
+            'name'   => $name,
+            'roles'  => array_values(array_unique($roles)),
+            'perms'  => array_values(array_unique($permCodes)),
+            'remark' => $remark ?? (string) ($group['remark'] ?? ''),
         ]);
         return true;
     }
@@ -59,10 +61,11 @@ final class RbacPermissionGroup
             return false;
         }
         $this->store->put(RbacStorage::GROUPS, $id, [
-            'id'    => $id,
-            'name'  => $name,
-            'roles' => (array) ($group['roles'] ?? []),
-            'perms' => (array) ($group['perms'] ?? []),
+            'id'     => $id,
+            'name'   => $name,
+            'roles'  => (array) ($group['roles'] ?? []),
+            'perms'  => (array) ($group['perms'] ?? []),
+            'remark' => (string) ($group['remark'] ?? ''),
         ]);
         return true;
     }

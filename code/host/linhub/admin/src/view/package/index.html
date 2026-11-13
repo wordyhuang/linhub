@@ -8,6 +8,7 @@
   <link rel="icon" type="image/svg+xml" href="/brand/favicon.svg">
   <link rel="stylesheet" href="/static/vendor/element-plus/index.css">
   <link rel="stylesheet" href="/static/vendor/workdesktop-ai/style.css">
+  <link rel="stylesheet" href="/static/linhub/cards.css">
   <style>
     html,
     body,
@@ -196,7 +197,7 @@
   <script type="text/x-template" id="pkg-tpl">
   <div class="pkg-page">
         <!-- 当前版本 / 平台与 workdesktop 版本检测升级 -->
-        <wd-panel :border="true">
+        <wd-panel description-align="right" :border="true">
             <template #description>
               平台按配置的检测接口检测；workdesktop 按包发布地址（npm）自动检测最新版本。有新版本时可一键升级（服务端自动下载替换，升级前自动备份）。
             </template>
@@ -255,17 +256,44 @@
             </div>
         </wd-panel>
 
-        <wd-panel :border="true" title="已安装功能包">
+        <wd-panel description-align="right" :border="true" title="已安装功能包">
             <template #description>
               超管专属：管理已安装功能包，并从暂存目录安装新功能包。宿主平台版本：v{{ hostVersion }}
             </template>
 
           <wd-data-grid :data-source="installed" border stripe :with-index="false" :with-pager="false">
             <template #toolbar>
-              <el-button type="primary" @click="openCreate">
-                <el-icon><Plus /></el-icon>
-                <span style="margin-left:4px">新建功能包</span>
-              </el-button>
+              <wd-drawer-button type="primary" label="新建功能包" title="新建功能包" mode="dialog" drawer-size="440px" @open="openCreate">
+                <el-form label-width="80px" @submit.prevent>
+                  <el-form-item label="短名" required>
+                    <el-input v-model="createForm.short" placeholder="小写字母/数字/中划线，如 demo" />
+                  </el-form-item>
+                  <el-form-item label="标题" required>
+                    <el-input v-model="createForm.title" placeholder="人类可读名称，如 演示包" />
+                  </el-form-item>
+                  <el-form-item label="版本">
+                    <el-input v-model="createForm.version" placeholder="0.1.0" />
+                  </el-form-item>
+                  <el-form-item label="类型">
+                    <wd-radio-list v-model="createForm.type" button-style
+                                   :data-source="[{type:'app',name:'app（业务应用包）'},{type:'lib',name:'lib（能力库包）'}]"
+                                   text-prop="name" value-prop="type" />
+                  </el-form-item>
+                  <el-form-item label="门禁类型">
+                    <wd-radio-list v-model="createForm.access" button-style
+                                   :data-source="[{access:'admin',name:'admin 包（需登录中后台）'},{access:'public',name:'public 包（免登录公开接口）'}]"
+                                   text-prop="name" value-prop="access" />
+                  </el-form-item>
+                  <el-form-item label="说明">
+                    <el-input v-model="createForm.description" type="textarea" :rows="3"
+                              placeholder="功能包说明文字，留空则使用默认文案" />
+                  </el-form-item>
+                </el-form>
+                <template #footer="f">
+                  <el-button @click="f.close">取消</el-button>
+                  <el-button type="primary" :loading="busy" @click="doCreate(f)">生成骨架</el-button>
+                </template>
+              </wd-drawer-button>
             </template>
             <el-table-column label="状态" width="90" align="center">
               <template #default="{ row }">
@@ -274,12 +302,18 @@
                 </el-tag>
               </template>
             </el-table-column>
-            <el-table-column label="包名 / 短名">
+            <el-table-column label="包名 / 短名" min-width="220">
               <template #default="{ row }">
                 <div>{{ row.title }}</div>
                 <div style="font-size:12px;color:var(--wd-text-color-secondary, #6b7280)">
                   {{ row.name }} · {{ row.short }}
                 </div>
+                <!-- 功能包健康问题：error 红 / warn 橙，行内直接展示具体错误内容 -->
+                <wd-tips
+                  v-if="row.issues && row.issues.length"
+                  type="box" icon="WarningFilled"
+                  :color="row.issues.some(i => i.level === 'error') ? '#f56c6c' : '#e6a23c'"
+                  :tips="row.issues.map(i => i.message).join('；')" />
               </template>
             </el-table-column>
             <el-table-column prop="version" label="版本" width="90" />
@@ -316,6 +350,10 @@
                     v-if="row.rollback_versions && row.rollback_versions.length"
                     type="warning" plain
                     @click="openRollback(row)">回退</el-button>
+                  <el-button
+                    v-if="row.state === 'enabled'" type="success" plain
+                    :loading="busy"
+                    @click="confirmUpdateConfig(row)">重载配置</el-button>
                   <el-button type="danger" plain @click="confirmRemove(row)">卸载</el-button>
                 </el-button-group>
               </template>
@@ -323,11 +361,67 @@
             <template #empty>
               <el-empty description="尚未安装任何功能包" :image-size="80" />
             </template>
+            <!-- ── 卡片清单模式（DataGrid 内建 modeSwitch 视图；扁平三层） ── -->
+            <template #card-item="{ row }">
+              <div class="lh-card">
+                <div class="lh-card__head">
+                  <div class="lh-card__title">{{ row.title }}</div>
+                  <div class="lh-card__tags">
+                    <el-tag :type="row.state === 'enabled' ? 'success' : 'info'" size="small">{{ row.state === 'enabled' ? '启用' : '禁用' }}</el-tag>
+                    <el-tag v-if="row.upgrade_version" size="small" type="warning" effect="plain">可升级 v{{ row.upgrade_version }}</el-tag>
+                  </div>
+                  <div class="lh-card__extra">
+                    <div class="lh-card__stamp">v{{ row.version || '—' }}</div>
+                  </div>
+                </div>
+                <div class="lh-card__fields">
+                  <div class="lh-card__field is-wide"><div class="k">包名</div><div class="v">{{ row.name }}</div></div>
+                  <div class="lh-card__field"><div class="k">短名</div><div class="v">{{ row.short }}</div></div>
+                  <div class="lh-card__field"><div class="k">安装于</div><div class="v">{{ fmtDate(row) }}</div></div>
+                  <div class="lh-card__field is-wide"><div class="k">说明</div><div class="v">{{ row.description || '—' }}</div></div>
+                </div>
+                <wd-tips
+                  v-if="row.issues && row.issues.length"
+                  type="box" icon="WarningFilled" style="margin-top:8px"
+                  :color="row.issues.some(i => i.level === 'error') ? '#f56c6c' : '#e6a23c'"
+                  :tips="row.issues.map(i => i.message).join('；')" />
+                <div class="lh-card__ops">
+                  <wd-drawer-button
+                    label="查看"
+                    type="primary"
+                    size="small"
+                    drawer-size="900px"
+                    :title="'功能包详情 · ' + row.title"
+                    :url="'/admin/package/view?name=' + encodeURIComponent(row.name)"
+                    reload-on-open />
+                  <wd-api-button
+                    v-if="row.state === 'disabled'"
+                    label="启用" type="primary" size="small"
+                    api="/admin/package/enable"
+                    :api-param="{ name: row.name }"
+                    :head-refresh-datagrid="false"
+                    @api-success="loadData">启用</wd-api-button>
+                  <wd-popconfirm-button
+                    v-if="row.state === 'enabled'"
+                    title="确认禁用该功能包？"
+                    tip="禁用后该功能包的菜单与插槽暂停接入，可随时重新启用"
+                    api="/admin/package/disable"
+                    :api-param="{ name: row.name }"
+                    :head-refresh-datagrid="false"
+                    type="warning" size="small"
+                    @api-success="loadData">禁用</wd-popconfirm-button>
+                  <el-button
+                    v-if="row.state === 'enabled'" type="success" plain size="small"
+                    @click="confirmUpdateConfig(row)">重载配置</el-button>
+                  <el-button type="danger" plain size="small" @click="confirmRemove(row)">卸载</el-button>
+                </div>
+              </div>
+            </template>
           </wd-data-grid>
 
           </wd-panel>
 
-          <wd-panel title="暂存可安装">
+          <wd-panel description-align="right" title="暂存可安装">
             <template #description>
               放在暂存目录内的功能包，目录名须为 lgg-pkg-短名</template>
 
@@ -369,9 +463,13 @@
                   @close="loadData" />
               </div>
               <div class="desc">{{ p.description || '—' }}</div>
-              <ul v-if="!p.valid" style="margin:8px 0 0;padding-left:18px;font-size:12px;color:#f56c6c">
-                <li v-for="(m, i) in p.problems" :key="i">{{ m }}</li>
-              </ul>
+              <!-- 暂存包校验失败：具体问题内容直出（与已安装列表一致的 wd-tips 形态） -->
+              <wd-tips
+                v-if="!p.valid && p.problems && p.problems.length"
+                type="box" icon="WarningFilled"
+                color="#f56c6c"
+                :tips="p.problems.join('；')"
+                style="margin-top:8px" />
               <div class="card-actions">
                 <wd-drawer-button
                   label="查看"
@@ -464,30 +562,6 @@
       </template>
     </el-dialog>
 
-    <!-- 新建功能包 -->
-    <el-dialog v-model="createOpen" title="新建功能包" width="440px" append-to-body>
-      <el-form label-width="80px" @submit.prevent>
-        <el-form-item label="短名" required>
-          <el-input v-model="createForm.short" placeholder="小写字母/数字/中划线，如 demo" />
-        </el-form-item>
-        <el-form-item label="标题" required>
-          <el-input v-model="createForm.title" placeholder="人类可读名称，如 演示包" />
-        </el-form-item>
-        <el-form-item label="版本">
-          <el-input v-model="createForm.version" placeholder="0.1.0" />
-        </el-form-item>
-        <el-form-item label="类型">
-          <wd-radio-list v-model="createForm.type" button-style
-                         :data-source="[{type:'app',name:'app（业务应用包）'},{type:'lib',name:'lib（能力库包）'}]"
-                         text-prop="name" value-prop="type" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="createOpen = false">取消</el-button>
-        <el-button type="primary" :loading="busy" @click="doCreate">生成骨架</el-button>
-      </template>
-    </el-dialog>
-
     <!-- 回退版本选择 -->
     <el-dialog v-model="rollbackOpen" :title="'回退功能包 · ' + (rollbackRow?.title || '')" width="520px" append-to-body>
       <el-alert
@@ -577,6 +651,40 @@
         <el-button type="warning" :loading="wdRollback.submitting" :disabled="!wdRollback.selected" @click="doWdRollback">确认回退</el-button>
       </template>
     </el-dialog>
+
+    <!-- 安装进度：安装为后台长任务，进度由 /admin/package/progress 轮询驱动，不受请求超时限制 -->
+    <el-dialog
+      v-model="installProgress.visible"
+      title="安装功能包"
+      width="520px"
+      append-to-body
+      :close-on-click-modal="false"
+      :close-on-press-escape="installProgress.status !== 'running'"
+      :show-close="installProgress.status !== 'running'">
+      <div v-if="installProgress.name" style="font-size:13px;font-weight:600;margin-bottom:10px">
+        {{ installProgress.name }}
+      </div>
+      <el-progress
+        :percentage="installProgress.percent"
+        :status="installProgress.status === 'failed' ? 'exception' : (installProgress.status === 'done' ? 'success' : '')"
+        :stroke-width="12" />
+      <div style="margin-top:10px;font-size:13px;color:var(--wd-text-color-secondary, #6b7280)">
+        {{ installProgress.step }}
+      </div>
+      <div v-if="installProgress.status === 'running'"
+           style="margin-top:6px;font-size:12px;color:var(--wd-text-color-secondary, #6b7280)">
+        安装为后台长任务，不受请求超时限制；完成后会自动刷新列表。
+      </div>
+      <wd-tips
+        v-if="installProgress.status === 'failed' && installProgress.error"
+        type="box" icon="WarningFilled" color="#f56c6c"
+        :tips="installProgress.error" style="margin-top:10px" />
+      <template #footer>
+        <el-button v-if="installProgress.status === 'failed'" @click="installProgress.visible = false">关闭</el-button>
+        <el-button v-else-if="installProgress.status === 'done'" type="primary" @click="installProgress.visible = false">完成</el-button>
+        <el-button v-else loading disabled>安装中...</el-button>
+      </template>
+    </el-dialog>
   </div>
 </script>
 
@@ -584,6 +692,7 @@
   <script src="/static/vendor/element-plus/index.full.min.js"></script>
   <script src="/static/vendor/icons/index.iife.min.js"></script>
   <script src="/static/vendor/workdesktop-ai/index.umd.js"></script>
+  <script src="/static/linhub/auth-guard.js?v=2"></script>
   <script>
     const WD = window.WorkDesktop;
     const ElementPlus = window.ElementPlus;
@@ -615,11 +724,20 @@
         const dropConfirmed = ref(false);
         const delStagedOpen = ref(false);
         const delStagedRow = ref(null);
-        const createOpen = ref(false);
-        const createForm = ref({ short: '', title: '', version: '0.1.0', type: 'app' });
+        const createForm = ref({ short: '', title: '', version: '0.1.0', type: 'app', access: 'admin', description: '' });
         const rollbackOpen = ref(false);
         const rollbackRow = ref(null);
         const rollbackPath = ref('');
+
+        // —— 安装进度：安装为长任务，进度由 /admin/package/progress 轮询驱动 ——
+        const installProgress = reactive({
+          visible: false,
+          name: '',
+          percent: 0,
+          step: '',
+          status: 'running', // running | done | failed
+          error: '',
+        });
 
         // —— 当前版本 panel：平台（host）与 workdesktop 各自独立检测/升级 ——
         function makeVersionItem() {
@@ -856,6 +974,32 @@
           }
         }
 
+        // 重载配置确认：按当前源码重载接入配置（菜单/权限/工作台登记、翻译种子、服务数据、
+        // resource/approvals 审批流程声明等覆盖式重导）并重挂路由，版本与启用状态不变。
+        // 接口仍为 /admin/package/reinstall（历史路径保留），语义即「重载包配置」。
+        async function confirmUpdateConfig(row) {
+          try {
+            await ElementPlus.ElMessageBox.confirm(
+              `确定重载「${row.title || row.name}」的配置吗？将按当前源码重新登记菜单、权限、工作台等接入点，并重载翻译、服务数据与 resource/approvals 审批流程声明，重挂路由。版本与启用状态不变，单据数据不受影响。`,
+              '重载配置确认',
+              { confirmButtonText: '确认重载', cancelButtonText: '取消', type: 'warning' }
+            );
+          } catch (e) {
+            return;
+          }
+          busy.value = true;
+          try {
+            const res = await WD.request.post('/admin/package/reinstall', { name: row.name });
+            ElementPlus.ElMessage[res.success ? 'success' : 'error'](res.message || (res.success ? '已重载配置' : '重载配置失败'));
+            if (res.success && res.data && res.data.warnings && res.data.warnings.length) {
+              ElementPlus.ElMessage.warning(res.data.warnings.join('；'));
+            }
+            if (res.success) await loadData();
+          } finally {
+            busy.value = false;
+          }
+        }
+
         // 打包为纯下载端点（返回二进制文件流），用隐藏表单提交，不做 JSON 处理
         async function doPack(p) {
           // 未启用 zip：明确告知不会下载，仅生成目录包，需用户确认
@@ -905,18 +1049,74 @@
           if (s === 'changed') return '审核通过后内容已变更，需重新审核。';
           return '该版本尚未通过接入审核。';
         }
+        // 安装：POST 发起（服务端 ignore_user_abort + set_time_limit(0) 执行到底），
+        // 同时轮询进度任务文件；即使 POST 被网关断开，仍以任务文件为准收敛结果，不会超时丢弃
         async function doInstall(p) {
           if (p.review_status !== 'approved') {
             ElementPlus.ElMessage.warning('该版本尚未通过功能包接入审核，请先审核');
             return;
           }
+          // 任务标识由前端生成，后端据此写进度文件（轮询的事实源）
+          const task = 't' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+          installProgress.visible = true;
+          installProgress.name = p.title || p.short || '';
+          installProgress.percent = 0;
+          installProgress.step = '正在发起安装...';
+          installProgress.status = 'running';
+          installProgress.error = '';
           busy.value = true;
-          try {
-            const res = await WD.request.post('/admin/package/install', { target: p.dir });
-            ElementPlus.ElMessage[res.success ? 'success' : 'error'](res.message || (res.success ? '已安装' : '安装失败'));
-            if (res.success) await loadData();
-          } finally {
+
+          let settled = false;
+          let poller = null;
+          const stopPoll = () => {
+            if (poller) { clearInterval(poller); poller = null; }
+          };
+          // 结果收敛（完成 / 失败）统一入口，避免 POST 与轮询重复收敛
+          const settle = async (status, message) => {
+            if (settled) return;
+            settled = true;
+            stopPoll();
+            if (status === 'done') {
+              installProgress.percent = 100;
+              installProgress.status = 'done';
+              installProgress.step = message || '安装完成';
+              ElementPlus.ElMessage.success(message || '已安装');
+              await loadData();
+            } else {
+              installProgress.status = 'failed';
+              installProgress.step = '安装失败';
+              installProgress.error = message || '安装失败';
+              ElementPlus.ElMessage.error(message || '安装失败');
+            }
             busy.value = false;
+          };
+
+          // 每 600ms 读一次进度文件，直到任务收敛
+          poller = setInterval(async () => {
+            if (settled) return;
+            try {
+              const r = await WD.request.get('/admin/package/progress', { task }, { showLoading: false, showTips: false, dedup: false });
+              if (!r.success || !r.data) return;
+              const d = r.data;
+              const pct = Number(d.percent);
+              if (Number.isFinite(pct)) {
+                installProgress.percent = Math.max(0, Math.min(100, Math.round(pct)));
+              }
+              if (d.step) installProgress.step = d.step;
+              if (d.status === 'done') await settle('done', d.step);
+              else if (d.status === 'failed') await settle('failed', d.message || d.step);
+            } catch (e) { /* 单次轮询失败忽略，等待下一次 */ }
+          }, 600);
+
+          try {
+            const res = await WD.request.post('/admin/package/install', { target: p.dir, task }, { showLoading: false });
+            await settle(res.success ? 'done' : 'failed', res.message);
+          } catch (e) {
+            // 网络/网关中断：服务端仍在后台执行，继续轮询任务文件收敛
+            installProgress.step = '连接已中断，安装仍在后台执行，正在等待结果...';
+            setTimeout(() => {
+              settle('failed', '等待安装结果超时，请重新加载列表查看实际状态');
+            }, 10 * 60 * 1000);
           }
         }
         async function doUpgradeStaged(p) {
@@ -970,10 +1170,9 @@
           return '';
         }
         function openCreate() {
-          createForm.value = { short: '', title: '', version: '0.1.0', type: 'app' };
-          createOpen.value = true;
+          createForm.value = { short: '', title: '', version: '0.1.0', type: 'app', access: 'admin', description: '' };
         }
-        async function doCreate() {
+        async function doCreate(f) {
           if (!createForm.value.short || !createForm.value.title) {
             ElementPlus.ElMessage.warning('请填写短名和标题');
             return;
@@ -983,7 +1182,7 @@
             const res = await WD.request.post('/admin/package/create', { ...createForm.value });
             ElementPlus.ElMessage[res.success ? 'success' : 'error'](res.message || (res.success ? '已生成骨架' : '生成失败'));
             if (res.success) {
-              createOpen.value = false;
+              if (f) f.close();
               await loadData();
             }
           } finally {
@@ -1052,11 +1251,12 @@
 
         return {
           hostVersion, installed, installable, loading, busy, packing, zipEnabled,
-          removeOpen, removingRow, rv, handle, dropConfirmed, delStagedOpen, delStagedRow, createOpen, createForm,
+          installProgress,
+          removeOpen, removingRow, rv, handle, dropConfirmed, delStagedOpen, delStagedRow, createForm,
           rollbackOpen, rollbackRow, rollbackPath,
           versions, upgrading, upgradeCapable, loadVersions, recheck, doUpgrade,
           wdRollback, openWdRollback, doWdRollback,
-          isInstalled, fmtDate, doAction, doPack, doInstall, doUpgradeStaged, openCreate, doCreate, confirmRemove, doRemove,
+          isInstalled, fmtDate, doAction, confirmUpdateConfig, doPack, doInstall, doUpgradeStaged, openCreate, doCreate, confirmRemove, doRemove,
           confirmRemoveStaged, doRemoveStaged,
           openRollback, doRollback, rollbackTagText, rollbackTagType,
           reviewText, reviewTagType, reviewHint, loadData, relPath

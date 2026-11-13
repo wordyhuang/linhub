@@ -8,6 +8,7 @@
   <link rel="icon" type="image/svg+xml" href="/brand/favicon.svg">
   <link rel="stylesheet" href="/static/vendor/element-plus/index.css">
   <link rel="stylesheet" href="/static/vendor/workdesktop-ai/style.css">
+  <link rel="stylesheet" href="/static/linhub/cards.css">
   <style>
     html, body, #app { height: 100%; margin: 0; }
     body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif; }
@@ -22,7 +23,7 @@
 
   <script type="text/x-template" id="ap-done-tpl">
     <div class="ap-page">
-      <wd-panel :border="true">
+      <wd-panel description-align="right" :border="true">
         <wd-tips type="box" style="margin-bottom:12px">
           我的已办：当前登录用户同意或驳回过的审批单（按单据去重，展示我最近一次动作）。
         </wd-tips>
@@ -59,6 +60,38 @@
             </template>
           </el-table-column>
           <template #empty><el-empty description="暂无已办记录" :image-size="80" /></template>
+          <!-- ── 卡片模式（DataGrid modeSwitch 内建视图；统一 lh-card 结构） ── -->
+          <template #card-item="{ row }">
+            <div class="lh-card">
+              <div class="lh-card__head">
+                <div class="lh-card__title">{{ row.title || '未命名单据' }}</div>
+                <div class="lh-card__tags">
+                  <el-tag size="small" :type="row.my_action === 'approve' ? 'success' : 'danger'">{{ row.my_action === 'approve' ? '同意' : '驳回' }}</el-tag>
+                  <el-tag size="small" :type="statusType(row.status)">{{ statusText(row.status) }}</el-tag>
+                </div>
+                <div class="lh-card__extra">
+                  <div class="lh-card__stamp ap-mono">{{ row.approval_no }}</div>
+                </div>
+              </div>
+              <div class="lh-card__fields">
+                <div class="lh-card__field">
+                  <div class="k">功能包</div>
+                  <div class="v ap-mono">{{ row.package || '—' }}</div>
+                </div>
+                <div class="lh-card__field">
+                  <div class="k">操作时间</div>
+                  <div class="v">{{ row.my_acted_at || '—' }}</div>
+                </div>
+                <div class="lh-card__field is-wide">
+                  <div class="k">我的意见</div>
+                  <div class="v">{{ row.my_comment || '—' }}</div>
+                </div>
+              </div>
+              <div class="lh-card__ops">
+                <el-button size="small" type="primary" plain @click="openDetail(row)">详情</el-button>
+              </div>
+            </div>
+          </template>
         </wd-data-grid>
 
         <div class="ap-pager">
@@ -76,6 +109,7 @@
   <script src="/static/vendor/element-plus/index.full.min.js"></script>
   <script src="/static/vendor/icons/index.iife.min.js"></script>
   <script src="/static/vendor/workdesktop-ai/index.umd.js"></script>
+  <script src="/static/linhub/auth-guard.js?v=2"></script>
   <script>
     const WD = window.WorkDesktop;
     const ElementPlus = window.ElementPlus;

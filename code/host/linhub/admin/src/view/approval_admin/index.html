@@ -8,14 +8,13 @@
   <link rel="icon" type="image/svg+xml" href="/brand/favicon.svg">
   <link rel="stylesheet" href="/static/vendor/element-plus/index.css">
   <link rel="stylesheet" href="/static/vendor/workdesktop-ai/style.css">
+  <link rel="stylesheet" href="/static/linhub/cards.css">
   <style>
     html, body, #app { height: 100%; margin: 0; }
     body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif; }
     .ap-page { height: 100%; padding: 16px 20px 24px; box-sizing: border-box; }
     .ap-mono { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
     .ap-filter { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; align-items: center; }
-    .ap-pager { display: flex; justify-content: flex-end; margin-top: 12px; }
-    .ap-stat { display: flex; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; align-items: center; }
   </style>
 </head>
 
@@ -24,27 +23,33 @@
 
   <script type="text/x-template" id="ap-index-tpl">
     <div class="ap-page">
-      <wd-panel :border="true">
+      <wd-panel description-align="right" :border="true">
         <wd-tips type="box" style="margin-bottom:12px">
-          全部单据：平台审批服务（AP）跨功能包全量视图。孤儿态（包已卸载）单据标注提示且不可审批，重装同名包后自动接管恢复推进。
+          全部单据：平台审批服务（AP）跨功能包全量视图，顶部页签区分单据状态（「待办」为当前登录账号名下有活跃审批任务的单据）。孤儿态（包已卸载）单据标注提示且不可审批，重装同名包后自动接管恢复推进。
         </wd-tips>
 
-        <div class="ap-stat">
-          <el-tag effect="plain">总单据 {{ stats.total }}</el-tag>
-          <el-tag type="warning" effect="plain">在办 {{ stats.pending }}</el-tag>
-          <el-tag type="success" effect="plain">已通过 {{ stats.approved }}</el-tag>
-          <el-tag type="danger" effect="plain">已驳回 {{ stats.rejected }}</el-tag>
-          <el-tag type="info" effect="plain">已撤回 {{ stats.cancelled }}</el-tag>
-          <el-tag type="warning" effect="dark">孤儿态 {{ stats.orphaned }}</el-tag>
-        </div>
+        <el-tabs v-model="activeTab" style="margin-bottom:12px" @tab-change="search">
+          <el-tab-pane name="all">
+            <template #label>全部 <el-badge :value="stats.total" type="primary" style="margin-left:4px" /></template>
+          </el-tab-pane>
+          <el-tab-pane name="running">
+            <template #label>在办 <el-badge :value="stats.pending" type="warning" style="margin-left:4px" /></template>
+          </el-tab-pane>
+          <el-tab-pane name="todo">
+            <template #label>待办 <el-badge :value="stats.todo" type="warning" style="margin-left:4px" /></template>
+          </el-tab-pane>
+          <el-tab-pane name="approved">
+            <template #label>已通过 <el-badge :value="stats.approved" type="success" style="margin-left:4px" /></template>
+          </el-tab-pane>
+          <el-tab-pane name="rejected">
+            <template #label>已驳回 <el-badge :value="stats.rejected" type="danger" style="margin-left:4px" /></template>
+          </el-tab-pane>
+          <el-tab-pane name="cancelled">
+            <template #label>已撤回 <el-badge :value="stats.cancelled" type="info" style="margin-left:4px" /></template>
+          </el-tab-pane>
+        </el-tabs>
 
         <form class="ap-filter" @submit.prevent="search">
-          <el-select v-model="filters.status" placeholder="单据状态" style="width:140px" clearable>
-            <el-option label="在办" value="pending" />
-            <el-option label="已通过" value="approved" />
-            <el-option label="已驳回" value="rejected" />
-            <el-option label="已撤回" value="cancelled" />
-          </el-select>
           <el-select v-model="filters.orphaned" placeholder="孤儿态" style="width:130px" clearable>
             <el-option label="仅孤儿" value="yes" />
             <el-option label="仅正常" value="no" />
@@ -54,14 +59,16 @@
           <el-input v-model="filters.keyword" placeholder="标题 / 单据编号 / 提交人" style="width:220px" clearable @keyup.enter="search" />
           <el-date-picker v-model="dateRange" type="daterange" value-format="YYYY-MM-DD"
             start-placeholder="提交起" end-placeholder="提交止" style="width:260px" />
-          <el-button native-type="submit" type="primary" :icon="Search" :loading="loading">检索</el-button>
+          <el-button native-type="submit" type="primary" :icon="Search">检索</el-button>
           <el-button :icon="RefreshLeft" @click="reset">重置</el-button>
         </form>
 
-        <wd-data-grid :data-source="rows" border stripe :with-index="false" :with-pager="false" v-loading="loading">
+        <!-- DataGrid api 模式：内建分页（GET currentPage/pageSize + param 嵌套搜索参数，后端已兼容） -->
+        <wd-data-grid ref="grid" api="/admin/approval_admin/rows" api-method="get" :active="true"
+                      border stripe :with-index="false">
           <el-table-column prop="approval_no" label="单据编号" min-width="200">
             <template #default="{ row }">
-              <a class="ap-mono" :href="'/admin/ApprovalAdmin/detail?no=' + row.approval_no">{{ row.approval_no }}</a>
+              {{ row.approval_no }}
             </template>
           </el-table-column>
           <el-table-column prop="package" label="功能包" min-width="120">
@@ -70,7 +77,7 @@
               <el-tag v-if="row.orphaned" size="small" type="warning" effect="dark" style="margin-left:4px">包已卸载</el-tag>
             </template>
           </el-table-column>
-          <el-table-column prop="flow_key" label="流程" min-width="150">
+          <el-table-column v-if="showFlowCol" prop="flow_key" label="流程" min-width="150">
             <template #default="{ row }"><span class="ap-mono">{{ row.flow_key }}@v{{ row.flow_version }}</span></template>
           </el-table-column>
           <el-table-column prop="title" label="标题" min-width="180" show-overflow-tooltip />
@@ -83,24 +90,56 @@
             </template>
           </el-table-column>
           <el-table-column prop="submitted_at" label="提交时间" width="180" />
-          <el-table-column prop="finished_at" label="结束时间" width="180">
+          <el-table-column v-if="showFinishCol" prop="finished_at" label="结束时间" width="180">
             <template #default="{ row }">{{ row.finished_at || '—' }}</template>
           </el-table-column>
           <el-table-column label="操作" width="90" fixed="right">
             <template #default="{ row }">
-              <el-button size="small" text type="primary" @click="openDetail(row)">详情</el-button>
+              <wd-drawer-button size="small" type="primary" label="详情" drawer-size="80%" :url="'/admin/ApprovalAdmin/detail?no=' + row.approval_no"></wd-drawer-button>
             </template>
           </el-table-column>
           <template #empty><el-empty description="暂无审批单据" :image-size="80" /></template>
+          <!-- ── 卡片模式（DataGrid modeSwitch 内建视图；统一 lh-card 结构） ── -->
+          <template #card-item="{ row }">
+            <div class="lh-card">
+              <div class="lh-card__head">
+                <div class="lh-card__title">{{ row.title || '未命名单据' }}</div>
+                <div class="lh-card__tags">
+                  <el-tag v-if="row.orphaned" size="small" type="warning" effect="dark">包已卸载</el-tag>
+                  <el-tag size="small" :type="statusType(row.status)">{{ statusText(row.status) }}</el-tag>
+                </div>
+                <div class="lh-card__extra">
+                  <div class="lh-card__stamp ap-mono">{{ row.approval_no }}</div>
+                </div>
+              </div>
+              <div class="lh-card__fields">
+                <div class="lh-card__field">
+                  <div class="k">功能包</div>
+                  <div class="v ap-mono">{{ row.package || '—' }}</div>
+                </div>
+                <div class="lh-card__field">
+                  <div class="k">流程</div>
+                  <div class="v ap-mono">{{ row.flow_key ? row.flow_key + '@v' + row.flow_version : '—' }}</div>
+                </div>
+                <div class="lh-card__field">
+                  <div class="k">发起人</div>
+                  <div class="v">{{ row.submitter_name || row.submitter_id || '—' }}</div>
+                </div>
+                <div class="lh-card__field">
+                  <div class="k">提交时间</div>
+                  <div class="v">{{ row.submitted_at || '—' }}</div>
+                </div>
+                <div v-if="showFinishCol" class="lh-card__field">
+                  <div class="k">结束时间</div>
+                  <div class="v">{{ row.finished_at || '—' }}</div>
+                </div>
+              </div>
+              <div class="lh-card__ops">
+                <wd-drawer-button size="small" type="primary" label="详情" drawer-size="80%" :url="'/admin/ApprovalAdmin/detail?no=' + row.approval_no"></wd-drawer-button>
+              </div>
+            </div>
+          </template>
         </wd-data-grid>
-
-        <div class="ap-pager">
-          <el-pagination
-            v-model:current-page="page" v-model:page-size="size"
-            :total="total" :page-sizes="[20, 50, 100]"
-            layout="total, sizes, prev, pager, next, jumper"
-            @current-change="load" @size-change="onSizeChange" />
-        </div>
       </wd-panel>
     </div>
   </script>
@@ -109,11 +148,12 @@
   <script src="/static/vendor/element-plus/index.full.min.js"></script>
   <script src="/static/vendor/icons/index.iife.min.js"></script>
   <script src="/static/vendor/workdesktop-ai/index.umd.js"></script>
+  <script src="/static/linhub/auth-guard.js?v=2"></script>
   <script>
     const WD = window.WorkDesktop;
     const ElementPlus = window.ElementPlus;
     const { WorkDesktop } = WD;
-    const { ref, reactive } = Vue;
+    const { ref, reactive, computed } = Vue;
     const { Search, RefreshLeft } = window.ElementPlusIconsVue || {};
 
     const STATUS_TEXT = { pending: '在办', approved: '已通过', rejected: '已驳回', cancelled: '已撤回' };
@@ -122,72 +162,64 @@
     const app = Vue.createApp({
       template: '#ap-index-tpl',
       setup() {
-        const loading = ref(false);
-        const rows = ref([]);
-        const total = ref(0);
-        const page = ref(1);
-        const size = ref(20);
+        const grid = ref(null);
         const dateRange = ref([]);
-        const filters = reactive({ status: '', orphaned: '', package: '', flow_key: '', keyword: '' });
-        const stats = reactive({ total: 0, pending: 0, approved: 0, rejected: 0, cancelled: 0, orphaned: 0 });
+        const activeTab = ref('all');
+        const filters = reactive({ orphaned: '', package: '', flow_key: '', keyword: '' });
+        const stats = reactive({ total: 0, pending: 0, todo: 0, approved: 0, rejected: 0, cancelled: 0 });
+
+        // 列随页签数据特征显隐：在办/待办无结束时间；已完结（已通过/已驳回/已撤回）无进行中流程
+        const showFinishCol = computed(() => !['running', 'todo'].includes(activeTab.value));
+        const showFlowCol = computed(() => !['approved', 'rejected', 'cancelled'].includes(activeTab.value));
 
         function statusText(s) { return STATUS_TEXT[s] || s || '—'; }
         function statusType(s) { return STATUS_TYPE[s] || 'info'; }
 
-        function qs(obj) {
-          const p = new URLSearchParams();
-          for (const [k, v] of Object.entries(obj)) { if (v !== '' && v != null) p.append(k, v); }
-          const s = p.toString();
-          return s ? '?' + s : '';
+        // 统计卡独立拉取（rows 已收敛为 DataGrid 内建分页，列表数据由 grid 自管）
+        async function loadStats() {
+          const res = await WD.request.get('/admin/approval_admin/stats');
+          if (!res.success) return;
+          const st = res.data || {};
+          stats.total = st.total || 0;
+          stats.pending = st.pending || 0;
+          stats.todo = st.todo || 0;
+          stats.approved = st.approved || 0;
+          stats.rejected = st.rejected || 0;
+          stats.cancelled = st.cancelled || 0;
         }
 
-        async function load() {
-          loading.value = true;
-          try {
-            const range = dateRange.value || [];
-            const res = await WD.request.get('/admin/approval_admin/rows' + qs({
-              status: filters.status,
-              orphaned: filters.orphaned,
-              package: filters.package,
-              flow_key: filters.flow_key,
-              keyword: filters.keyword,
-              date_from: range[0] || '',
-              date_to: range[1] ? range[1] + ' 23:59:59' : '',
-              page: page.value,
-              size: size.value
-            }));
-            if (!res.success) {
-              ElementPlus.ElMessage.error(res.message || '加载失败');
-              return;
-            }
-            rows.value = res.data.list || [];
-            total.value = res.data.total || 0;
-            const st = res.data.stats || {};
-            stats.total = st.total || 0;
-            stats.pending = st.pending || 0;
-            stats.approved = st.approved || 0;
-            stats.rejected = st.rejected || 0;
-            stats.cancelled = st.cancelled || 0;
-            stats.orphaned = st.orphaned || 0;
-          } finally {
-            loading.value = false;
-          }
+        function searchParams() {
+          const range = dateRange.value || [];
+          return {
+            state: activeTab.value,
+            orphaned: filters.orphaned,
+            package: filters.package,
+            flow_key: filters.flow_key,
+            keyword: filters.keyword,
+            date_from: range[0] || '',
+            date_to: range[1] || ''
+          };
         }
 
-        function search() { page.value = 1; load(); }
+        function search() {
+          grid.value && grid.value.search(searchParams());
+          loadStats();
+        }
+
         function reset() {
-          filters.status = ''; filters.orphaned = ''; filters.package = '';
+          activeTab.value = 'all';
+          filters.orphaned = ''; filters.package = '';
           filters.flow_key = ''; filters.keyword = ''; dateRange.value = [];
-          page.value = 1; load();
+          grid.value && grid.value.reset();
+          loadStats();
         }
-        function onSizeChange() { page.value = 1; load(); }
-        function openDetail(row) { location.href = '/admin/ApprovalAdmin/detail?no=' + row.approval_no; }
 
-        load();
+        loadStats();
 
         return {
-          loading, rows, total, page, size, filters, dateRange, stats,
-          load, search, reset, onSizeChange, openDetail, statusText, statusType,
+          grid, activeTab, filters, dateRange, stats,
+          showFinishCol, showFlowCol,
+          search, reset, statusText, statusType,
           Search, RefreshLeft
         };
       }

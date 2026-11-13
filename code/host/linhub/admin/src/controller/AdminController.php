@@ -78,10 +78,10 @@ abstract class AdminController extends BaseController
         return json(['code' => 0, 'data' => $data, 'message' => $message]);
     }
 
-    /** JSON 失败响应。 */
-    protected function jsonFail(string $message, int $code = 500, mixed $data = null): Response
+    /** JSON 失败响应。失败码恒负数（中心化负化）：workdesktop-ai 判定 code >= successCode(0) 为成功，正数失败码会被误判成功。 */
+    protected function jsonFail(string $message, int $code = -1, mixed $data = null): Response
     {
-        return json(['code' => $code, 'data' => $data, 'message' => $message]);
+        return json(['code' => -abs($code ?: 1), 'data' => $data, 'message' => $message]);
     }
 
     /**
@@ -100,6 +100,32 @@ abstract class AdminController extends BaseController
         }
         if (!HostBootstrap::authService()->isSuperAdmin($identity)) {
             return $this->jsonFail('无权限访问平台管理接口', -403);
+        }
+        return $identity;
+    }
+
+    /**
+     * 登录门禁（不限超管）：任何登录用户放行，未登录 302 登录页。
+     *
+     * 适用于面向全体登录用户的平台页面（如审批工作台）；数据级越权由服务层兜底。
+     */
+    protected function loginGate(): Identity|Response
+    {
+        $identity = $this->identity();
+        if ($identity === null) {
+            return redirect('/admin/auth/login');
+        }
+        return $identity;
+    }
+
+    /**
+     * 登录门禁 JSON 版：未登录返回 -401 JSON 错误，登录用户（含普通用户）放行。
+     */
+    protected function loginGateForJson(): Identity|Response
+    {
+        $identity = $this->identity();
+        if ($identity === null) {
+            return $this->jsonFail('未登录或会话已失效', -401);
         }
         return $identity;
     }
@@ -137,7 +163,7 @@ abstract class AdminController extends BaseController
      * 将宿主菜单树转换为 WdStation 需要的分组结构（G0.6 收口自 Home/Package 的两份重复实现）。
      *
      * 每个根节点作为一组（其 child 为组内菜单项）；分导台下未配置任何菜单（子菜单为空）时，
-     * 该组渲染为一条 disabled 占位提示「当前分导台暂无菜单」，不生成可跳转菜单项。
+     * 该组 menus 为空数组，由前端 wd-station 的 hide-empty-group 剔除空组（不再塞占位提示项）。
      * route 以 / 开头（绝对应用路径）时直接使用，否则回退 url() 生成。
      *
      * @param list<array{item: array<string,mixed>, children: array}> $tree
@@ -151,16 +177,6 @@ abstract class AdminController extends BaseController
             $gi++;
             $item  = $node['item'] ?? [];
             $menus = $this->buildMenuItems($node['children'] ?? [], $gi);
-            if ($menus === []) {
-                // 空分导台占位：disabled 提示项，不可点击、不产生循环导航（UMD 渲染为 el-menu-item disabled）
-                $menus = [[
-                    'key'      => (string) ($item['id'] ?? 'g' . $gi) . '.empty',
-                    'title'    => '当前分导台暂无菜单',
-                    'path'     => '',
-                    'icon'     => '',
-                    'disabled' => true,
-                ]];
-            }
             $groups[] = [
                 'key'   => (string) ($item['id'] ?? 'g' . $gi),
                 'title' => (string) ($item['title'] ?? ''),

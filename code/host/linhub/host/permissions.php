@@ -10,7 +10,8 @@ declare(strict_types=1);
  *  - title      显示名
  *  - description 权限说明
  *  - group      权限分组（platform=平台权限）
- *  - roles      限定可见角色；空数组=不限角色（J7-b）
+ *  - roles      限定可见角色；只能取预设角色英文键常量（WORKER/REVIEWER/FUNCTIONAL_ADMIN/
+ *               SYSTEM_ADMIN/SUPER_ADMIN），空数组=不限角色（J7-b）
  *
  * @return list<array<string, mixed>>
  */
@@ -24,6 +25,7 @@ return [
     ['code' => 'host:user:manage',     'title' => '管理用户',     'description' => '允许创建、编辑、删除用户并分配角色权限。', 'group' => 'platform', 'roles' => []],
     ['code' => 'host:permission:view', 'title' => '浏览权限项',   'description' => '允许查看各功能包与平台登记的权限点清单。', 'group' => 'platform', 'roles' => []],
     ['code' => 'host:audit:view',      'title' => '查看日志审计', 'description' => '允许浏览平台操作日志与审计轨迹。', 'group' => 'platform', 'roles' => []],
+    ['code' => 'host:logging:manage',  'title' => '管理日志设置', 'description' => '允许调整运行日志的最低记录级别与保留月数，并执行过期日志清理。', 'group' => 'platform', 'roles' => []],
     ['code' => 'host:backup:view',     'title' => '查看归档备份', 'description' => '允许浏览平台归档与备份记录。', 'group' => 'platform', 'roles' => []],
     ['code' => 'host:backup:manage',   'title' => '管理归档备份', 'description' => '允许创建、恢复、删除平台归档与备份。', 'group' => 'platform', 'roles' => []],
     ['code' => 'host:uireplace:view',  'title' => '查看界面替换', 'description' => '允许浏览各功能包提交的界面替换候选。', 'group' => 'platform', 'roles' => []],
@@ -43,6 +45,9 @@ return [
     ['code' => 'host:translation:manage', 'title' => '管理翻译词条',   'description' => '允许跨功能包命名空间检索、新增、修改、删除多语言翻译词条，并查看缺失对照（修改记录 owner_pkg=host）。', 'group' => 'platform', 'roles' => []],
     ['code' => 'host:recyclebin:view',    'title' => '查看回收站',     'description' => '允许浏览全部功能包与宿主命名空间的回收站托管条目（含孤儿态）与用量统计。', 'group' => 'platform', 'roles' => []],
     ['code' => 'host:recyclebin:manage',  'title' => '管理回收站',     'description' => '允许跨功能包命名空间查看条目载荷、延长保留期、彻底删除（单条/批量）并手动触发到期清理。', 'group' => 'platform', 'roles' => []],
+    ['code' => 'host:printtpl:view',      'title' => '查看打印模板',   'description' => '允许浏览平台公共与包级私有单据打印模板清单、版本快照与试打记录。', 'group' => 'platform', 'roles' => []],
+    ['code' => 'host:printtpl:manage',    'title' => '管理打印模板',   'description' => '允许新增/编辑/复制/启停/删除打印模板、编辑正文与纸张、回滚版本快照并执行试打。', 'group' => 'platform', 'roles' => []],
+    ['code' => 'host:scheduler:manage',   'title' => '管理任务调度',   'description' => '允许查看异步任务托管总览、周期定义与执行实例，暂停/恢复/删除定义、立即触发、取消实例并调整 42 项调度配置。', 'group' => 'platform', 'roles' => []],
 
     // 平台公共服务：AP 审批服务（审批中心）
     ['code' => 'host:approval:view',      'title' => '查看审批单据',   'description' => '允许浏览本人待办、本人已办与审批单详情，并在详情页处理待办。', 'group' => 'platform', 'roles' => []],

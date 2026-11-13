@@ -1,0 +1,605 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>任务调度 - LinHub 林枢</title>
+  <link rel="icon" type="image/svg+xml" href="/brand/favicon.svg">
+  <link rel="stylesheet" href="/static/vendor/element-plus/index.css">
+  <link rel="stylesheet" href="/static/vendor/workdesktop-ai/style.css">
+  <link rel="stylesheet" href="/static/linhub/cards.css">
+  <style>
+    html, body, #app { height: 100%; margin: 0; }
+    body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif; }
+    .sc-page { height: 100%; padding: 16px 20px 24px; box-sizing: border-box; overflow: auto; }
+    .sc-mono { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
+    .sc-filter { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; align-items: center; }
+    .sc-pager { display: flex; justify-content: flex-end; margin-top: 12px; }
+    .sc-stat { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; align-items: center; }
+    .sc-stat .el-tag { font-size: 12px; }
+    .sc-pre { background: #f6f8fa; border: 1px solid #e4e7ed; border-radius: 6px; padding: 12px;
+      max-height: 46vh; overflow: auto; white-space: pre-wrap; word-break: break-all;
+      font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; margin: 0; }
+    .sc-block { margin-bottom: 14px; }
+    .sc-block-title { font-size: 13px; font-weight: 600; margin: 0 0 8px; color: #303133; }
+    .sc-state { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+  </style>
+</head>
+
+<body>
+  <div id="app"></div>
+
+  <script type="text/x-template" id="sc-tpl">
+    <div class="sc-page">
+      <wd-panel description-align="right" :border="true">
+        <wd-tips type="box" style="margin-bottom:12px">
+          异步任务托管服务（SC）超管视图：一次性任务与周期任务、三级并发闸门、租约回收、取消与熔断。
+          Lite 档在请求尾薄跑一次 tick；Pro 档由常驻心跳进程按间隔轮询，二者共用同一把 tick 互斥锁。
+        </wd-tips>
+
+        <el-tabs v-model="tab" @tab-click="onTabClick">
+          <!-- 概览 -->
+          <el-tab-pane label="概览" name="overview">
+            <div class="sc-stat">
+              <el-tag effect="plain">排队 {{ states.queued }}</el-tag>
+              <el-tag type="warning" effect="plain">执行中 {{ states.running }}</el-tag>
+              <el-tag type="success" effect="plain">成功 {{ states.done }}</el-tag>
+              <el-tag type="danger" effect="plain">失败 {{ states.failed }}</el-tag>
+              <el-tag type="info" effect="plain">取消 {{ states.cancelled }}</el-tag>
+              <el-tag effect="plain">周期定义 {{ overview.defs_total }}</el-tag>
+              <div style="flex:1"></div>
+              <el-button size="small" :icon="Refresh" :loading="loading" @click="loadOverview">刷新</el-button>
+              <el-button size="small" type="primary" :icon="VideoPlay" :loading="ticking" @click="tickNow">立即执行一次 tick</el-button>
+              <el-button size="small" :icon="Cpu" :loading="probing" @click="runProbe">环境自检</el-button>
+            </div>
+
+            <el-descriptions :column="3" border size="small" class="sc-block">
+              <el-descriptions-item label="服务状态">
+                <el-tag :type="overview.enabled ? 'success' : 'info'" size="small">{{ overview.enabled ? '已启用' : '已停用' }}</el-tag>
+              </el-descriptions-item>
+              <el-descriptions-item label="运行档位"><span class="sc-mono">{{ overview.mode || '—' }}</span></el-descriptions-item>
+              <el-descriptions-item label="有效精度">{{ heartbeat.effective_precision }} 秒（{{ heartbeat.level }}）</el-descriptions-item>
+              <el-descriptions-item label="心跳来源"><span class="sc-mono">{{ heartbeat.source || '—' }}</span></el-descriptions-item>
+              <el-descriptions-item label="心跳存活">
+                <el-tag :type="heartbeat.alive ? 'success' : 'danger'" size="small">{{ heartbeat.alive ? '存活' : '未存活' }}</el-tag>
+              </el-descriptions-item>
+              <el-descriptions-item label="心跳时间"><span class="sc-mono">{{ heartbeat.heartbeat_at || '—' }}</span></el-descriptions-item>
+              <el-descriptions-item label="进程 / 锁"><span class="sc-mono">{{ heartbeat.lock_holder || '—' }}</span></el-descriptions-item>
+              <el-descriptions-item label="代码版本"><span class="sc-mono">{{ heartbeat.code_version }}</span></el-descriptions-item>
+              <el-descriptions-item label="陈旧进程">
+                <el-tag :type="heartbeat.stale_process ? 'warning' : 'success'" size="small">{{ heartbeat.stale_process ? '需重启' : '正常' }}</el-tag>
+              </el-descriptions-item>
+              <el-descriptions-item label="全局并发上限">{{ overview.concurrent_global }}</el-descriptions-item>
+              <el-descriptions-item label="单包并发上限">{{ overview.concurrent_package }}</el-descriptions-item>
+              <el-descriptions-item label="排队上限（全局 / 单包）">{{ overview.queued_limit_global }} / {{ overview.queued_limit_package }}</el-descriptions-item>
+            </el-descriptions>
+
+            <div class="sc-block">
+              <p class="sc-block-title">最近一次 tick</p>
+              <pre class="sc-pre">{{ lastTickText }}</pre>
+            </div>
+          </el-tab-pane>
+
+          <!-- 周期定义 -->
+          <el-tab-pane label="周期定义" name="defs">
+            <wd-data-grid :data-source="defRows" border stripe :with-index="false" :with-pager="false" v-loading="loading">
+              <template #toolbar>
+                <el-input v-model="defFilters.namespace" placeholder="命名空间" style="width:170px" clearable @keyup.enter="searchDefs" />
+                <el-input v-model="defFilters.def_key" placeholder="定义键" style="width:170px" clearable @keyup.enter="searchDefs" />
+                <el-select v-model="defFilters.status" placeholder="状态" style="width:140px" clearable>
+                  <el-option label="运行中" value="active" />
+                  <el-option label="孤儿态" value="orphaned" />
+                </el-select>
+                <el-button type="primary" :icon="Search" :loading="loading" @click="searchDefs">检索</el-button>
+                <el-button :icon="RefreshLeft" @click="resetDefs">重置</el-button>
+              </template>
+              <el-table-column prop="namespace" label="命名空间" min-width="110">
+                <template #default="{ row }"><span class="sc-mono">{{ row.namespace }}</span></template>
+              </el-table-column>
+              <el-table-column prop="def_key" label="定义键" min-width="150">
+                <template #default="{ row }"><span class="sc-mono">{{ row.def_key }}</span></template>
+              </el-table-column>
+              <el-table-column prop="handler" label="处理器" min-width="160">
+                <template #default="{ row }"><span class="sc-mono">{{ row.handler }}</span></template>
+              </el-table-column>
+              <el-table-column prop="mode" label="模式" width="90" />
+              <el-table-column prop="expr" label="表达式" min-width="130">
+                <template #default="{ row }"><span class="sc-mono">{{ row.expr }}</span></template>
+              </el-table-column>
+              <el-table-column prop="timezone" label="时区" width="110" />
+              <el-table-column label="状态" width="100">
+                <template #default="{ row }">
+                  <el-tag size="small" :type="row.status === 'orphaned' ? 'warning' : (row.enabled ? 'success' : 'info')">
+                    {{ row.status === 'orphaned' ? '孤儿' : (row.enabled ? '启用' : '暂停') }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column prop="next_run" label="下次执行" min-width="160">
+                <template #default="{ row }"><span class="sc-mono">{{ row.next_run || '—' }}</span></template>
+              </el-table-column>
+              <el-table-column prop="last_run_at" label="上次执行" min-width="160">
+                <template #default="{ row }"><span class="sc-mono">{{ row.last_run_at || '—' }}</span></template>
+              </el-table-column>
+              <el-table-column label="失败连击" width="90">
+                <template #default="{ row }">
+                  <el-tag size="small" :type="row.fail_streak > 0 ? 'danger' : 'info'">{{ row.fail_streak || 0 }}</el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="操作" width="260" fixed="right">
+                <template #default="{ row }">
+                  <el-button size="small" link type="primary" :disabled="row.status === 'orphaned'" @click="triggerDef(row)">立即触发</el-button>
+                  <el-button size="small" link :type="row.enabled ? 'warning' : 'success'" :disabled="row.status === 'orphaned'" @click="toggleDef(row)">{{ row.enabled ? '暂停' : '恢复' }}</el-button>
+                  <el-button size="small" link type="danger" @click="removeDef(row)">删除</el-button>
+                </template>
+              </el-table-column>
+            </wd-data-grid>
+
+            <div class="sc-pager">
+              <el-pagination v-model:current-page="defPage" v-model:page-size="defSize"
+                :total="defTotal" :page-sizes="[20, 50, 100]"
+                layout="total, sizes, prev, pager, next, jumper"
+                @current-change="loadDefs" @size-change="onDefSizeChange" />
+            </div>
+          </el-tab-pane>
+
+          <!-- 执行实例 -->
+          <el-tab-pane label="执行实例" name="runs">
+            <wd-data-grid :data-source="runRows" border stripe :with-index="false" :with-pager="false" v-loading="loading">
+              <template #toolbar>
+                <el-input v-model="runFilters.namespace" placeholder="命名空间" style="width:150px" clearable @keyup.enter="searchRuns" />
+                <el-select v-model="runFilters.state" placeholder="状态" style="width:130px" clearable>
+                  <el-option label="排队" value="queued" />
+                  <el-option label="执行中" value="running" />
+                  <el-option label="成功" value="done" />
+                  <el-option label="失败" value="failed" />
+                  <el-option label="取消" value="cancelled" />
+                </el-select>
+                <el-input v-model="runFilters.handler" placeholder="处理器" style="width:170px" clearable @keyup.enter="searchRuns" />
+                <el-input v-model="runFilters.task_key" placeholder="任务键" style="width:150px" clearable @keyup.enter="searchRuns" />
+                <el-button type="primary" :icon="Search" :loading="loading" @click="searchRuns">检索</el-button>
+                <el-button :icon="RefreshLeft" @click="resetRuns">重置</el-button>
+              </template>
+              <el-table-column label="实例号" min-width="120">
+                <template #default="{ row }"><span class="sc-mono">{{ shortId(row.run_id) }}</span></template>
+              </el-table-column>
+              <el-table-column prop="namespace" label="命名空间" min-width="110">
+                <template #default="{ row }"><span class="sc-mono">{{ row.namespace }}</span></template>
+              </el-table-column>
+              <el-table-column prop="handler" label="处理器" min-width="160">
+                <template #default="{ row }"><span class="sc-mono">{{ row.handler }}</span></template>
+              </el-table-column>
+              <el-table-column label="状态" width="100">
+                <template #default="{ row }">
+                  <el-tag size="small" :type="stateType(row.state)">{{ stateText(row.state) }}</el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column prop="progress" label="进度" width="80">
+                <template #default="{ row }">{{ row.progress }}%</template>
+              </el-table-column>
+              <el-table-column prop="plan_time" label="计划时间" min-width="160">
+                <template #default="{ row }"><span class="sc-mono">{{ row.plan_time || '—' }}</span></template>
+              </el-table-column>
+              <el-table-column prop="started_at" label="开始时间" min-width="160">
+                <template #default="{ row }"><span class="sc-mono">{{ row.started_at || '—' }}</span></template>
+              </el-table-column>
+              <el-table-column prop="finished_at" label="结束时间" min-width="160">
+                <template #default="{ row }"><span class="sc-mono">{{ row.finished_at || '—' }}</span></template>
+              </el-table-column>
+              <el-table-column prop="message" label="消息 / 错误" min-width="200">
+                <template #default="{ row }">
+                  <span class="sc-mono" :style="row.error ? 'color:#f56c6c' : ''">{{ row.error || row.message || '—' }}</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="取消标记" width="90">
+                <template #default="{ row }">
+                  <el-tag v-if="row.cancel_requested" size="small" type="warning">已请求</el-tag>
+                  <span v-else>—</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="操作" width="90" fixed="right">
+                <template #default="{ row }">
+                  <el-button size="small" link type="danger"
+                    :disabled="row.state !== 'queued' && row.state !== 'running'"
+                    @click="cancelRun(row)">取消</el-button>
+                </template>
+              </el-table-column>
+            </wd-data-grid>
+
+            <div class="sc-pager">
+              <el-pagination v-model:current-page="runPage" v-model:page-size="runSize"
+                :total="runTotal" :page-sizes="[20, 50, 100]"
+                layout="total, sizes, prev, pager, next, jumper"
+                @current-change="loadRuns" @size-change="onRunSizeChange" />
+            </div>
+          </el-tab-pane>
+
+          <!-- 设置 -->
+          <el-tab-pane label="设置" name="settings">
+            <wd-tips type="box" style="margin-bottom:12px">
+              42 项平铺配置，保存时整表校验，任一非法即整体拒绝。默认值 → 配置文件覆盖 → 环境变量硬顶（
+              SCHEDULER_MAX_CONCURRENT / SCHEDULER_MAX_TIMEOUT_SEC）。
+            </wd-tips>
+
+            <div class="sc-stat">
+              <el-tag effect="plain">并发硬顶 {{ envCaps.max_concurrent }}</el-tag>
+              <el-tag effect="plain">超时硬顶 {{ envCaps.max_timeout_sec }} 秒</el-tag>
+              <div style="flex:1"></div>
+              <el-button size="small" :icon="Refresh" :loading="loading" @click="loadSettings">刷新</el-button>
+              <el-button size="small" type="primary" :icon="Select" :loading="saving" @click="saveSettings">保存配置</el-button>
+              <el-button size="small" type="danger" plain :icon="RefreshLeft" :loading="saving" @click="resetSettings">恢复默认</el-button>
+            </div>
+
+            <el-table :data="schemaRows" border stripe max-height="52vh">
+              <el-table-column prop="key" label="配置项" min-width="260">
+                <template #default="{ row }">
+                  <div>{{ row.title || row.key }}</div>
+                  <div class="sc-mono" style="color:#909399">{{ row.key }}</div>
+                </template>
+              </el-table-column>
+              <el-table-column label="取值" min-width="230">
+                <template #default="{ row }">
+                  <el-switch v-if="row.type === 'bool'" v-model="values[row.key]" inline-prompt active-text="开" inactive-text="关" />
+                  <el-radio-group v-else-if="row.type === 'enum'" v-model="values[row.key]">
+                    <el-radio-button v-for="opt in row.enum" :key="opt" :value="opt">{{ enumLabel(opt) }}</el-radio-button>
+                  </el-radio-group>
+                  <el-input-number v-else-if="row.type === 'float'" v-model="values[row.key]"
+                    :min="row.min" :max="row.max" :step="0.1" :precision="2" controls-position="right" style="width:100%" />
+                  <el-input-number v-else v-model="values[row.key]"
+                    :min="row.min" :max="row.max" :step="1" controls-position="right" style="width:100%" />
+                </template>
+              </el-table-column>
+              <el-table-column prop="default" label="默认值" width="130">
+                <template #default="{ row }"><span class="sc-mono">{{ formatValue(row.default) }}</span></template>
+              </el-table-column>
+              <el-table-column label="范围 / 枚举" min-width="180">
+                <template #default="{ row }">
+                  <span class="sc-mono">{{ row.type === 'enum' ? row.enum.map(enumLabel).join(' / ') : (row.min != null ? row.min + ' ~ ' + row.max : '—') }}</span>
+                </template>
+              </el-table-column>
+            </el-table>
+
+            <div class="sc-block" style="margin-top:14px">
+              <p class="sc-block-title">常驻心跳部署命令（只生成，不执行）</p>
+              <div class="sc-filter">
+                <el-input v-model="installInterval" placeholder="轮询间隔秒数（1~300）" style="width:200px" />
+                <el-button :icon="Document" :loading="loading" @click="loadInstallCommands">生成命令</el-button>
+              </div>
+              <pre class="sc-pre">{{ installText }}</pre>
+            </div>
+          </el-tab-pane>
+        </el-tabs>
+      </wd-panel>
+
+      <!-- 环境自检结果 -->
+      <el-dialog v-model="probeVisible" title="环境自检（P-1~P-8 / E0~E3）" width="720px">
+        <pre class="sc-pre">{{ probeText }}</pre>
+        <template #footer>
+          <el-button @click="probeVisible = false">关闭</el-button>
+          <el-button type="primary" @click="runProbe">重新探测</el-button>
+        </template>
+      </el-dialog>
+    </div>
+  </script>
+
+  <script src="/static/vendor/vue/vue.global.prod.js"></script>
+  <script src="/static/vendor/element-plus/index.full.min.js"></script>
+  <script src="/static/vendor/icons/index.iife.min.js"></script>
+  <script src="/static/vendor/workdesktop-ai/index.umd.js"></script>
+  <script src="/static/linhub/auth-guard.js?v=2"></script>
+  <script>
+    const WD = window.WorkDesktop;
+    const ElementPlus = window.ElementPlus;
+    const { WorkDesktop } = WD;
+    const { ref, reactive, computed } = Vue;
+    const { Search, Refresh, RefreshLeft, Select, VideoPlay, Cpu, Document } = window.ElementPlusIconsVue || {};
+
+    const app = Vue.createApp({
+      template: '#sc-tpl',
+      setup() {
+        const tab = ref('overview');
+        const loading = ref(false);
+        const ticking = ref(false);
+        const probing = ref(false);
+        const saving = ref(false);
+
+        // 概览
+        const states = reactive({ queued: 0, running: 0, done: 0, failed: 0, cancelled: 0 });
+        const overview = reactive({ defs_total: 0, mode: '', enabled: false,
+          queued_limit_global: 0, queued_limit_package: 0, concurrent_global: 0, concurrent_package: 0 });
+        const heartbeat = reactive({ source: '', heartbeat_at: '', alive: false, lock_holder: '',
+          code_version: '', stale_process: false, effective_precision: 0, level: '' });
+        const lastTick = ref({});
+        const lastTickText = computed(() => JSON.stringify(lastTick.value || {}, null, 2));
+
+        // 周期定义
+        const defRows = ref([]);
+        const defTotal = ref(0);
+        const defPage = ref(1);
+        const defSize = ref(20);
+        const defFilters = reactive({ namespace: '', def_key: '', status: '' });
+
+        // 执行实例
+        const runRows = ref([]);
+        const runTotal = ref(0);
+        const runPage = ref(1);
+        const runSize = ref(20);
+        const runFilters = reactive({ namespace: '', state: '', handler: '', task_key: '' });
+
+        // 设置
+        const values = reactive({});
+        const schemaRows = ref([]);
+        const envCaps = reactive({ max_concurrent: 0, max_timeout_sec: 0 });
+        const installInterval = ref('1');
+        const installText = ref('');
+
+        // 自检
+        const probeVisible = ref(false);
+        const probeText = ref('');
+
+        function qs(obj) {
+          const p = new URLSearchParams();
+          for (const [k, v] of Object.entries(obj)) { if (v !== '' && v != null) p.append(k, v); }
+          const s = p.toString();
+          return s ? '?' + s : '';
+        }
+
+        function shortId(id) { return id ? String(id).slice(0, 12) + '…' : '—'; }
+
+        function stateText(s) {
+          return { queued: '排队', running: '执行中', done: '成功', failed: '失败', cancelled: '取消' }[s] || s;
+        }
+
+        function stateType(s) {
+          return { queued: 'info', running: 'warning', done: 'success', failed: 'danger', cancelled: 'info' }[s] || 'info';
+        }
+
+        function formatValue(v) {
+          if (v === true) return 'true';
+          if (v === false) return 'false';
+          return v == null ? '—' : String(v);
+        }
+
+        // 枚举取值的中文标签（设置 tab 展示用，存储值保持英文原样）
+        const enumLabels = {
+          reject: '拒绝入队', allow: '允许入队',
+          skip: '跳过本次', catchup_once: '补跑一次',
+          inbox: '站内消息', 'inbox+log': '站内消息+日志',
+          lite: 'Lite 轻量档', pro: 'Pro 完整档',
+          auto: '自动', cron_once: '定时触发', request_tail: '请求尾随',
+        };
+        function enumLabel(v) { return enumLabels[v] || v; }
+
+        function resetValues(data) {
+          for (const k of Object.keys(values)) delete values[k];
+          Object.assign(values, data || {});
+        }
+
+        async function loadOverview() {
+          loading.value = true;
+          try {
+            const res = await WD.request.get('/admin/scheduler_admin/overview');
+            if (!res.success) { ElementPlus.ElMessage.error(res.message || '加载失败'); return; }
+            const d = res.data || {};
+            Object.assign(states, d.states || {});
+            Object.assign(overview, {
+              defs_total: d.defs_total || 0,
+              mode: d.mode || '',
+              enabled: !!d.enabled,
+              queued_limit_global: d.queued_limit_global || 0,
+              queued_limit_package: d.queued_limit_package || 0,
+              concurrent_global: d.concurrent_global || 0,
+              concurrent_package: d.concurrent_package || 0,
+            });
+            Object.assign(heartbeat, d.heartbeat || {});
+            lastTick.value = d.last_tick || {};
+          } finally {
+            loading.value = false;
+          }
+        }
+
+        async function loadDefs() {
+          loading.value = true;
+          try {
+            const res = await WD.request.get('/admin/scheduler_admin/defs' + qs({
+              ...defFilters, page: defPage.value, size: defSize.value
+            }));
+            if (!res.success) { ElementPlus.ElMessage.error(res.message || '加载失败'); return; }
+            defRows.value = res.data.list || [];
+            defTotal.value = res.data.total || 0;
+          } finally {
+            loading.value = false;
+          }
+        }
+
+        async function loadRuns() {
+          loading.value = true;
+          try {
+            const res = await WD.request.get('/admin/scheduler_admin/runs' + qs({
+              ...runFilters, page: runPage.value, size: runSize.value
+            }));
+            if (!res.success) { ElementPlus.ElMessage.error(res.message || '加载失败'); return; }
+            runRows.value = res.data.list || [];
+            runTotal.value = res.data.total || 0;
+          } finally {
+            loading.value = false;
+          }
+        }
+
+        async function loadSettings() {
+          loading.value = true;
+          try {
+            const res = await WD.request.get('/admin/scheduler_admin/settings');
+            if (!res.success) { ElementPlus.ElMessage.error(res.message || '加载失败'); return; }
+            resetValues(res.data.values || {});
+            schemaRows.value = res.data.schema || [];
+            Object.assign(envCaps, res.data.env_caps || {});
+          } finally {
+            loading.value = false;
+          }
+        }
+
+        function onTabClick(pane) {
+          const name = (pane && pane.paneName) || tab.value;
+          if (name === 'overview') loadOverview();
+          else if (name === 'defs') loadDefs();
+          else if (name === 'runs') loadRuns();
+          else if (name === 'settings') loadSettings();
+        }
+
+        function searchDefs() { defPage.value = 1; loadDefs(); }
+        function resetDefs() { defFilters.namespace = ''; defFilters.def_key = ''; defFilters.status = ''; defPage.value = 1; loadDefs(); }
+        function onDefSizeChange() { defPage.value = 1; loadDefs(); }
+
+        function searchRuns() { runPage.value = 1; loadRuns(); }
+        function resetRuns() { runFilters.namespace = ''; runFilters.state = ''; runFilters.handler = ''; runFilters.task_key = ''; runPage.value = 1; loadRuns(); }
+        function onRunSizeChange() { runPage.value = 1; loadRuns(); }
+
+        async function tickNow() {
+          ticking.value = true;
+          try {
+            const res = await WD.request.post('/admin/scheduler_admin/tickNow', {});
+            if (!res.success) { ElementPlus.ElMessage.error(res.message || '执行失败'); return; }
+            ElementPlus.ElMessage.success(res.message || '已执行');
+            lastTick.value = res.data || {};
+            loadOverview();
+          } finally {
+            ticking.value = false;
+          }
+        }
+
+        async function runProbe() {
+          probing.value = true;
+          try {
+            const res = await WD.request.get('/admin/scheduler_admin/probe?fresh=1');
+            if (!res.success) { ElementPlus.ElMessage.error(res.message || '自检失败'); return; }
+            probeText.value = JSON.stringify(res.data || {}, null, 2);
+            probeVisible.value = true;
+          } finally {
+            probing.value = false;
+          }
+        }
+
+        function defParam(row) { return { namespace: row.namespace, def_key: row.def_key }; }
+
+        async function triggerDef(row) {
+          try {
+            const res = await WD.request.post('/admin/scheduler_admin/triggerNow', defParam(row));
+            if (!res.success) { ElementPlus.ElMessage.error(res.message || '触发失败'); return; }
+            ElementPlus.ElMessage.success('已加入队列：' + shortId(res.data && res.data.run_id));
+          } catch (e) { ElementPlus.ElMessage.error('触发失败'); }
+        }
+
+        async function toggleDef(row) {
+          const api = row.enabled ? '/admin/scheduler_admin/pauseDef' : '/admin/scheduler_admin/resumeDef';
+          try {
+            const res = await WD.request.post(api, defParam(row));
+            if (!res.success) { ElementPlus.ElMessage.error(res.message || '操作失败'); return; }
+            ElementPlus.ElMessage.success(res.message || '已完成');
+            loadDefs();
+          } catch (e) { ElementPlus.ElMessage.error('操作失败'); }
+        }
+
+        async function removeDef(row) {
+          try {
+            await ElementPlus.ElMessageBox.confirm(
+              '删除周期定义 ' + row.namespace + '/' + row.def_key + '？已产生的执行实例不受影响。',
+              '删除确认', { type: 'warning' }
+            );
+          } catch (e) { return; }
+          try {
+            const res = await WD.request.post('/admin/scheduler_admin/deleteDef', defParam(row));
+            if (!res.success) { ElementPlus.ElMessage.error(res.message || '删除失败'); return; }
+            ElementPlus.ElMessage.success(res.message || '已删除');
+            loadDefs();
+          } catch (e) { ElementPlus.ElMessage.error('删除失败'); }
+        }
+
+        async function cancelRun(row) {
+          try {
+            await ElementPlus.ElMessageBox.confirm(
+              '取消执行实例 ' + shortId(row.run_id) + '？执行中的任务需处理器轮询心跳后自行退出。',
+              '取消确认', { type: 'warning' }
+            );
+          } catch (e) { return; }
+          try {
+            const res = await WD.request.post('/admin/scheduler_admin/cancelRun', { run_id: row.run_id });
+            if (!res.success) { ElementPlus.ElMessage.error(res.message || '取消失败'); return; }
+            ElementPlus.ElMessage.success(res.message || '已提交取消');
+            loadRuns();
+          } catch (e) { ElementPlus.ElMessage.error('取消失败'); }
+        }
+
+        async function saveSettings() {
+          saving.value = true;
+          try {
+            const res = await WD.request.post('/admin/scheduler_admin/settingsSave', {
+              values: JSON.stringify({ ...values })
+            });
+            if (!res.success) { ElementPlus.ElMessage.error(res.message || '保存失败'); return; }
+            ElementPlus.ElMessage.success(res.message || '已保存');
+            resetValues((res.data && res.data.values) || {});
+          } finally {
+            saving.value = false;
+          }
+        }
+
+        async function resetSettings() {
+          try {
+            await ElementPlus.ElMessageBox.confirm('恢复全部 42 项配置为默认值？', '恢复默认', { type: 'warning' });
+          } catch (e) { return; }
+          saving.value = true;
+          try {
+            const res = await WD.request.post('/admin/scheduler_admin/settingsReset', {});
+            if (!res.success) { ElementPlus.ElMessage.error(res.message || '恢复失败'); return; }
+            ElementPlus.ElMessage.success(res.message || '已恢复默认配置');
+            resetValues((res.data && res.data.values) || {});
+          } finally {
+            saving.value = false;
+          }
+        }
+
+        async function loadInstallCommands() {
+          loading.value = true;
+          try {
+            const res = await WD.request.get('/admin/scheduler_admin/installCommands' + qs({ interval: installInterval.value }));
+            if (!res.success) { ElementPlus.ElMessage.error(res.message || '生成失败'); return; }
+            const d = res.data || {};
+            const lines = (d.items || []).map(it => '# ' + it.name + '\n' + it.text);
+            installText.value = ['# OS: ' + (d.os || '') + '  PHP: ' + (d.php || '') + '  入口: ' + (d.entry || '')]
+              .concat(lines).join('\n\n');
+          } finally {
+            loading.value = false;
+          }
+        }
+
+        loadOverview();
+
+        return {
+          tab, loading, ticking, probing, saving,
+          states, overview, heartbeat, lastTick, lastTickText,
+          defRows, defTotal, defPage, defSize, defFilters,
+          runRows, runTotal, runPage, runSize, runFilters,
+          values, schemaRows, envCaps, installInterval, installText,
+          probeVisible, probeText,
+          loadOverview, loadDefs, loadRuns, loadSettings, onTabClick,
+          searchDefs, resetDefs, onDefSizeChange,
+          searchRuns, resetRuns, onRunSizeChange,
+          tickNow, runProbe, triggerDef, toggleDef, removeDef, cancelRun,
+          saveSettings, resetSettings, loadInstallCommands,
+          shortId, stateText, stateType, formatValue, enumLabel,
+          Search, Refresh, RefreshLeft, Select, VideoPlay, Cpu, Document
+        };
+      }
+    });
+
+    for (const [name, comp] of Object.entries(window.ElementPlusIconsVue)) {
+      app.component(name, comp);
+    }
+    app.use(ElementPlus);
+    app.use(WorkDesktop);
+    app.mount('#app');
+  </script>
+</body>
+
+</html>

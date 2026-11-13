@@ -11,12 +11,26 @@ namespace linhub\host\services\logging;
  */
 class LoggingService implements Logging
 {
+    /** 本请求内已确认存在的目录，避免每条日志重复 mkdir。 */
+    private static array $ensuredDirs = [];
+
     public function __construct(private readonly string $logPath = '')
     {
     }
 
+    /** 运行日志根目录（工作台巡检与写盘共用同一口径）。 */
+    public static function defaultLogDir(): string
+    {
+        return runtime_path() . 'log' . DIRECTORY_SEPARATOR;
+    }
+
     private function write(string $level, string $message, array $context): void
     {
+        // 日志设置：总开关关闭或低于最低记录级别时不落盘（缺省 enabled=1 / debug，保持历史行为）
+        $settings = LogSettingService::shared();
+        if (!$settings->enabled() || !$settings->passes($level)) {
+            return;
+        }
         $line = sprintf(
             "[%s] %s | %s | %s\n",
             date('Y-m-d H:i:s'),
@@ -24,9 +38,17 @@ class LoggingService implements Logging
             $message,
             json_encode($context, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
         );
-        $path = $this->logPath !== '' ? $this->logPath : runtime_path() . 'log' . DIRECTORY_SEPARATOR . date('Ym') . DIRECTORY_SEPARATOR;
-        @mkdir($path, 0755, true);
-        @file_put_contents($path . 'host.log', $line, FILE_APPEND);
+        // 统一按月归档：{根目录}/YYYYMM/host.log（注入路径与缺省路径同口径）
+        $root = $this->logPath !== '' ? $this->logPath : self::defaultLogDir();
+        $path = rtrim(str_replace('\\', '/', $root), '/') . '/' . date('Ym') . '/';
+        if (!isset(self::$ensuredDirs[$path])) {
+            if (!is_dir($path)) {
+                @mkdir($path, 0755, true);
+            }
+            self::$ensuredDirs[$path] = true;
+        }
+        // LOCK_EX 保证并发写入时整行不撕裂
+        @file_put_contents($path . 'host.log', $line, FILE_APPEND | LOCK_EX);
     }
 
     public function info(string $message, array $context = []): void

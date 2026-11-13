@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace linhub\host\services\translation;
 
+use linhub\host\services\logging\LoggingService;
 use linhub\host\services\support\PlatformStore;
 
 /**
@@ -147,6 +148,13 @@ final class TranslatorService implements Translator
             );
         }
         $this->invalidate($namespace);
+        $this->journal('put', [
+            'namespace' => $namespace,
+            'key'       => $key,
+            'lang'      => $lang,
+            'owner'     => $owner,
+            'as_admin'  => $asAdmin,
+        ], 'debug');
 
         $row = $this->rawRow($namespace, $key, $lang) ?? [];
         return [
@@ -178,7 +186,23 @@ final class TranslatorService implements Translator
             'DELETE FROM ' . PlatformStore::TRANSLATION_TABLE . ' WHERE id=' . (int) $existing['id']
         );
         $this->invalidate($namespace);
+        $this->journal('remove', [
+            'namespace' => $namespace,
+            'key'       => $key,
+            'lang'      => $lang,
+            'as_admin'  => $asAdmin,
+        ], 'debug');
         return true;
+    }
+
+    /** 日志记录：落 runtime host.log，失败不阻断业务。 */
+    private function journal(string $action, array $context = [], string $level = 'info'): void
+    {
+        try {
+            (new LoggingService())->{$level}('[translation] ' . $action, $context);
+        } catch (\Throwable) {
+            // 日志失败不影响业务
+        }
     }
 
     public function search(array $filter, int $page = 1, int $size = 20): array

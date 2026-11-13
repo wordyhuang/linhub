@@ -7,6 +7,7 @@ namespace linhub\host\services\inbox;
 use linhub\capability\auth\Identity;
 use linhub\host\rbac\DbRbacStorage;
 use linhub\host\rbac\RbacStorage;
+use linhub\host\services\logging\LoggingService;
 use linhub\host\services\support\PlatformStore;
 use think\facade\Env;
 
@@ -119,6 +120,7 @@ final class InboxService implements Inbox
             . ' AND is_read = 0'
             . ' AND user_id IN (' . $this->viewerIdLiterals($viewer) . ')'
         );
+        $this->journal('mark_read', ['msg_key' => $msgKey], 'debug');
     }
 
     public function markAllRead(Identity $viewer): int
@@ -133,6 +135,7 @@ final class InboxService implements Inbox
                 . ' AND user_id IN (' . $this->viewerIdLiterals($viewer) . ')'
             );
         }
+        $this->journal('mark_all_read', ['affected' => $affected], 'debug');
         return $affected;
     }
 
@@ -325,7 +328,24 @@ final class InboxService implements Inbox
             $this->trimUnread((string) $recipient['id']);
         }
 
+        $this->journal('send', [
+            'msg_key'   => $msgKey,
+            'source'    => trim($sourcePackage),
+            'title'     => $title,
+            'target_type' => $targetType,
+            'recipients' => count($resolved),
+        ]);
         return ['msg_key' => $msgKey, 'recipient_count' => count($resolved)];
+    }
+
+    /** 日志记录：落 runtime host.log，失败不阻断业务。 */
+    private function journal(string $action, array $context = [], string $level = 'info'): void
+    {
+        try {
+            (new LoggingService())->{$level}('[inbox] ' . $action, $context);
+        } catch (\Throwable) {
+            // 日志失败不影响业务
+        }
     }
 
     /** 外部 ref_id / 本地 id 统一反查为本地用户；无本地用户时直接以原值落快照。 */

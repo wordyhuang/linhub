@@ -23,14 +23,33 @@ final class ManifestError
     public const M012 = 'M012'; // services.requires 服务版本约束不满足
     public const M013 = 'M013'; // services.provides 条目格式非法（id/class 空或 version 非语义化）
     public const M014 = 'M014'; // services.provides id 与宿主服务冲突（host 源只读红线）
+    public const M015 = 'M015'; // manifest.data 数据随包声明非法（类型/未知键/scope 三档外/未注册或不支持数据随包的服务 id）
+    public const M016 = 'M016'; // manifest.tasks 处理器映射声明非法（文件名/键/实现类不合法）
 
     public const ALL = [
         self::M001, self::M002, self::M003, self::M004, self::M005, self::M006,
         self::M007, self::M008, self::M009, self::M010, self::M011, self::M012,
-        self::M013, self::M014,
+        self::M013, self::M014, self::M015, self::M016,
     ];
 
     private function __construct()
     {
+    }
+
+    /**
+     * 将错误码渲染为「M015（具体原因）」消息串（原因取该码收集到的第一条详情）。
+     *
+     * @param list<string> $codes validate() 返回的错误码列表
+     * @param array<string, list<string>> $reasons validate() 收集的 码 => 原因描述列表
+     * @return list<string>
+     */
+    public static function render(array $codes, array $reasons = []): array
+    {
+        $out = [];
+        foreach ($codes as $code) {
+            $reason = $reasons[$code][0] ?? '';
+            $out[] = $code . ($reason !== '' ? "（{$reason}）" : '');
+        }
+        return $out;
     }
 }

@@ -1,0 +1,843 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>流程设计 - LinHub 林枢</title>
+  <link rel="icon" type="image/svg+xml" href="/brand/favicon.svg">
+  <link rel="stylesheet" href="/static/vendor/element-plus/index.css">
+  <link rel="stylesheet" href="/static/vendor/workdesktop-ai/style.css">
+  <style>
+    html, body, #app { height: 100%; margin: 0; }
+    body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif; }
+    .fe-page { height: 100%; padding: 16px 20px 24px; box-sizing: border-box; }
+    .fe-toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
+    .fe-toolbar .fe-label { font-size: 13px; color: #64748b; }
+    .fe-spacer { flex: 1; }
+    .fe-body { display: flex; gap: 12px; align-items: stretch; }
+    .fe-palette { width: 168px; flex: none; border: 1px solid var(--el-border-color-light); border-radius: 6px; padding: 10px; box-sizing: border-box; }
+    .fe-palette-title { font-size: 13px; font-weight: 600; color: #334155; margin-bottom: 8px; }
+    .fe-palette-item { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid var(--el-border-color-light); border-radius: 6px; margin-bottom: 8px; cursor: pointer; font-size: 13px; color: #334155; user-select: none; }
+    .fe-palette-item:hover { border-color: var(--el-color-primary); color: var(--el-color-primary); }
+    .fe-dot { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+    .fe-dot.is-approval { background: #409eff; }
+    .fe-dot.is-exclusive { background: #e6a23c; }
+    .fe-dot.is-parallel { background: #67c23a; }
+    .fe-tip { font-size: 12px; color: #94a3b8; line-height: 1.7; margin-top: 6px; }
+    .fe-canvas-wrap { flex: 1; min-width: 0; height: calc(100vh - 240px); border: 1px solid var(--el-border-color-light); border-radius: 6px; overflow: auto; background: #f8fafc; box-sizing: border-box; }
+    .fe-node-box { cursor: move; }
+    .fe-node-approval { fill: #e8f3ff; stroke: #409eff; stroke-width: 1.4; }
+    .fe-node-exclusive { fill: #fdf3e7; stroke: #e6a23c; stroke-width: 1.4; }
+    .fe-node-parallel { fill: #ecf9f1; stroke: #67c23a; stroke-width: 1.4; }
+    .fe-node-title { font-size: 13px; fill: #1e293b; font-weight: 600; }
+    .fe-node-sub { font-size: 11px; fill: #64748b; }
+    .fe-node-type { font-size: 10px; fill: #94a3b8; }
+    .fe-entry-badge { fill: #f0fdf4; stroke: #22c55e; }
+    .fe-entry-text { font-size: 10px; fill: #16a34a; }
+    .fe-port { fill: #ffffff; stroke: #409eff; stroke-width: 1.4; cursor: crosshair; }
+    .fe-port:hover { stroke-width: 2.4; }
+    .fe-edge { stroke: #94a3b8; stroke-width: 1.6; fill: none; marker-end: url(#fe-arrow); cursor: pointer; }
+    .fe-edge.is-active { stroke: #ef4444; stroke-width: 2.4; }
+    .fe-edge-label { font-size: 11px; fill: #64748b; paint-order: stroke; stroke: #f8fafc; stroke-width: 3px; }
+    .fe-pending { stroke: #409eff; stroke-width: 1.6; stroke-dasharray: 5 4; fill: none; }
+    .fe-props { width: 336px; flex: none; border: 1px solid var(--el-border-color-light); border-radius: 6px; padding: 12px; box-sizing: border-box; overflow: auto; height: calc(100vh - 240px); }
+    .fe-props-title { font-size: 13px; font-weight: 600; color: #334155; margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
+    .fe-field { margin-bottom: 10px; }
+    .fe-field-label { font-size: 12px; color: #64748b; margin-bottom: 4px; display: block; }
+    .fe-branch { border: 1px solid var(--el-border-color-light); border-radius: 6px; padding: 8px; margin-bottom: 8px; }
+    .fe-branch-head { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; font-size: 12px; color: #334155; }
+    .fe-branch-head .fe-branch-target { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .fe-empty-props { font-size: 13px; color: #94a3b8; text-align: center; padding: 40px 0; line-height: 1.8; }
+    .fe-mono { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
+  </style>
+</head>
+
+<body>
+  <div id="app"></div>
+
+  <script type="text/x-template" id="ap-flow-editor-tpl">
+    <div class="fe-page">
+      <wd-panel description-align="right" :border="true">
+        <wd-tips type="box" style="margin-bottom:10px">
+          图形化编辑审批流程 DSL：点击左侧节点类型添加到画布，拖动节点右侧圆点连线到目标节点；保存后立即生效并生成新版本，在办单据仍按其提交时快照推进。
+        </wd-tips>
+
+        <div class="fe-toolbar">
+          <el-select v-model="selectedTpl" placeholder="加载已有流程模板" clearable filterable style="width:280px" @change="onPickTpl">
+            <el-option v-for="t in templates" :key="t.id" :label="t.package + ' / ' + (t.name || t.flow_key)" :value="t.id" />
+          </el-select>
+          <el-button :icon="Plus" @click="newFlow">新建流程</el-button>
+          <el-button :icon="Sort" @click="autoLayout">自动整理</el-button>
+          <div class="fe-spacer"></div>
+          <el-tag v-if="currentVersion" type="info" effect="plain">当前版本 v{{ currentVersion }}</el-tag>
+          <el-button type="primary" :icon="Check" :loading="saving" @click="save">保存流程</el-button>
+        </div>
+
+        <div class="fe-toolbar">
+          <span class="fe-label">所属包</span>
+          <el-select v-model="meta.package" filterable allow-create default-first-option placeholder="选择或输入包名" style="width:170px">
+            <el-option v-for="p in packages" :key="p" :label="p" :value="p" />
+          </el-select>
+          <span class="fe-label">flow_key</span>
+          <el-input v-model="meta.flowKey" placeholder="如 purchase_flow" style="width:180px" class="fe-mono" />
+          <span class="fe-label">流程名称</span>
+          <el-input v-model="meta.name" placeholder="如 采购审批" style="width:160px" />
+          <el-tag v-if="entryName" type="success" effect="plain" style="margin-left:4px">起点：{{ entryName }}</el-tag>
+          <el-tag v-else type="danger" effect="plain" style="margin-left:4px">未设置起点</el-tag>
+        </div>
+
+        <div class="fe-body">
+          <div class="fe-palette">
+            <div class="fe-palette-title">节点类型</div>
+            <div class="fe-palette-item" v-for="p in palette" :key="p.type" @click="addNode(p.type)">
+              <span class="fe-dot" :class="'is-' + p.type"></span>{{ p.label }}
+            </div>
+            <div class="fe-tip">
+              点击类型添加节点；从节点右侧圆点按下并拖到目标节点上连线；点选节点或连线后在右侧编辑属性；Delete 键删除选中项。
+            </div>
+          </div>
+
+          <div class="fe-canvas-wrap" ref="canvasRef" @mousedown="onCanvasDown">
+            <svg :width="canvasW" :height="canvasH">
+              <defs>
+                <marker id="fe-arrow" markerWidth="9" markerHeight="8" refX="8" refY="4" orient="auto">
+                  <path d="M0,0 L9,4 L0,8 Z" fill="#94a3b8"></path>
+                </marker>
+                <pattern id="fe-grid" width="24" height="24" patternUnits="userSpaceOnUse">
+                  <path d="M 24 0 L 0 0 0 24" fill="none" stroke="#e2e8f0" stroke-width="1"></path>
+                </pattern>
+              </defs>
+              <rect width="100%" height="100%" fill="url(#fe-grid)"></rect>
+
+              <g v-for="e in edges" :key="e.id" @mousedown.stop="selectEdge(e)">
+                <path :d="edgePath(e)" class="fe-edge" :class="{ 'is-active': sel && sel.kind === 'edge' && sel.id === e.id }"></path>
+                <text v-if="edgeLabel(e)" class="fe-edge-label" :x="edgeMid(e).x" :y="edgeMid(e).y - 6" text-anchor="middle">{{ edgeLabel(e) }}</text>
+              </g>
+
+              <g v-for="n in nodes" :key="n.id" :transform="'translate(' + n.x + ',' + n.y + ')'"
+                 @mousedown.stop="nodeDown(n, $event)">
+                <rect class="fe-node-box" :class="[nodeClass(n), { 'is-selected': isSelectedNode(n) }]"
+                      :width="NODE_W" :height="NODE_H" rx="8"
+                      :stroke="isSelectedNode(n) ? '#2563eb' : undefined" :stroke-width="isSelectedNode(n) ? 2.4 : undefined"></rect>
+                <g v-if="n.id === entry">
+                  <rect class="fe-entry-badge" x="-2" y="-9" width="38" height="16" rx="8"></rect>
+                  <text class="fe-entry-text" x="17" y="3" text-anchor="middle">起点</text>
+                </g>
+                <text class="fe-node-type" :x="10" y="16">{{ typeLabel(n.type) }}</text>
+                <text class="fe-node-title" :x="10" y="34">{{ n.name || n.id }}</text>
+                <text class="fe-node-sub" :x="10" y="52">{{ nodeSub(n) }}</text>
+                <circle class="fe-port" :cx="NODE_W" :cy="NODE_H / 2" r="5.5" @mousedown.stop="linkStart(n, $event)"></circle>
+              </g>
+
+              <path v-if="pending" class="fe-pending" :d="pendingPath"></path>
+            </svg>
+          </div>
+
+          <div class="fe-props">
+            <template v-if="selNode">
+              <div class="fe-props-title">
+                <span class="fe-dot" :class="'is-' + selNode.type"></span>
+                节点属性 · {{ typeLabel(selNode.type) }}
+                <div class="fe-spacer"></div>
+                <el-button size="small" text type="primary" :disabled="selNode.id === entry" @click="setEntry(selNode.id)">设为起点</el-button>
+              </div>
+              <div class="fe-field">
+                <label class="fe-field-label">节点 ID（标识符，改动会同步更新引用）</label>
+                <el-input :model-value="selNode.id" class="fe-mono" @change="onIdChange(selNode, $event)" />
+              </div>
+              <div class="fe-field">
+                <label class="fe-field-label">节点名称</label>
+                <el-input v-model="selNode.name" placeholder="如 部门经理审批" />
+              </div>
+
+              <template v-if="selNode.type === 'approval'">
+                <div class="fe-field">
+                  <label class="fe-field-label">审批方式</label>
+                  <el-radio-group v-model="selNode.mode">
+                    <el-radio value="any">或签（任一通过）</el-radio>
+                    <el-radio value="all">会签（全部通过）</el-radio>
+                  </el-radio-group>
+                </div>
+                <div class="fe-field">
+                  <label class="fe-field-label">审批人（用户）</label>
+                  <el-select v-model="selNode.users" multiple filterable clearable placeholder="选择用户" style="width:100%">
+                    <el-option v-for="u in users" :key="u.id" :label="u.name + '（' + u.id + '）'" :value="u.id" />
+                  </el-select>
+                </div>
+                <div class="fe-field">
+                  <label class="fe-field-label">审批人（角色）</label>
+                  <el-select v-model="selNode.roles" multiple filterable clearable placeholder="选择角色" style="width:100%">
+                    <el-option v-for="r in roles" :key="r.id" :label="r.name + '（' + r.id + '）'" :value="r.id" />
+                  </el-select>
+                </div>
+                <div class="fe-field">
+                  <label class="fe-field-label">审批人（权限组）</label>
+                  <el-select v-model="selNode.groups" multiple filterable clearable placeholder="选择权限组（成员用户为备选审批人）" style="width:100%">
+                    <el-option v-for="g in groups" :key="g.id" :label="g.name + '（' + g.id + '）'" :value="g.id" />
+                  </el-select>
+                </div>
+                <div class="fe-field">
+                  <label class="fe-field-label">自定义解析器（可留空）</label>
+                  <el-input v-model="selNode.resolver" placeholder="如 leader_of_submitter" class="fe-mono" />
+                </div>
+                <div class="fe-tip">users / roles / groups / resolver 至少配置一项，否则无法保存。</div>
+              </template>
+
+              <template v-if="selNode.type === 'exclusive'">
+                <div class="fe-field">
+                  <label class="fe-field-label">分支（自上而下按顺序求值，命中即走；不设条件的是默认分支）</label>
+                  <div class="fe-branch" v-for="(e, i) in outsOf(selNode)" :key="e.id">
+                    <div class="fe-branch-head">
+                      <el-tag size="small" :type="e.condition ? 'warning' : 'success'" effect="plain">{{ e.condition ? '条件' : '默认' }}</el-tag>
+                      <span class="fe-branch-target">→ {{ nodeName(e.to) }}</span>
+                      <el-button size="small" text :disabled="i === 0" @click="moveBranch(selNode, i, -1)">↑</el-button>
+                      <el-button size="small" text :disabled="i === outsOf(selNode).length - 1" @click="moveBranch(selNode, i, 1)">↓</el-button>
+                      <el-button size="small" text type="danger" @click="deleteEdge(e.id)">删</el-button>
+                    </div>
+                    <template v-if="e.condition">
+                      <template v-if="isComboCondition(e.condition)">
+                        <div class="fe-tip">组合条件（all/any），编辑器不做改动，保存时原样保留。</div>
+                      </template>
+                      <template v-else>
+                        <el-input v-model="e.condition.field" size="small" placeholder="payload.amount 或 submitter.id" class="fe-mono" style="margin-bottom:6px" />
+                        <div style="display:flex; gap:6px">
+                          <el-select v-model="e.condition.op" size="small" style="width:120px">
+                            <el-option v-for="op in opOptions" :key="op.value" :label="op.label" :value="op.value" />
+                          </el-select>
+                          <el-input v-if="e.condition.op !== 'exists'" v-model="e.condition.value" size="small"
+                                    :placeholder="e.condition.op === 'in' || e.condition.op === 'not_in' ? '值1,值2' : '比较值'" />
+                        </div>
+                      </template>
+                    </template>
+                    <el-button v-else size="small" text type="primary" style="padding-left:0" @click="startCondition(e)">+ 添加条件</el-button>
+                  </div>
+                </div>
+              </template>
+
+              <template v-if="selNode.type === 'parallel'">
+                <div class="fe-field">
+                  <label class="fe-field-label">出边分支（{{ outsOf(selNode).length }} 支，至少 2 支）</label>
+                  <div class="fe-branch" v-for="e in outsOf(selNode)" :key="e.id">
+                    <div class="fe-branch-head">
+                      <el-tag size="small" effect="plain">分支</el-tag>
+                      <span class="fe-branch-target">→ {{ nodeName(e.to) }}</span>
+                      <el-button size="small" text type="danger" @click="deleteEdge(e.id)">删</el-button>
+                    </div>
+                  </div>
+                </div>
+                <div class="fe-field">
+                  <label class="fe-field-label">汇合节点（各分支执行完毕后在此继续）</label>
+                  <el-select v-model="selNode.joinTarget" filterable placeholder="选择审批节点" style="width:100%">
+                    <el-option v-for="n in approvalJoinables" :key="n.id" :label="(n.name || n.id)" :value="n.id" />
+                  </el-select>
+                </div>
+                <div class="fe-tip">从各分支末尾节点连线到汇合节点即可，保存时自动转写为汇合标识。</div>
+              </template>
+
+              <el-button type="danger" plain size="small" :icon="Delete" style="margin-top:6px" @click="deleteNode(selNode.id)">删除此节点</el-button>
+            </template>
+
+            <template v-else-if="selEdge">
+              <div class="fe-props-title">连线属性</div>
+              <div class="fe-field">
+                <label class="fe-field-label">方向</label>
+                <div>{{ nodeName(selEdge.from) }} → {{ nodeName(selEdge.to) }}</div>
+              </div>
+              <div class="fe-field" v-if="fromIsExclusive(selEdge)">
+                <label class="fe-field-label">分支条件（清空条件即为默认分支）</label>
+                <template v-if="selEdge.condition">
+                  <template v-if="isComboCondition(selEdge.condition)">
+                    <div class="fe-tip">组合条件（all/any），编辑器不做改动，保存时原样保留。</div>
+                  </template>
+                  <template v-else>
+                    <el-input v-model="selEdge.condition.field" size="small" placeholder="payload.xxx 或 submitter.xxx" class="fe-mono" style="margin-bottom:6px" />
+                    <div style="display:flex; gap:6px">
+                      <el-select v-model="selEdge.condition.op" size="small" style="width:120px">
+                        <el-option v-for="op in opOptions" :key="op.value" :label="op.label" :value="op.value" />
+                      </el-select>
+                      <el-input v-if="selEdge.condition.op !== 'exists'" v-model="selEdge.condition.value" size="small" placeholder="比较值" />
+                    </div>
+                  </template>
+                </template>
+                <el-button v-else size="small" text type="primary" style="padding-left:0" @click="startCondition(selEdge)">+ 添加条件</el-button>
+              </div>
+              <el-button type="danger" plain size="small" :icon="Delete" @click="deleteEdge(selEdge.id)">删除此连线</el-button>
+            </template>
+
+            <template v-else>
+              <div class="fe-empty-props">
+                未选中任何对象<br />
+                点选画布中的节点或连线<br />
+                编辑属性
+              </div>
+            </template>
+          </div>
+        </div>
+      </wd-panel>
+    </div>
+  </script>
+
+  <script src="/static/vendor/vue/vue.global.prod.js"></script>
+  <script src="/static/vendor/element-plus/index.full.min.js"></script>
+  <script src="/static/vendor/icons/index.iife.min.js"></script>
+  <script src="/static/vendor/workdesktop-ai/index.umd.js"></script>
+  <script src="/static/linhub/auth-guard.js?v=2"></script>
+  <script>
+    const WD = window.WorkDesktop;
+    const ElementPlus = window.ElementPlus;
+    const { WorkDesktop } = WD;
+    const { ref, reactive, computed, onMounted, onBeforeUnmount } = Vue;
+    const { Plus, Sort, Check, Delete } = window.ElementPlusIconsVue || {};
+
+    const NODE_W = 176;
+    const NODE_H = 64;
+    const CANVAS_W = 2800;
+    const CANVAS_H = 1700;
+    const JOIN_RE = /^__join_(.+)__$/;
+    const OPS = [
+      { value: 'eq', label: '等于' }, { value: 'ne', label: '不等于' },
+      { value: 'gt', label: '大于' }, { value: 'gte', label: '大于等于' },
+      { value: 'lt', label: '小于' }, { value: 'lte', label: '小于等于' },
+      { value: 'in', label: '在列表' }, { value: 'not_in', label: '不在列表' },
+      { value: 'contains', label: '包含' }, { value: 'exists', label: '字段存在' }
+    ];
+    const TYPE_LABEL = { approval: '审批节点', exclusive: '排他网关', parallel: '并行网关' };
+    const TYPE_CLASS = { approval: 'fe-node-approval', exclusive: 'fe-node-exclusive', parallel: 'fe-node-parallel' };
+
+    const app = Vue.createApp({
+      template: '#ap-flow-editor-tpl',
+      setup() {
+        const templates = ref([]);
+        const packages = ref([]);
+        const selectedTpl = ref(null);
+        const meta = reactive({ package: '', flowKey: '', name: '' });
+        const nodes = ref([]);
+        const edges = ref([]);
+        const entry = ref('');
+        const sel = ref(null);
+        const pending = ref(null);
+        const roles = ref([]);
+        const groups = ref([]);
+        const users = ref([]);
+        const saving = ref(false);
+        const canvasRef = ref(null);
+        const opOptions = OPS;
+
+        let nodeSeq = 1;
+        let edgeSeq = 1;
+        let drag = null;
+
+        const selNode = computed(() => sel.value && sel.value.kind === 'node' ? nodes.value.find(n => n.id === sel.value.id) || null : null);
+        const selEdge = computed(() => sel.value && sel.value.kind === 'edge' ? edges.value.find(e => e.id === sel.value.id) || null : null);
+        const entryName = computed(() => entry.value ? nodeName(entry.value) : '');
+        const currentVersion = computed(() => {
+          const t = templates.value.find(x => x.package === meta.package && x.flow_key === meta.flowKey.trim());
+          return t ? t.version : '';
+        });
+        const approvalJoinables = computed(() => nodes.value.filter(n => n.type === 'approval' && (!selNode.value || n.id !== selNode.value.id)));
+        const pendingPath = computed(() => {
+          if (!pending.value) return '';
+          const from = nodeById(pending.value.from);
+          if (!from) return '';
+          const sx = from.x + NODE_W, sy = from.y + NODE_H / 2;
+          return 'M ' + sx + ' ' + sy + ' L ' + pending.value.x + ' ' + pending.value.y;
+        });
+
+        function nodeById(id) { return nodes.value.find(n => n.id === id) || null; }
+        function nodeName(id) { const n = nodeById(id); return n ? (n.name || n.id) : id; }
+        function typeLabel(t) { return TYPE_LABEL[t] || t; }
+        function nodeClass(n) { return TYPE_CLASS[n.type] || TYPE_CLASS.approval; }
+        function isSelectedNode(n) { return !!(sel.value && sel.value.kind === 'node' && sel.value.id === n.id); }
+        function outsOf(node) { return edges.value.filter(e => e.from === node.id); }
+        function fromIsExclusive(e) { const f = nodeById(e.from); return !!f && f.type === 'exclusive'; }
+        function isComboCondition(c) { return !!c && (c.all !== undefined || c.any !== undefined); }
+
+        function nodeSub(n) {
+          if (n.type === 'approval') {
+            const parts = [];
+            if (n.users.length) parts.push(n.users.length + ' 用户');
+            if (n.roles.length) parts.push(n.roles.length + ' 角色');
+            if (n.groups.length) parts.push(n.groups.length + ' 权限组');
+            if (n.resolver) parts.push('解析器');
+            return parts.length ? parts.join(' · ') : '未配置审批人';
+          }
+          if (n.type === 'exclusive') return outsOf(n).length + ' 个分支';
+          return n.joinTarget ? '汇合 → ' + nodeName(n.joinTarget) : '未选择汇合节点';
+        }
+
+        // —— 图形几何 ——
+        function edgePath(e) {
+          const f = nodeById(e.from), t = nodeById(e.to);
+          if (!f || !t) return '';
+          const sx = f.x + NODE_W, sy = f.y + NODE_H / 2;
+          const tx = t.x, ty = t.y + NODE_H / 2;
+          const mx = (sx + tx) / 2;
+          return 'M ' + sx + ' ' + sy + ' C ' + mx + ' ' + sy + ', ' + mx + ' ' + ty + ', ' + tx + ' ' + ty;
+        }
+        function edgeMid(e) {
+          const f = nodeById(e.from), t = nodeById(e.to);
+          if (!f || !t) return { x: 0, y: 0 };
+          return { x: (f.x + NODE_W + t.x) / 2, y: (f.y + t.y) / 2 + NODE_H / 2 };
+        }
+        function edgeLabel(e) {
+          if (joinGwOfEdge(e)) return '汇合';
+          const f = nodeById(e.from);
+          if (f && f.type === 'exclusive') {
+            if (!e.condition) return '默认分支';
+            if (isComboCondition(e.condition)) return '组合条件';
+            return condText(e.condition);
+          }
+          return '';
+        }
+        function condText(c) {
+          const op = OPS.find(o => o.value === c.op);
+          return (c.field || '?') + ' ' + (op ? op.label : c.op) + (c.value !== '' && c.value != null ? ' ' + c.value : '');
+        }
+
+        // —— 编辑动作 ——
+        function autoNodeId() {
+          let id;
+          do { id = 'n' + (nodeSeq++); } while (nodeById(id));
+          return id;
+        }
+        function addNode(type) {
+          const wrap = canvasRef.value;
+          let cx = 160, cy = 120;
+          if (wrap) {
+            cx = wrap.scrollLeft + wrap.clientWidth / 2 - NODE_W / 2 + (Math.random() * 60 - 30);
+            cy = wrap.scrollTop + wrap.clientHeight / 2 - NODE_H / 2 + (Math.random() * 60 - 30);
+          }
+          const n = {
+            id: autoNodeId(), type, name: '', x: Math.max(20, Math.round(cx)), y: Math.max(20, Math.round(cy)),
+            mode: 'any', users: [], roles: [], groups: [], resolver: '', joinTarget: ''
+          };
+          nodes.value.push(n);
+          if (!entry.value) entry.value = n.id;
+          sel.value = { kind: 'node', id: n.id };
+        }
+        function newFlow() {
+          ElementPlus.ElMessageBox.confirm('新建会清空当前画布（未保存的修改将丢失），继续？', '新建流程', { type: 'warning' })
+            .then(() => { resetCanvas(); })
+            .catch(() => {});
+        }
+        function resetCanvas() {
+          meta.package = ''; meta.flowKey = ''; meta.name = '';
+          nodes.value = []; edges.value = []; entry.value = ''; sel.value = null; pending.value = null;
+          selectedTpl.value = null;
+          nodeSeq = 1; edgeSeq = 1;
+        }
+        function addEdge(fromId, toId) {
+          if (fromId === toId) return;
+          if (edges.value.some(e => e.from === fromId && e.to === toId)) return;
+          const from = nodeById(fromId);
+          if (from && from.type === 'approval') {
+            edges.value = edges.value.filter(e => e.from !== fromId);
+          }
+          edges.value.push({ id: 'e' + (edgeSeq++), from: fromId, to: toId, condition: null });
+          sel.value = { kind: 'edge', id: edges.value[edges.value.length - 1].id };
+        }
+        function selectEdge(e) {
+          sel.value = { kind: 'edge', id: e.id };
+          pending.value = null;
+        }
+        function setEntry(id) { entry.value = id; }
+        function startCondition(e) { e.condition = { field: '', op: 'eq', value: '' }; }
+        function moveBranch(node, index, dir) {
+          const list = edges.value;
+          const idxs = list.map((e, i) => e.from === node.id ? i : -1).filter(i => i >= 0);
+          const a = idxs[index], b = idxs[index + dir];
+          if (b === undefined) return;
+          const tmp = list[a]; list[a] = list[b]; list[b] = tmp;
+        }
+        function deleteEdge(id) {
+          edges.value = edges.value.filter(e => e.id !== id);
+          if (sel.value && sel.value.kind === 'edge' && sel.value.id === id) sel.value = null;
+        }
+        function deleteNode(id) {
+          edges.value = edges.value.filter(e => e.from !== id && e.to !== id);
+          nodes.value = nodes.value.filter(n => n.id !== id);
+          nodes.value.forEach(n => { if (n.joinTarget === id) n.joinTarget = ''; });
+          if (entry.value === id) entry.value = nodes.value.length ? nodes.value[0].id : '';
+          if (sel.value && sel.value.kind === 'node' && sel.value.id === id) sel.value = null;
+        }
+        function deleteSelected() {
+          if (sel.value && sel.value.kind === 'node') deleteNode(sel.value.id);
+          else if (sel.value && sel.value.kind === 'edge') deleteEdge(sel.value.id);
+        }
+        function onIdChange(n, val) {
+          const old = n.id;
+          const nid = String(val || '').trim();
+          if (!nid || nid === old) { n.id = old; return; }
+          if (nid.length > 191) { ElementPlus.ElMessage.warning('节点 id 不能超过 191 字符'); n.id = old; return; }
+          if (nodes.value.some(x => x.id === nid)) { ElementPlus.ElMessage.warning('节点 id「' + nid + '」已存在'); n.id = old; return; }
+          n.id = nid;
+          edges.value.forEach(e => { if (e.from === old) e.from = nid; if (e.to === old) e.to = nid; });
+          nodes.value.forEach(x => { if (x.joinTarget === old) x.joinTarget = nid; });
+          if (entry.value === old) entry.value = nid;
+          if (sel.value && sel.value.kind === 'node' && sel.value.id === old) sel.value.id = nid;
+        }
+
+        // —— 鼠标交互 ——
+        function canvasXY(evt) {
+          const rect = canvasRef.value.getBoundingClientRect();
+          return { x: evt.clientX - rect.left, y: evt.clientY - rect.top };
+        }
+        function hitNode(x, y) {
+          return nodes.value.find(n => x >= n.x && x <= n.x + NODE_W && y >= n.y && y <= n.y + NODE_H) || null;
+        }
+        function nodeDown(n, evt) {
+          sel.value = { kind: 'node', id: n.id };
+          pending.value = null;
+          const p = canvasXY(evt);
+          drag = { id: n.id, dx: n.x - p.x, dy: n.y - p.y, moved: false };
+          evt.preventDefault();
+        }
+        function linkStart(n, evt) {
+          const p = canvasXY(evt);
+          pending.value = { from: n.id, x: p.x, y: p.y };
+          sel.value = null;
+          evt.preventDefault();
+        }
+        function onCanvasDown() {
+          sel.value = null;
+          pending.value = null;
+        }
+        function onMouseMove(evt) {
+          const p = canvasXY(evt);
+          if (pending.value) {
+            pending.value.x = p.x; pending.value.y = p.y;
+            return;
+          }
+          if (drag) {
+            const n = nodeById(drag.id);
+            if (n) {
+              n.x = Math.max(4, Math.round(p.x + drag.dx));
+              n.y = Math.max(4, Math.round(p.y + drag.dy));
+              drag.moved = true;
+            }
+          }
+        }
+        function onMouseUp(evt) {
+          if (pending.value) {
+            const p = canvasXY(evt);
+            const target = hitNode(p.x, p.y);
+            if (target && target.id !== pending.value.from) addEdge(pending.value.from, target.id);
+            pending.value = null;
+          }
+          drag = null;
+        }
+        function onKeyDown(evt) {
+          if (evt.key !== 'Delete' && evt.key !== 'Backspace') return;
+          const tag = (document.activeElement && document.activeElement.tagName || '').toLowerCase();
+          if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
+          if (document.activeElement && document.activeElement.isContentEditable) return;
+          if (sel.value) { evt.preventDefault(); deleteSelected(); }
+        }
+
+        // —— join 语义 ——
+        /** 该边的目标是否是某并行网关的汇合点，且边起点位于该网关分支内；返回网关节点或 null。 */
+        function joinGwOfEdge(e) {
+          const t = nodeById(e.to);
+          if (!t) return null;
+          for (const gw of nodes.value) {
+            if (gw.type !== 'parallel' || gw.joinTarget !== e.to) continue;
+            if (reachableInBranch(gw, e.from)) return gw;
+          }
+          return null;
+        }
+        /** from 是否位于并行网关 gw 的分支可达集合内（沿出边 BFS，遇到汇合点即止）。 */
+        function reachableInBranch(gw, from) {
+          const seen = new Set();
+          const queue = outsOf(gw).map(e => e.to);
+          while (queue.length) {
+            const cur = queue.shift();
+            if (cur === from) return true;
+            if (seen.has(cur) || seen.size > 256) continue;
+            seen.add(cur);
+            if (cur === gw.joinTarget) continue;
+            for (const e of outsOfById(cur)) queue.push(e.to);
+          }
+          return false;
+        }
+        function outsOfById(id) { return edges.value.filter(e => e.from === id); }
+
+        // —— DSL 转换 ——
+        function fromDsl(dsl) {
+          nodes.value = []; edges.value = []; entry.value = ''; sel.value = null; pending.value = null;
+          nodeSeq = 1; edgeSeq = 1;
+          const defs = (dsl && dsl.nodes) || {};
+          const layout = (dsl && dsl.layout) || {};
+          let i = 0;
+          for (const [id, n] of Object.entries(defs)) {
+            const ap = (n && n.approvers) || {};
+            nodes.value.push({
+              id, type: (n && n.type) || 'approval', name: (n && n.name) || '',
+              x: (layout[id] && layout[id].x) != null ? layout[id].x : 140 + (i % 5) * 240,
+              y: (layout[id] && layout[id].y) != null ? layout[id].y : 80 + Math.floor(i / 5) * 150,
+              mode: ap && n.mode === 'all' ? 'all' : 'any',
+              users: Array.isArray(ap.users) ? [...ap.users] : [],
+              roles: Array.isArray(ap.roles) ? [...ap.roles] : [],
+              groups: Array.isArray(ap.groups) ? [...ap.groups] : [],
+              resolver: (ap && ap.resolver) || '',
+              joinTarget: (n && n.join) || ''
+            });
+            i++;
+          }
+          const mk = (from, to, condition) => edges.value.push({ id: 'e' + (edgeSeq++), from, to, condition: normalizeCondIn(condition) });
+          for (const [id, n] of Object.entries(defs)) {
+            if (!n) continue;
+            if ((n.type || 'approval') === 'approval') {
+              if (n.next) mk(id, resolveJoinTarget(n.next, defs), null);
+            } else if (n.type === 'exclusive') {
+              (n.branches || []).forEach(b => mk(id, b.next, (b && b.condition) || null));
+            } else if (n.type === 'parallel') {
+              (n.branches || []).forEach(b => mk(id, b.next, null));
+            }
+          }
+          entry.value = (dsl && dsl.entry) || (nodes.value.length ? nodes.value[0].id : '');
+          autoLayout();
+        }
+        function resolveJoinTarget(next, defs) {
+          const m = JOIN_RE.exec(String(next));
+          if (m && defs[m[1]] && defs[m[1]].join) return defs[m[1]].join;
+          return String(next);
+        }
+        /** 加载时把引擎条件结构转为编辑器友好的结构（in/not_in 的 value 摊平为逗号串；组合条件原样保留）。 */
+        function normalizeCondIn(condition) {
+          if (!condition) return null;
+          if (typeof condition !== 'object' || Array.isArray(condition)) return null;
+          if (condition.all !== undefined || condition.any !== undefined) return condition;
+          const op = String(condition.op || 'eq');
+          let value = condition.value;
+          if (op === 'in' || op === 'not_in') value = Array.isArray(value) ? value.map(String).join(',') : String(value == null ? '' : value);
+          else value = value == null ? '' : String(value);
+          return { field: String(condition.field || ''), op, value };
+        }
+        function condOut(condition) {
+          if (!condition) return null;
+          if (isComboCondition(condition)) return JSON.parse(JSON.stringify(condition));
+          const op = String(condition.op || 'eq');
+          const field = String(condition.field || '').trim();
+          let value;
+          if (op === 'in' || op === 'not_in') {
+            value = String(condition.value || '').split(/[,，]/).map(s => s.trim()).filter(Boolean)
+              .map(s => /^-?\d+(\.\d+)?$/.test(s) ? Number(s) : s);
+          } else if (op === 'exists') {
+            value = '';
+          } else {
+            value = String(condition.value == null ? '' : condition.value);
+          }
+          return { field, op, value };
+        }
+        function buildDsl() {
+          const list = nodes.value.map(g => {
+            const item = { id: g.id, type: g.type, name: g.name || '', x: Math.round(g.x), y: Math.round(g.y) };
+            const outs = outsOf(g);
+            if (g.type === 'approval') {
+              item.approvers = { users: [...g.users], roles: [...g.roles], groups: [...g.groups], resolver: g.resolver || '' };
+              item.mode = g.mode === 'all' ? 'all' : 'any';
+              const out = outs[0] || null;
+              const gw = out ? joinGwOfEdge(out) : null;
+              item.next = out ? (gw ? '__join_' + gw.id + '__' : out.to) : null;
+            } else if (g.type === 'exclusive') {
+              item.branches = outs.map(e => ({ condition: condOut(e.condition), next: e.to }));
+            } else {
+              item.branches = outs.map(e => ({ next: e.to }));
+              item.join = g.joinTarget;
+            }
+            return item;
+          });
+          return { flow_key: meta.flowKey.trim(), name: meta.name.trim(), entry: entry.value, nodes: list };
+        }
+
+        // —— 校验与保存 ——
+        function collectErrors() {
+          const errs = [];
+          if (!meta.package.trim()) errs.push('缺少所属功能包');
+          const fk = meta.flowKey.trim();
+          if (!fk || fk.length > 191 || !/^[A-Za-z0-9_.\-]+$/.test(fk)) errs.push('flow_key 不合法：仅限字母数字与 . _ -，且不超过 191 字符');
+          if (!meta.name.trim()) errs.push('缺少流程名称');
+          if (!nodes.value.length) errs.push('画布为空');
+          const ids = nodes.value.map(n => n.id.trim());
+          if (ids.some(id => !id)) errs.push('存在未填写 id 的节点');
+          if (new Set(ids).size !== ids.length) errs.push('节点 id 重复');
+          if (!entry.value || !nodeById(entry.value)) errs.push('未设置有效的起点节点');
+          for (const g of nodes.value) {
+            const label = '节点「' + (g.name || g.id) + '」';
+            if (g.type === 'approval') {
+              if (!g.users.length && !g.roles.length && !g.groups.length && !g.resolver.trim()) errs.push(label + '：至少配置用户 / 角色 / 权限组 / 解析器之一');
+            } else if (g.type === 'exclusive') {
+              const outs = outsOf(g);
+              if (!outs.length) errs.push(label + '：排他网关至少一条出边');
+              const defaults = outs.filter(e => !e.condition).length;
+              if (defaults === 0) errs.push(label + '：需要一条不设条件的默认分支');
+              if (defaults > 1) errs.push(label + '：默认分支只能有一条');
+              for (const e of outs) {
+                if (e.condition && !isComboCondition(e.condition) && !String(e.condition.field || '').trim()) errs.push(label + '：存在未填写字段的分支条件');
+              }
+            } else {
+              const outs = outsOf(g);
+              if (outs.length < 2) errs.push(label + '：并行网关至少两条出边');
+              if (!g.joinTarget) errs.push(label + '：未选择汇合节点');
+              else if ((nodeById(g.joinTarget) || {}).type !== 'approval') errs.push(label + '：汇合节点必须是审批节点');
+              else outs.forEach((e, i) => {
+                if (!canReach(e.to, g.joinTarget)) errs.push(label + '：第 ' + (i + 1) + ' 支无法到达汇合节点');
+              });
+            }
+          }
+          for (const e of edges.value) {
+            if (!nodeById(e.to)) errs.push('存在指向已删节点的连线（' + e.from + ' → ' + e.to + '）');
+          }
+          return errs;
+        }
+        function canReach(start, target) {
+          const seen = new Set();
+          const queue = [start];
+          while (queue.length) {
+            const cur = queue.shift();
+            if (cur === target) return true;
+            if (seen.has(cur) || seen.size > 256) continue;
+            seen.add(cur);
+            for (const e of outsOfById(cur)) queue.push(e.to);
+          }
+          return false;
+        }
+        async function save() {
+          const errs = collectErrors();
+          if (errs.length) {
+            ElementPlus.ElMessage.warning('校验未通过：' + errs[0] + (errs.length > 1 ? '（等 ' + errs.length + ' 项）' : ''));
+            return;
+          }
+          saving.value = true;
+          try {
+            const res = await WD.request.post('/admin/approval_admin/flowSave', {
+              package: meta.package.trim(),
+              flow: JSON.stringify(buildDsl())
+            });
+            if (!res.success) {
+              ElementPlus.ElMessage.error(res.message || '保存失败');
+              return;
+            }
+            ElementPlus.ElMessage.success('已保存，版本 v' + ((res.data && res.data.version) || '?'));
+            await loadTemplates();
+            const t = templates.value.find(x => x.package === meta.package && x.flow_key === meta.flowKey.trim());
+            selectedTpl.value = t ? t.id : null;
+          } finally {
+            saving.value = false;
+          }
+        }
+
+        // —— 数据加载 ——
+        async function loadMeta() {
+          const res = await WD.request.get('/admin/approval_admin/flowMeta');
+          if (res.success) {
+            roles.value = res.data.roles || [];
+            users.value = res.data.users || [];
+            groups.value = res.data.groups || [];
+          }
+        }
+        async function loadTemplates() {
+          const res = await WD.request.get('/admin/approval_admin/flowList');
+          if (res.success) {
+            templates.value = res.data.list || [];
+            packages.value = res.data.packages || [];
+          }
+        }
+        function onPickTpl(id) {
+          if (!id) return;
+          const t = templates.value.find(x => x.id === id);
+          if (!t) return;
+          meta.package = t.package || '';
+          meta.flowKey = t.flow_key || '';
+          meta.name = t.name || '';
+          fromDsl(t.definition || {});
+        }
+        // 清单页跳转直载：/flowEditor?pkg=xx&key=yy 自动回填对应模板
+        function autoPickFromUrl() {
+          const p = new URLSearchParams(location.search);
+          const pkg = p.get('pkg') || '';
+          const key = p.get('key') || '';
+          if (!pkg && !key) return;
+          const t = templates.value.find(x => (!pkg || x.package === pkg) && (!key || x.flow_key === key));
+          if (t) {
+            onPickTpl(t.id);
+          } else if (pkg || key) {
+            ElementPlus.ElMessage.warning('未找到指定流程模板，已按新建处理');
+          }
+        }
+
+        // —— 自动布局 ——
+        function autoLayout() {
+          if (!nodes.value.length) return;
+          const start = (entry.value && nodeById(entry.value)) ? entry.value : nodes.value[0].id;
+          const depth = new Map([[start, 0]]);
+          for (let round = 0; round < nodes.value.length; round++) {
+            let changed = false;
+            for (const e of edges.value) {
+              if (!depth.has(e.from)) continue;
+              const d = depth.get(e.from) + 1;
+              if (!depth.has(e.to) || depth.get(e.to) < d) { depth.set(e.to, d); changed = true; }
+            }
+            if (!changed) break;
+          }
+          let maxD = 0;
+          depth.forEach(d => { if (d > maxD) maxD = d; });
+          const layers = new Map();
+          nodes.value.forEach(n => {
+            const d = depth.has(n.id) ? depth.get(n.id) : maxD + 1;
+            if (!layers.has(d)) layers.set(d, []);
+            layers.get(d).push(n);
+          });
+          for (const [, list] of layers) {
+            list.sort((a, b) => a.y - b.y);
+            list.forEach((n, i) => { n.y = 90 + i * 150; });
+          }
+          for (const [d, list] of layers) {
+            list.forEach((n) => { n.x = 120 + d * 260; });
+          }
+        }
+
+        onMounted(() => {
+          window.addEventListener('mousemove', onMouseMove);
+          window.addEventListener('mouseup', onMouseUp);
+          window.addEventListener('keydown', onKeyDown);
+          loadMeta();
+          loadTemplates().then(autoPickFromUrl);
+        });
+        onBeforeUnmount(() => {
+          window.removeEventListener('mousemove', onMouseMove);
+          window.removeEventListener('mouseup', onMouseUp);
+          window.removeEventListener('keydown', onKeyDown);
+        });
+
+        return {
+          NODE_W, NODE_H, canvasW: CANVAS_W, canvasH: CANVAS_H,
+          palette: [
+            { type: 'approval', label: '审批节点' },
+            { type: 'exclusive', label: '排他网关' },
+            { type: 'parallel', label: '并行网关' }
+          ],
+          opOptions,
+          templates, packages, selectedTpl, meta, nodes, edges, entry, sel, pending, roles, groups, users, saving, canvasRef,
+          selNode, selEdge, entryName, currentVersion, approvalJoinables, pendingPath,
+          nodeById, nodeName, typeLabel, nodeClass, isSelectedNode, outsOf, fromIsExclusive, isComboCondition, nodeSub,
+          edgePath, edgeMid, edgeLabel,
+          addNode, newFlow, addEdge, selectEdge, setEntry, startCondition, moveBranch, deleteEdge, deleteNode, deleteSelected, onIdChange,
+          nodeDown, linkStart, onCanvasDown,
+          collectErrors, save, onPickTpl, autoLayout,
+          Plus, Sort, Check, Delete
+        };
+      }
+    });
+
+    for (const [name, comp] of Object.entries(window.ElementPlusIconsVue)) {
+      app.component(name, comp);
+    }
+    app.use(ElementPlus);
+    app.use(WorkDesktop);
+    app.mount('#app');
+  </script>
+</body>
+
+</html>

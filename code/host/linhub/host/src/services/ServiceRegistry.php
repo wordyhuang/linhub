@@ -18,7 +18,7 @@ use linhub\host\manifest\VersionConstraint;
  */
 final class ServiceRegistry
 {
-    /** id => ['class' => ..., 'version' => ..., 'source' => ...] */
+    /** id => ['class' => ..., 'version' => ..., 'source' => ..., 'type' => ...] */
     private static array $registry = [];
 
     /** id => ['contract' => ..., 'impl' => ..., 'version' => ..., 'source' => ..., 'desc' => ...] */
@@ -52,6 +52,13 @@ final class ServiceRegistry
     {
         $entry = self::hostList()[$id] ?? null;
         return $entry === null ? null : (string) ($entry['version'] ?? '');
+    }
+
+    /** 读取单个 host 服务的服务类型（functional=功能服务 | hosted=托管服务）；不存在返回 null。 */
+    public static function hostType(string $id): ?string
+    {
+        $entry = self::hostList()[$id] ?? null;
+        return $entry === null ? null : (string) ($entry['type'] ?? '');
     }
 
     /**
@@ -165,6 +172,7 @@ final class ServiceRegistry
                 'class'   => (string) ($entry['contract'] ?? ''),
                 'version' => (string) ($entry['version'] ?? '0.0.0'),
                 'source'  => (string) ($entry['source'] ?? 'host'),
+                'type'    => (string) ($entry['type'] ?? 'functional'),
             ];
         }
     }

@@ -14,6 +14,7 @@ use linhub\host\services\setting\SiteSettingService;
  *  - GET  /admin/site_admin/index      设置页（GUI）
  *  - GET  /admin/site_admin/state      当前设置 JSON（含 logo 预览地址）
  *  - POST /admin/site_admin/save       保存站点名称与备案号
+ *  - POST /admin/site_admin/appearanceSave 保存外观与引导（换肤开关 / 默认皮肤 / 系统指导按钮）
  *  - POST /admin/site_admin/logoUpload 上传/更换站点 logo（multipart 字段 file）
  *  - POST /admin/site_admin/logoReset  清除 logo（回退内置图）
  *
@@ -50,7 +51,40 @@ class SiteAdmin extends AdminController
             'logo_token' => $svc->get('logo_token', ''),
             'logo_url'   => $svc->logoUrl(),
             'icp_link'   => SiteSettingService::ICP_LINK,
+            'allow_skin'    => $svc->skinChangeAllowed(),
+            'default_skin'  => $svc->defaultSkin(),
+            // 平台提供的皮肤 key 白名单（前端默认皮肤下拉按此过滤）
+            'allowed_skins' => SiteSettingService::ALLOWED_SKINS,
+            'guide_enabled' => $svc->guideEnabled(),
         ]);
+    }
+
+    /** 保存外观与引导设置（换肤开关 / 平台默认皮肤 / 系统指导按钮）。 */
+    public function appearanceSave()
+    {
+        $gate = $this->gateForJson();
+        if (!$gate instanceof Identity) {
+            return $gate;
+        }
+        $skin = trim((string) $this->request->post('default_skin', ''));
+        if ($skin !== '' && !preg_match('/^[\w-]{1,32}$/', $skin)) {
+            return $this->jsonFail('默认皮肤标识不合法');
+        }
+        // 平台只提供白名单内皮肤（清单外直接拒绝，防止绕过前端下拉写入遗留 key）
+        if ($skin !== '' && !SiteSettingService::isSkinAllowed($skin)) {
+            return $this->jsonFail('平台未提供该皮肤');
+        }
+        try {
+            $this->service()->save([
+                'allow_skin'    => $this->request->post('allow_skin') === '0' ? '0' : '1',
+                'default_skin'  => $skin,
+                'guide_enabled' => $this->request->post('guide_enabled') === '0' ? '0' : '1',
+            ]);
+            $this->audit($gate, 'site.setting.appearance.save', 'skin=' . ($skin !== '' ? $skin : 'default'));
+            return $this->jsonOk(null, '外观与引导设置已保存');
+        } catch (\Throwable $e) {
+            return $this->jsonFail('保存失败：' . $e->getMessage());
+        }
     }
 
     /** 保存站点名称与备案号。 */

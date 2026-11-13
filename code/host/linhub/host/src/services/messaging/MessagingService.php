@@ -7,6 +7,7 @@ namespace linhub\host\services\messaging;
 use linhub\host\communication\broker\Broker;
 use linhub\host\communication\broker\HandlerCaller;
 use linhub\host\communication\broker\MemoryBroker;
+use linhub\host\services\logging\LoggingService;
 
 /**
  * 消息/事件服务实现（MessagingService）。
@@ -53,6 +54,7 @@ final class MessagingService implements Messaging
     public function publish(string $topic, array $payload = []): void
     {
         self::broker()->publish($topic, $payload, 'platform');
+        self::journal('publish', ['topic' => $topic], 'debug');
     }
 
     public function subscribe(string $topic, string $handler): void
@@ -70,7 +72,23 @@ final class MessagingService implements Messaging
     public static function broadcastLifecycle(string $event, string $short, array $extra = []): array
     {
         $payload = array_merge(['short' => $short], $extra);
-        return self::broker()->publish(self::LIFECYCLE_PREFIX . $event, $payload, 'platform');
+        $result  = self::broker()->publish(self::LIFECYCLE_PREFIX . $event, $payload, 'platform');
+        self::journal('broadcast_lifecycle', [
+            'event'  => $event,
+            'short'  => $short,
+            'result' => $result,
+        ]);
+        return $result;
+    }
+
+    /** 日志记录：落 runtime host.log，失败不阻断事件投递。 */
+    private static function journal(string $action, array $context = [], string $level = 'info'): void
+    {
+        try {
+            (new LoggingService())->{$level}('[messaging] ' . $action, $context);
+        } catch (\Throwable) {
+            // 日志失败不影响业务
+        }
     }
 
     /**

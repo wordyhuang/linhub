@@ -10,74 +10,265 @@
   <style>
     html, body, #app { height: 100%; margin: 0; }
     body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif; }
-    .st-page { height: 100%; padding: 16px 20px 24px; box-sizing: border-box; }
-    .st-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 14px; }
-    .st-card { border: 1px solid var(--el-border-color-light, #e4e7ed); border-radius: 8px; padding: 16px; background: var(--el-bg-color, #fff); }
-    .st-card h3 { margin: 0 0 14px; font-size: 15px; }
-    .st-hint { color: #909399; font-size: 12px; line-height: 1.7; }
-    .st-preview { display: flex; align-items: center; justify-content: center; width: 100%; height: 160px; border: 1px dashed var(--el-border-color, #dcdfe6); border-radius: 8px; background: var(--el-fill-color-lighter, #fafafa); overflow: hidden; }
-    .st-preview img { max-width: 100%; max-height: 100%; object-fit: contain; }
-    .st-actions { margin-top: 12px; display: flex; gap: 10px; flex-wrap: wrap; }
-    .st-foot { margin-top: 14px; }
+    .gs-page { height: 100%; padding: 16px 20px 24px; box-sizing: border-box; overflow-y: auto; }
+
+    /* —— 标题区 —— */
+    .gs-head { display: flex; justify-content: space-between; align-items: flex-start; margin: 4px 0 16px; }
+    .gs-title { font-size: 22px; font-weight: 700; color: #303133; line-height: 1.3; }
+    .gs-sub { font-size: 13px; color: #909399; margin-top: 6px; }
+    .gs-date { flex: none; font-size: 13px; color: #606266; background: var(--el-fill-color-light, #f5f7fa); border-radius: 8px; padding: 6px 12px; }
+
+    /* —— 两列卡片流（窄屏降为单列） —— */
+    .gs-cols { columns: 2; column-gap: 14px; }
+    @media (max-width: 1100px) { .gs-cols { columns: 1; } }
+    .gs-card { break-inside: avoid; border: 1px solid var(--el-border-color-light, #e4e7ed); border-radius: 10px; padding: 16px 18px; background: var(--el-bg-color, #fff); margin-bottom: 14px; }
+    .gs-card-title { font-size: 15px; font-weight: 600; color: #303133; }
+    .gs-card-desc { font-size: 12px; color: #909399; margin-top: 4px; line-height: 1.6; }
+
+    /* —— 设置行（图标块 + 标题/描述 + 右侧控件） —— */
+    .gs-row { display: flex; align-items: flex-start; gap: 12px; padding: 11px 0; }
+    .gs-row + .gs-row { border-top: 1px dashed var(--el-border-color-lighter, #ebeef5); }
+    .gs-ico { flex: none; width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 16px; }
+    .gs-ico.blue   { background: #eaf3ff; color: #0066cc; }
+    .gs-ico.green  { background: #e8f7ee; color: #22a35c; }
+    .gs-ico.orange { background: #fdf1e6; color: #e6822a; }
+    .gs-ico.purple { background: #f1edfd; color: #7a5af5; }
+    .gs-row-main { flex: 1; min-width: 0; }
+    .gs-row-title { font-size: 13px; color: #303133; line-height: 1.5; }
+    .gs-row-desc { font-size: 12px; color: #909399; margin-top: 2px; line-height: 1.6; }
+    .gs-row-ctrl { flex: none; display: flex; align-items: center; gap: 8px; padding-top: 2px; }
+    .gs-foot { margin-top: 12px; }
+    .gs-hint { color: #909399; font-size: 12px; line-height: 1.7; }
+    .gs-mono { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
+
+    /* —— 站点信息品牌区 —— */
+    .gs-brand { display: flex; align-items: center; gap: 14px; margin-top: 4px; }
+    .gs-logo { position: relative; width: 64px; height: 64px; border-radius: 50%; border: 1px solid var(--el-border-color-light, #e4e7ed); background: var(--el-fill-color-lighter, #fafafa); display: flex; align-items: center; justify-content: center; overflow: hidden; cursor: pointer; font-size: 22px; color: #909399; }
+    .gs-logo img { width: 100%; height: 100%; object-fit: contain; }
+    .gs-logo-badge { position: absolute; right: -1px; bottom: -1px; width: 20px; height: 20px; border-radius: 50%; background: var(--el-color-primary, #0066cc); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 11px; }
+    .gs-brand-name { font-size: 15px; font-weight: 600; color: #303133; }
+    .gs-brand-icp { font-size: 12px; color: #909399; margin: 3px 0 5px; }
   </style>
 </head>
 
 <body>
   <div id="app"></div>
 
-  <script type="text/x-template" id="st-tpl">
-    <div class="st-page" v-loading="loading" element-loading-text="加载中...">
-      <wd-panel :border="true">
-        <wd-tips type="box" style="margin-bottom:12px">
-          平台全局设置：站点名称、网络备案号（ICP）与站点 logo。保存后，登录页、工作台及浏览器标题等全站品牌信息将统一从这里的设置提取。
+  <script type="text/x-template" id="gs-tpl">
+    <div class="gs-page" v-loading="loading" element-loading-text="加载中...">
+      <wd-panel description-align="right" :border="true">
+        <wd-tips type="box" style="margin-bottom:14px">
+          平台全局设置中心：站点品牌、审批服务开关、附件托管默认值、存储驱动状态与归档备份策略在此统一维护。原独立设置页（服务设置 / 存储配置 / 归档备份）仍保留可用，两处数据同源、保存即刻生效。
         </wd-tips>
 
-        <div class="st-grid">
-          <!-- 站点信息 -->
-          <div class="st-card">
-            <h3>站点信息</h3>
-            <el-form label-width="90px" @submit.prevent>
+        <!-- 标题区 -->
+        <div class="gs-head">
+          <div>
+            <div class="gs-title">全局设置</div>
+            <div class="gs-sub">集中配置平台品牌与各服务全局参数，保存后即刻生效</div>
+          </div>
+          <div class="gs-date">{{ dateText }}</div>
+        </div>
+
+        <div class="gs-cols">
+          <!-- 站点信息（品牌 + 站点名 / 备案号 + logo） -->
+          <section class="gs-card">
+            <div class="gs-card-title">站点信息</div>
+            <div class="gs-card-desc">站点名称、网络备案号（ICP）与站点 logo，用于登录页、工作台及浏览器标题等全站品牌展示</div>
+            <div class="gs-brand">
+              <el-upload :show-file-list="false" :http-request="uploadLogo" accept="image/*" :before-upload="beforeUpload">
+                <div class="gs-logo" v-loading="uploading" title="点击上传 / 更换 logo">
+                  <img v-if="previewUrl" :src="previewUrl" alt="站点 logo 预览" />
+                  <el-icon v-else><Picture /></el-icon>
+                  <span class="gs-logo-badge"><el-icon><Camera /></el-icon></span>
+                </div>
+              </el-upload>
+              <div>
+                <div class="gs-brand-name">{{ form.site_name || '未设置站点名称' }}</div>
+                <div class="gs-brand-icp">{{ form.icp || '未填写备案号' }}</div>
+                <el-button text type="primary" size="small" :icon="RefreshLeft" :disabled="!logoConfigured" @click="resetLogo">还原内置 logo</el-button>
+              </div>
+            </div>
+            <el-form label-width="80px" @submit.prevent style="margin-top:12px">
               <el-form-item label="站点名称" required>
                 <el-input v-model="form.site_name" placeholder="如：LinHub 林枢" maxlength="60" show-word-limit />
-                <div class="st-hint">用于登录页、工作台侧边栏与浏览器标题后缀等全站品牌展示。</div>
               </el-form-item>
               <el-form-item label="备案号">
                 <el-input v-model="form.icp" placeholder="如：京ICP备12345678号" maxlength="120" />
-                <div class="st-hint">
-                  有值时才显示在登录页底部，点击跳转
-                  <a :href="icpLink" target="_blank" rel="noopener" style="color:var(--el-color-primary,#3b82f6)">工信部备案管理系统</a>
-                  （beian.miit.gov.cn）。
+                <div class="gs-hint">有值时显示在登录页底部，点击跳转
+                  <a :href="icpLink" target="_blank" rel="noopener" style="color:var(--el-color-primary,#0066cc)">工信部备案管理系统</a>。
                 </div>
               </el-form-item>
             </el-form>
-            <div class="st-foot">
-              <el-button type="primary" :icon="Check" :loading="saving" @click="saveInfo">保存站点信息</el-button>
+            <div class="gs-foot">
+              <el-button type="primary" :icon="Check" :loading="saving" @click="saveSite">保存站点信息</el-button>
             </div>
-          </div>
+          </section>
 
-          <!-- 站点 logo -->
-          <div class="st-card">
-            <h3>站点 logo</h3>
-            <div class="st-preview">
-              <template v-if="previewUrl">
-                <img :src="previewUrl" alt="站点 logo 预览" />
-              </template>
-              <el-empty v-else description="使用内置 logo" :image-size="60" />
+          <!-- 审批服务设置（开关即存） -->
+          <section class="gs-card">
+            <div class="gs-card-title">审批服务设置</div>
+            <div class="gs-card-desc">控制审批服务的平台级行为，切换后即刻保存生效；审批动作链不受开关影响</div>
+            <div class="gs-row" v-for="row in approvalRows" :key="row.key">
+              <div class="gs-ico" :class="row.tone"><el-icon><component :is="row.icon" /></el-icon></div>
+              <div class="gs-row-main">
+                <div class="gs-row-title">{{ row.title }}</div>
+                <div class="gs-row-desc">{{ row.desc }}</div>
+              </div>
+              <div class="gs-row-ctrl">
+                <el-switch v-model="approval[row.key]" :loading="approvalSaving" @change="saveApproval" />
+              </div>
             </div>
-            <div class="st-actions">
-              <el-upload
-                :show-file-list="false"
-                :http-request="uploadLogo"
-                accept="image/*"
-                :before-upload="beforeUpload">
-                <el-button type="primary" :icon="Upload" :loading="uploading">上传 / 更换 logo</el-button>
-              </el-upload>
-              <el-button :icon="RefreshLeft" :disabled="!logoConfigured" @click="resetLogo">还原内置 logo</el-button>
+          </section>
+
+          <!-- 附件托管默认值 -->
+          <section class="gs-card">
+            <div class="gs-card-title">附件托管默认值</div>
+            <div class="gs-card-desc">新上传附件的默认行为与缺图兜底，过期 / 孤儿附件按计划自动清理</div>
+            <div class="gs-row">
+              <div class="gs-ico blue"><el-icon><Lock /></el-icon></div>
+              <div class="gs-row-main">
+                <div class="gs-row-title">新附件默认公开</div>
+                <div class="gs-row-desc">开启后新附件默认公开可见（可在上传时单独调整）</div>
+              </div>
+              <div class="gs-row-ctrl"><el-switch v-model="attachForm.default_public" /></div>
             </div>
-            <div class="st-hint" style="margin-top:10px">
-              上传后即时生效：登录页大图与工作台小标均使用该图片；未上传时回退系统内置 logo。仅接受图片文件。
+            <div class="gs-row">
+              <div class="gs-ico orange"><el-icon><Timer /></el-icon></div>
+              <div class="gs-row-main">
+                <div class="gs-row-title">默认有效期（天）</div>
+                <div class="gs-row-desc">0 表示永不过期；到期后附件进入自动清理范围</div>
+              </div>
+              <div class="gs-row-ctrl"><el-input-number v-model="attachForm.default_expire_days" :min="0" :max="3650" :step="1" controls-position="right" style="width:130px" /></div>
             </div>
-          </div>
+            <div class="gs-row">
+              <div class="gs-ico green"><el-icon><PictureRounded /></el-icon></div>
+              <div class="gs-row-main">
+                <div class="gs-row-title">缺图兜底</div>
+                <div class="gs-row-desc">开启后无图 / 缺图场景回退默认图片</div>
+              </div>
+              <div class="gs-row-ctrl"><el-switch v-model="attachForm.fallback_enabled" /></div>
+            </div>
+            <div class="gs-hint" style="margin-top:8px">
+              过期 / 孤儿自动清理：{{ attach.clean_enabled ? '已启用（' + attach.clean_cron + '）' : '未启用' }}
+            </div>
+            <div class="gs-foot">
+              <el-button type="primary" :icon="Check" :loading="attachSaving" @click="saveAttach">保存托管默认值</el-button>
+            </div>
+          </section>
+
+          <!-- 存储驱动（只读运行态 + 连通性测试） -->
+          <section class="gs-card">
+            <div class="gs-card-title">存储驱动</div>
+            <div class="gs-card-desc">附件存储运行态只读视图；存储密钥与驱动切换由服务器 .env（ATTACH_*）统一管理，本页仅展示状态与连通性探测</div>
+            <div class="gs-row">
+              <div class="gs-ico blue"><el-icon><Cpu /></el-icon></div>
+              <div class="gs-row-main">
+                <div class="gs-row-title">
+                  当前驱动
+                  <el-tag size="small" effect="dark" style="margin-left:6px">{{ attach.driver || '—' }}</el-tag>
+                </div>
+                <div class="gs-row-desc">
+                  本地根目录 <span class="gs-mono">{{ attach.local_root || '—' }}</span> · 单文件上限 {{ attach.max_size_raw || '—' }}
+                </div>
+              </div>
+              <div class="gs-row-ctrl">
+                <el-button size="small" type="primary" plain :icon="Connection" :loading="testing.current" @click="testDriver('')">测试</el-button>
+              </div>
+            </div>
+            <div class="gs-row">
+              <div class="gs-ico purple"><el-icon><UploadFilled /></el-icon></div>
+              <div class="gs-row-main">
+                <div class="gs-row-title">
+                  七牛云对象存储
+                  <el-tag size="small" :type="attach.qiniu && attach.qiniu.configured ? 'success' : 'info'" style="margin-left:6px">
+                    {{ attach.qiniu && attach.qiniu.configured ? 'AK/SK 已配置' : '未配置' }}
+                  </el-tag>
+                </div>
+                <div class="gs-row-desc">
+                  Bucket <span class="gs-mono">{{ (attach.qiniu && attach.qiniu.bucket) || '—' }}</span> ·
+                  SDK {{ attach.qiniu && attach.qiniu.sdk_available ? '可用' : '不可用（缺少 qiniu/php-sdk）' }}
+                </div>
+              </div>
+              <div class="gs-row-ctrl">
+                <el-button size="small" plain :icon="Connection" :loading="testing.qiniu" @click="testDriver('qiniu')">测试</el-button>
+              </div>
+            </div>
+          </section>
+
+          <!-- 归档备份策略 -->
+          <section class="gs-card">
+            <div class="gs-card-title">归档备份策略</div>
+            <div class="gs-card-desc">RBAC 快照与功能包源码的自动归档；快照与恢复操作请前往「数据安全 → 归档备份」</div>
+            <div class="gs-row">
+              <div class="gs-ico blue"><el-icon><Cloudy /></el-icon></div>
+              <div class="gs-row-main">
+                <div class="gs-row-title">自动归档</div>
+                <div class="gs-row-desc">开启后按计划自动生成快照，超配额自动清理最旧快照</div>
+              </div>
+              <div class="gs-row-ctrl"><el-switch v-model="backupForm.enabled" /></div>
+            </div>
+            <div class="gs-row">
+              <div class="gs-ico orange"><el-icon><Files /></el-icon></div>
+              <div class="gs-row-main">
+                <div class="gs-row-title">保留份数</div>
+                <div class="gs-row-desc">超出后自动清理最旧的快照</div>
+              </div>
+              <div class="gs-row-ctrl"><el-input-number v-model="backupForm.retain" :min="1" :max="99" :step="1" controls-position="right" style="width:130px" /></div>
+            </div>
+            <div class="gs-row">
+              <div class="gs-ico green"><el-icon><FolderOpened /></el-icon></div>
+              <div class="gs-row-main">
+                <div class="gs-row-title">归档目录</div>
+                <div class="gs-row-desc">快照保存目录（服务器本地路径）</div>
+              </div>
+              <div class="gs-row-ctrl" style="flex:1;justify-content:flex-end"><el-input v-model="backupForm.dir" placeholder="如 runtime/backup/archive" style="width:220px" /></div>
+            </div>
+            <div class="gs-foot">
+              <el-button type="primary" :icon="Check" :loading="backupSaving" @click="saveBackup">保存归档策略</el-button>
+            </div>
+          </section>
+          <!-- 外观与引导（皮肤策略 + 系统指导按钮） -->
+          <section class="gs-card">
+            <div class="gs-card-title">外观与引导</div>
+            <div class="gs-card-desc">工作台皮肤策略与右上角「系统指导」入口，保存后对所有用户下次进入工作台生效</div>
+            <div class="gs-row">
+              <div class="gs-ico blue"><el-icon><Brush /></el-icon></div>
+              <div class="gs-row-main">
+                <div class="gs-row-title">允许用户更换皮肤</div>
+                <div class="gs-row-desc">关闭后工作台右上角隐藏皮肤切换入口，所有用户统一使用平台默认皮肤</div>
+              </div>
+              <div class="gs-row-ctrl"><el-switch v-model="appearanceForm.allow_skin" /></div>
+            </div>
+            <div class="gs-row">
+              <div class="gs-ico purple"><el-icon><MagicStick /></el-icon></div>
+              <div class="gs-row-main">
+                <div class="gs-row-title">平台默认皮肤</div>
+                <div class="gs-row-desc">用户未自行设置皮肤（或换肤已关闭）时生效；用户自设皮肤优先于默认值</div>
+              </div>
+              <div class="gs-row-ctrl">
+                <el-select v-model="appearanceForm.default_skin" style="width:150px" placeholder="选择皮肤">
+                  <el-option v-for="s in skins" :key="s.key" :label="s.label" :value="s.key">
+                    <span style="display:inline-flex;align-items:center;gap:8px">
+                      <span :style="{ width: '12px', height: '12px', borderRadius: '50%', flex: 'none', background: skinColor(s), border: '1px solid rgba(0,0,0,.08)' }"></span>
+                      {{ s.label }}
+                    </span>
+                  </el-option>
+                </el-select>
+              </div>
+            </div>
+            <div class="gs-row">
+              <div class="gs-ico green"><el-icon><QuestionFilled /></el-icon></div>
+              <div class="gs-row-main">
+                <div class="gs-row-title">显示「系统指导」按钮</div>
+                <div class="gs-row-desc">关闭后工作台右上角不显示系统指导（分步引导）入口</div>
+              </div>
+              <div class="gs-row-ctrl"><el-switch v-model="appearanceForm.guide_enabled" /></div>
+            </div>
+            <div class="gs-foot">
+              <el-button type="primary" :icon="Check" :loading="appearanceSaving" @click="saveAppearance">保存外观与引导</el-button>
+            </div>
+          </section>
         </div>
       </wd-panel>
     </div>
@@ -87,17 +278,25 @@
   <script src="/static/vendor/element-plus/index.full.min.js"></script>
   <script src="/static/vendor/icons/index.iife.min.js"></script>
   <script src="/static/vendor/workdesktop-ai/index.umd.js"></script>
+  <script src="/static/linhub/auth-guard.js?v=2"></script>
   <script>
     const WD = window.WorkDesktop;
     const ElementPlus = window.ElementPlus;
     const { WorkDesktop } = WD;
     const { ref, reactive, computed } = Vue;
-    const { Check, Upload, RefreshLeft } = window.ElementPlusIconsVue || {};
+    const { Check, Picture, Camera, RefreshLeft, Lock, Timer, PictureRounded, Cpu, UploadFilled, Cloudy, Files, FolderOpened, Connection, Brush, MagicStick, QuestionFilled } = window.ElementPlusIconsVue || {};
 
     const app = Vue.createApp({
-      template: '#st-tpl',
+      template: '#gs-tpl',
       setup() {
         const loading = ref(false);
+        const dateText = computed(() => {
+          const d = new Date();
+          const week = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'][d.getDay()];
+          return d.getFullYear() + '年' + (d.getMonth() + 1) + '月' + d.getDate() + '日 ' + week;
+        });
+
+        // ===== 站点信息 / logo =====
         const saving = ref(false);
         const uploading = ref(false);
         const icpLink = ref('https://beian.miit.gov.cn/');
@@ -109,22 +308,26 @@
         );
         const logoConfigured = computed(() => !!state.logo_token);
 
-        async function load() {
-          loading.value = true;
-          try {
-            const res = await WD.request.get('/admin/site_admin/state');
-            if (!res.success) {
-              ElementPlus.ElMessage.error(res.message || '加载失败');
-              return;
-            }
-            form.site_name = res.data.site_name || '';
-            form.icp = res.data.icp || '';
-            state.logo_token = res.data.logo_token || '';
-            state.logo_url = res.data.logo_url || '';
-            icpLink.value = res.data.icp_link || 'https://beian.miit.gov.cn/';
-          } finally {
-            loading.value = false;
+        async function loadSite() {
+          const res = await WD.request.get('/admin/site_admin/state');
+          if (!res.success) {
+            ElementPlus.ElMessage.error(res.message || '站点信息加载失败');
+            return;
           }
+          form.site_name = res.data.site_name || '';
+          form.icp = res.data.icp || '';
+          state.logo_token = res.data.logo_token || '';
+          state.logo_url = res.data.logo_url || '';
+          icpLink.value = res.data.icp_link || 'https://beian.miit.gov.cn/';
+          appearanceForm.allow_skin = res.data.allow_skin !== false;
+          appearanceForm.default_skin = res.data.default_skin || 'default';
+          appearanceForm.guide_enabled = res.data.guide_enabled !== false;
+          // 皮肤下拉按平台白名单过滤，只提供平台开放的 8 种风格
+          const allowed = Array.isArray(res.data.allowed_skins) ? res.data.allowed_skins : [];
+          try {
+            const all = (window.WorkDesktop.listSkins && window.WorkDesktop.listSkins()) || [];
+            skins.value = allowed.length ? all.filter((s) => allowed.includes(s.key)) : all;
+          } catch (e) { skins.value = []; }
         }
 
         function beforeUpload(file) {
@@ -146,7 +349,7 @@
               if (json.code === 0) {
                 ElementPlus.ElMessage.success(json.message || '站点 logo 已更新');
                 nonce.value = Date.now();
-                load();
+                loadSite();
               } else {
                 ElementPlus.ElMessage.error(json.message || '上传失败');
               }
@@ -163,30 +366,190 @@
           } catch (e) { return; }
           const res = await WD.request.post('/admin/site_admin/logoReset', {});
           ElementPlus.ElMessage[res.success ? 'success' : 'error'](res.message || (res.success ? '已还原' : '还原失败'));
-          if (res.success) { nonce.value = Date.now(); load(); }
+          if (res.success) { nonce.value = Date.now(); loadSite(); }
         }
 
-        async function saveInfo() {
+        async function saveSite() {
           if (!form.site_name || !form.site_name.trim()) {
             ElementPlus.ElMessage.error('站点名称不能为空');
             return;
           }
           saving.value = true;
           try {
-            const res = await WD.request.post('/admin/site_admin/save', {
-              site_name: form.site_name,
-              icp: form.icp,
-            });
+            const res = await WD.request.post('/admin/site_admin/save', { site_name: form.site_name, icp: form.icp });
             ElementPlus.ElMessage[res.success ? 'success' : 'error'](res.message || (res.success ? '已保存' : '保存失败'));
-            if (res.success) load();
+            if (res.success) loadSite();
           } finally {
             saving.value = false;
           }
         }
 
-        load();
-        return { loading, saving, uploading, icpLink, form, state, previewUrl, logoConfigured,
-                 uploadLogo, beforeUpload, resetLogo, saveInfo };
+        // ===== 审批服务设置（开关即存） =====
+        const approvalSaving = ref(false);
+        const approval = reactive({ workbench_enabled: true, workbench_api_enabled: true, workbench_stats_enabled: false, notify_enabled: true });
+        const approvalRows = [
+          { key: 'workbench_enabled', icon: 'Bell', tone: 'blue', title: '审批工作台', desc: '停用后「审批工作台」页面展示停用提示' },
+          { key: 'workbench_api_enabled', icon: 'Link', tone: 'green', title: '待办/已办接口', desc: '停用后我的待办 / 已办数据接口拒绝请求' },
+          { key: 'workbench_stats_enabled', icon: 'DataAnalysis', tone: 'orange', title: '工作台统计', desc: '角色首页显示个人审批统计卡，需「审批工作台」同时开启' },
+          { key: 'notify_enabled', icon: 'ChatDotRound', tone: 'purple', title: '审批通知', desc: '工作台右上角显示审批入口与待审批徽章' }
+        ];
+
+        async function loadApproval() {
+          const res = await WD.request.get('/admin/approval_admin/settingsData');
+          if (!res.success) {
+            ElementPlus.ElMessage.error(res.message || '审批服务设置加载失败');
+            return;
+          }
+          approval.workbench_enabled = !!res.data.workbench_enabled;
+          approval.workbench_api_enabled = !!res.data.workbench_api_enabled;
+          approval.workbench_stats_enabled = !!res.data.workbench_stats_enabled;
+          approval.notify_enabled = !!res.data.notify_enabled;
+        }
+
+        async function saveApproval() {
+          approvalSaving.value = true;
+          try {
+            const res = await WD.request.post('/admin/approval_admin/settingsSave', {
+              workbench_enabled: approval.workbench_enabled,
+              workbench_api_enabled: approval.workbench_api_enabled,
+              workbench_stats_enabled: approval.workbench_stats_enabled,
+              notify_enabled: approval.notify_enabled,
+            });
+            ElementPlus.ElMessage[res.success ? 'success' : 'error'](res.message || (res.success ? '已保存' : '保存失败'));
+            if (!res.success) loadApproval();
+          } finally {
+            approvalSaving.value = false;
+          }
+        }
+
+        // ===== 外观与引导（皮肤策略 / 系统指导按钮） =====
+        const appearanceSaving = ref(false);
+        const appearanceForm = reactive({ allow_skin: true, default_skin: 'default', guide_enabled: true });
+        const skins = ref([]); // 默认皮肤下拉候选：loadSite 后按平台白名单（state.allowed_skins）填充
+        const skinColor = (s) => (s && s.theme && s.theme.colors && s.theme.colors.primary) || '#409eff';
+
+        async function saveAppearance() {
+          appearanceSaving.value = true;
+          try {
+            const res = await WD.request.post('/admin/site_admin/appearanceSave', {
+              allow_skin: appearanceForm.allow_skin ? '1' : '0',
+              default_skin: appearanceForm.default_skin,
+              guide_enabled: appearanceForm.guide_enabled ? '1' : '0'
+            });
+            ElementPlus.ElMessage[res.success ? 'success' : 'error'](res.message || (res.success ? '已保存' : '保存失败'));
+            if (res.success) loadSite();
+          } finally {
+            appearanceSaving.value = false;
+          }
+        }
+
+        // ===== 附件托管默认值 + 存储驱动状态 =====
+        const attachSaving = ref(false);
+        const testing = reactive({ current: false, qiniu: false });
+        const attach = reactive({
+          driver: '', local_root: '', max_size_raw: '',
+          default_expire_days: 0, clean_enabled: false, clean_cron: '',
+          qiniu: { configured: false, sdk_available: false, bucket: '', domain_set: false }
+        });
+        const attachForm = reactive({ default_public: false, default_expire_days: 0, fallback_enabled: true });
+
+        async function loadAttach() {
+          const res = await WD.request.get('/admin/attach_admin/config');
+          if (!res.success) {
+            ElementPlus.ElMessage.error(res.message || '附件托管配置加载失败');
+            return;
+          }
+          Object.assign(attach, res.data);
+          attachForm.default_public = !!res.data.default_public;
+          attachForm.default_expire_days = Number(res.data.default_expire_days) || 0;
+          attachForm.fallback_enabled = !!res.data.fallback_enabled;
+        }
+
+        async function saveAttach() {
+          attachSaving.value = true;
+          try {
+            const res = await WD.request.post('/admin/attach_admin/settingsSave', {
+              default_public: attachForm.default_public ? '1' : '0',
+              default_expire_days: attachForm.default_expire_days,
+              fallback_enabled: attachForm.fallback_enabled ? '1' : '0'
+            });
+            ElementPlus.ElMessage[res.success ? 'success' : 'error'](res.message || (res.success ? '已保存' : '保存失败'));
+            if (res.success) loadAttach();
+          } finally {
+            attachSaving.value = false;
+          }
+        }
+
+        async function testDriver(driver) {
+          const key = driver === 'qiniu' ? 'qiniu' : 'current';
+          testing[key] = true;
+          try {
+            const res = await WD.request.post('/admin/attach_admin/driverTest', { driver });
+            if (res.success && res.data && res.data.ok) {
+              ElementPlus.ElMessage.success(res.data.message || '驱动连通正常');
+            } else {
+              ElementPlus.ElMessage.warning((res.data && res.data.message) || res.message || '驱动测试未通过');
+            }
+          } finally {
+            testing[key] = false;
+          }
+        }
+
+        // ===== 归档备份策略 =====
+        const backupSaving = ref(false);
+        const backupForm = reactive({ enabled: false, retain: 5, dir: '' });
+
+        async function loadBackup() {
+          const res = await WD.request.get('/admin/backup/rows');
+          if (!res.success) {
+            ElementPlus.ElMessage.error(res.message || '归档策略加载失败');
+            return;
+          }
+          const policy = res.data.policy || {};
+          backupForm.enabled = !!policy.enabled;
+          backupForm.retain = Number(policy.retain) || 5;
+          backupForm.dir = policy.dir || '';
+        }
+
+        async function saveBackup() {
+          if (!backupForm.dir || !backupForm.dir.trim()) {
+            ElementPlus.ElMessage.error('归档目录不能为空');
+            return;
+          }
+          backupSaving.value = true;
+          try {
+            const res = await WD.request.post('/admin/backup/savePolicy', {
+              enabled: backupForm.enabled ? '1' : '0',
+              retain: backupForm.retain,
+              dir: backupForm.dir
+            });
+            ElementPlus.ElMessage[res.success ? 'success' : 'error'](res.message || (res.success ? '已保存' : '保存失败'));
+            if (res.success) loadBackup();
+          } finally {
+            backupSaving.value = false;
+          }
+        }
+
+        async function loadAll() {
+          loading.value = true;
+          try {
+            await Promise.allSettled([loadSite(), loadApproval(), loadAttach(), loadBackup()]);
+          } finally {
+            loading.value = false;
+          }
+        }
+
+        loadAll();
+        return {
+          loading, dateText,
+          saving, uploading, icpLink, form, state, previewUrl, logoConfigured,
+          beforeUpload, uploadLogo, resetLogo, saveSite,
+          approvalSaving, approval, approvalRows, saveApproval,
+          appearanceSaving, appearanceForm, skins, skinColor, saveAppearance,
+          attachSaving, testing, attach, attachForm, saveAttach, testDriver,
+          backupSaving, backupForm, saveBackup,
+          Check, Picture, Camera, RefreshLeft, Lock, Timer, PictureRounded, Cpu, UploadFilled, Cloudy, Files, FolderOpened, Connection, Brush, MagicStick, QuestionFilled
+        };
       }
     });
 

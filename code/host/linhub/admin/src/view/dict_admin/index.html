@@ -8,6 +8,7 @@
   <link rel="icon" type="image/svg+xml" href="/brand/favicon.svg">
   <link rel="stylesheet" href="/static/vendor/element-plus/index.css">
   <link rel="stylesheet" href="/static/vendor/workdesktop-ai/style.css">
+  <link rel="stylesheet" href="/static/linhub/cards.css">
   <style>
     html, body, #app { height: 100%; margin: 0; }
     body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif; }
@@ -29,7 +30,7 @@
 
   <script type="text/x-template" id="dd-tpl">
     <div class="dd-page">
-      <wd-panel :border="true">
+      <wd-panel description-align="right" :border="true">
         <wd-tips type="box" style="margin-bottom:12px">
           数据字典服务（DD-9）超管全局视图：可跨所有功能包命名空间检索，含私有项。支持按值类型（单文本/对象/数组）差异化编辑修改字典值，修改操作留痕。
         </wd-tips>
@@ -77,10 +78,179 @@
           <el-table-column label="操作" width="150" fixed="right">
             <template #default="{ row }">
               <el-button size="small" text type="primary" @click="openDetail(row)">详情</el-button>
-              <el-button size="small" text type="primary" @click="openEdit(row)">修改</el-button>
+              <wd-drawer-button size="small" text type="primary" label="修改" title="修改字典项" drawer-size="54%"
+                                @open="openEdit(row)">
+                <div v-loading="editLoading">
+                  <el-descriptions :column="2" border size="small" style="margin-bottom:14px">
+                    <el-descriptions-item label="命名空间"><span class="dd-mono">{{ editForm.namespace }}</span></el-descriptions-item>
+                    <el-descriptions-item label="键名"><span class="dd-mono">{{ editForm.key }}</span></el-descriptions-item>
+                    <el-descriptions-item label="值类型">
+                      <el-tag size="small" effect="plain">{{ editForm.value_type }}</el-tag>
+                    </el-descriptions-item>
+                    <el-descriptions-item label="托管方"><span class="dd-mono">{{ editForm.owner_pkg || '—' }}</span></el-descriptions-item>
+                  </el-descriptions>
+
+                  <!-- 单文本 / 数字 / 布尔 / 空 -->
+                  <template v-if="isScalar">
+                    <el-form label-width="70px">
+                      <el-form-item v-if="editForm.value_type === 'string'" label="值">
+                        <el-input v-model="editForm.value" type="textarea" :rows="3" placeholder="单行/多行文本" />
+                      </el-form-item>
+                      <el-form-item v-else-if="editForm.value_type === 'int' || editForm.value_type === 'float'" label="值">
+                        <el-input-number v-model="editForm.numValue"
+                          :precision="editForm.value_type === 'float' ? 4 : 0" :step="1" style="width:260px" />
+                      </el-form-item>
+                      <el-form-item v-else-if="editForm.value_type === 'bool'" label="值">
+                        <el-switch v-model="editForm.boolValue" active-text="true" inactive-text="false" />
+                      </el-form-item>
+                      <el-form-item v-else label="值">
+                        <el-tag type="info" effect="plain">空值（null）</el-tag>
+                      </el-form-item>
+                    </el-form>
+                  </template>
+
+                  <!-- JSON 对象：键值对编辑器 -->
+                  <template v-else-if="isObjectJson">
+                    <div class="dd-edit-head">
+                      <span class="dd-edit-title">JSON 对象（键值对）</span>
+                      <el-button size="small" :icon="Plus" @click="addObjRow">添加键</el-button>
+                    </div>
+                    <div v-for="(r, i) in objRows" :key="i" class="dd-edit-row">
+                      <el-input v-model="r.k" placeholder="键名" class="dd-edit-key" />
+                      <el-input v-model="r.v" placeholder="值：对象/数组可填 JSON（如 {\"a\":1} 或 [1,2]）" class="dd-edit-val" />
+                      <el-button :icon="Delete" circle text type="danger" @click="objRows.splice(i, 1)" />
+                    </div>
+                    <el-empty v-if="!objRows.length" description="暂无键值，点击「添加键」开始" :image-size="50" />
+                  </template>
+
+                  <!-- JSON 数组：元素列表编辑器 -->
+                  <template v-else-if="isArrayJson">
+                    <div class="dd-edit-head">
+                      <span class="dd-edit-title">JSON 数组（元素列表）</span>
+                      <el-button size="small" :icon="Plus" @click="arrRows.push({ v: '' })">添加元素</el-button>
+                    </div>
+                    <div v-for="(r, i) in arrRows" :key="i" class="dd-edit-row">
+                      <el-input v-model="r.v" placeholder="元素值：对象/数组可填 JSON" class="dd-edit-val" />
+                      <el-button :icon="Delete" circle text type="danger" @click="arrRows.splice(i, 1)" />
+                    </div>
+                    <el-empty v-if="!arrRows.length" description="暂无元素，点击「添加元素」开始" :image-size="50" />
+                  </template>
+
+                  <el-form label-width="70px" style="margin-top:12px">
+                    <el-form-item label="备注">
+                      <el-input v-model="editForm.remark" placeholder="备注说明（可选）" />
+                    </el-form-item>
+                  </el-form>
+                </div>
+                <template #footer="f">
+                  <el-button @click="f.close">取消</el-button>
+                  <el-button type="primary" :loading="saving" @click="saveEdit(f)">保存修改</el-button>
+                </template>
+              </wd-drawer-button>
             </template>
           </el-table-column>
           <template #empty><el-empty description="暂无匹配的字典项" :image-size="80" /></template>
+          <!-- ── 卡片模式（DataGrid modeSwitch 内建视图；统一 lh-card 结构） ── -->
+          <template #card-item="{ row }">
+            <div class="lh-card">
+              <div class="lh-card__head">
+                <div class="lh-card__title"><span class="dd-mono">{{ row.dict_key }}</span></div>
+                <div class="lh-card__tags">
+                  <el-tag size="small" effect="plain">{{ row.value_type }}</el-tag>
+                  <el-tag size="small" :type="row.is_public ? 'success' : 'info'">{{ row.is_public ? '公开' : '私有' }}</el-tag>
+                </div>
+                <div class="lh-card__extra">
+                  <div class="lh-card__stamp">{{ row.updated_at || '—' }}</div>
+                </div>
+              </div>
+              <div class="lh-card__fields">
+                <div class="lh-card__field">
+                  <div class="k">命名空间</div>
+                  <div class="v"><span class="dd-mono">{{ row.namespace }}</span></div>
+                </div>
+                <div class="lh-card__field">
+                  <div class="k">托管方</div>
+                  <div class="v"><span class="dd-mono">{{ row.owner_pkg || '—' }}</span></div>
+                </div>
+                <div class="lh-card__field is-wide">
+                  <div class="k">值</div>
+                  <div class="v"><span class="dd-mono">{{ displayValue(row) }}</span></div>
+                </div>
+              </div>
+              <div class="lh-card__ops">
+                <el-button size="small" type="primary" plain @click="openDetail(row)">详情</el-button>
+                <wd-drawer-button size="small" label="修改" title="修改字典项" drawer-size="54%"
+                                  @open="openEdit(row)">
+                  <div v-loading="editLoading">
+                    <el-descriptions :column="2" border size="small" style="margin-bottom:14px">
+                      <el-descriptions-item label="命名空间"><span class="dd-mono">{{ editForm.namespace }}</span></el-descriptions-item>
+                      <el-descriptions-item label="键名"><span class="dd-mono">{{ editForm.key }}</span></el-descriptions-item>
+                      <el-descriptions-item label="值类型">
+                        <el-tag size="small" effect="plain">{{ editForm.value_type }}</el-tag>
+                      </el-descriptions-item>
+                      <el-descriptions-item label="托管方"><span class="dd-mono">{{ editForm.owner_pkg || '—' }}</span></el-descriptions-item>
+                    </el-descriptions>
+
+                    <!-- 单文本 / 数字 / 布尔 / 空 -->
+                    <template v-if="isScalar">
+                      <el-form label-width="70px">
+                        <el-form-item v-if="editForm.value_type === 'string'" label="值">
+                          <el-input v-model="editForm.value" type="textarea" :rows="3" placeholder="单行/多行文本" />
+                        </el-form-item>
+                        <el-form-item v-else-if="editForm.value_type === 'int' || editForm.value_type === 'float'" label="值">
+                          <el-input-number v-model="editForm.numValue"
+                            :precision="editForm.value_type === 'float' ? 4 : 0" :step="1" style="width:260px" />
+                        </el-form-item>
+                        <el-form-item v-else-if="editForm.value_type === 'bool'" label="值">
+                          <el-switch v-model="editForm.boolValue" active-text="true" inactive-text="false" />
+                        </el-form-item>
+                        <el-form-item v-else label="值">
+                          <el-tag type="info" effect="plain">空值（null）</el-tag>
+                        </el-form-item>
+                      </el-form>
+                    </template>
+
+                    <!-- JSON 对象：键值对编辑器 -->
+                    <template v-else-if="isObjectJson">
+                      <div class="dd-edit-head">
+                        <span class="dd-edit-title">JSON 对象（键值对）</span>
+                        <el-button size="small" :icon="Plus" @click="addObjRow">添加键</el-button>
+                      </div>
+                      <div v-for="(r, i) in objRows" :key="i" class="dd-edit-row">
+                        <el-input v-model="r.k" placeholder="键名" class="dd-edit-key" />
+                        <el-input v-model="r.v" placeholder="值：对象/数组可填 JSON（如 {&quot;a&quot;:1} 或 [1,2]）" class="dd-edit-val" />
+                        <el-button :icon="Delete" circle text type="danger" @click="objRows.splice(i, 1)" />
+                      </div>
+                      <el-empty v-if="!objRows.length" description="暂无键值，点击「添加键」开始" :image-size="50" />
+                    </template>
+
+                    <!-- JSON 数组：元素列表编辑器 -->
+                    <template v-else-if="isArrayJson">
+                      <div class="dd-edit-head">
+                        <span class="dd-edit-title">JSON 数组（元素列表）</span>
+                        <el-button size="small" :icon="Plus" @click="arrRows.push({ v: '' })">添加元素</el-button>
+                      </div>
+                      <div v-for="(r, i) in arrRows" :key="i" class="dd-edit-row">
+                        <el-input v-model="r.v" placeholder="元素值：对象/数组可填 JSON" class="dd-edit-val" />
+                        <el-button :icon="Delete" circle text type="danger" @click="arrRows.splice(i, 1)" />
+                      </div>
+                      <el-empty v-if="!arrRows.length" description="暂无元素，点击「添加元素」开始" :image-size="50" />
+                    </template>
+
+                    <el-form label-width="70px" style="margin-top:12px">
+                      <el-form-item label="备注">
+                        <el-input v-model="editForm.remark" placeholder="备注说明（可选）" />
+                      </el-form-item>
+                    </el-form>
+                  </div>
+                  <template #footer="f">
+                    <el-button @click="f.close">取消</el-button>
+                    <el-button type="primary" :loading="saving" @click="saveEdit(f)">保存修改</el-button>
+                  </template>
+                </wd-drawer-button>
+              </div>
+            </div>
+          </template>
         </wd-data-grid>
 
         <div class="dd-pager">
@@ -113,77 +283,6 @@
           <pre class="dd-json dd-mono" style="background:var(--el-fill-color-light,#f5f7fa);padding:10px;border-radius:6px">{{ detail.value }}</pre>
         </div>
       </el-drawer>
-
-      <!-- 修改抽屉：按值类型差异化编辑 -->
-      <el-drawer v-model="editVisible" title="修改字典项" size="54%">
-        <div v-loading="editLoading">
-          <el-descriptions :column="2" border size="small" style="margin-bottom:14px">
-            <el-descriptions-item label="命名空间"><span class="dd-mono">{{ editForm.namespace }}</span></el-descriptions-item>
-            <el-descriptions-item label="键名"><span class="dd-mono">{{ editForm.key }}</span></el-descriptions-item>
-            <el-descriptions-item label="值类型">
-              <el-tag size="small" effect="plain">{{ editForm.value_type }}</el-tag>
-            </el-descriptions-item>
-            <el-descriptions-item label="托管方"><span class="dd-mono">{{ editForm.owner_pkg || '—' }}</span></el-descriptions-item>
-          </el-descriptions>
-
-          <!-- 单文本 / 数字 / 布尔 / 空 -->
-          <template v-if="isScalar">
-            <el-form label-width="70px">
-              <el-form-item v-if="editForm.value_type === 'string'" label="值">
-                <el-input v-model="editForm.value" type="textarea" :rows="3" placeholder="单行/多行文本" />
-              </el-form-item>
-              <el-form-item v-else-if="editForm.value_type === 'int' || editForm.value_type === 'float'" label="值">
-                <el-input-number v-model="editForm.numValue"
-                  :precision="editForm.value_type === 'float' ? 4 : 0" :step="1" style="width:260px" />
-              </el-form-item>
-              <el-form-item v-else-if="editForm.value_type === 'bool'" label="值">
-                <el-switch v-model="editForm.boolValue" active-text="true" inactive-text="false" />
-              </el-form-item>
-              <el-form-item v-else label="值">
-                <el-tag type="info" effect="plain">空值（null）</el-tag>
-              </el-form-item>
-            </el-form>
-          </template>
-
-          <!-- JSON 对象：键值对编辑器 -->
-          <template v-else-if="isObjectJson">
-            <div class="dd-edit-head">
-              <span class="dd-edit-title">JSON 对象（键值对）</span>
-              <el-button size="small" :icon="Plus" @click="addObjRow">添加键</el-button>
-            </div>
-            <div v-for="(r, i) in objRows" :key="i" class="dd-edit-row">
-              <el-input v-model="r.k" placeholder="键名" class="dd-edit-key" />
-              <el-input v-model="r.v" placeholder="值：对象/数组可填 JSON（如 {\"a\":1} 或 [1,2]）" class="dd-edit-val" />
-              <el-button :icon="Delete" circle text type="danger" @click="objRows.splice(i, 1)" />
-            </div>
-            <el-empty v-if="!objRows.length" description="暂无键值，点击「添加键」开始" :image-size="50" />
-          </template>
-
-          <!-- JSON 数组：元素列表编辑器 -->
-          <template v-else-if="isArrayJson">
-            <div class="dd-edit-head">
-              <span class="dd-edit-title">JSON 数组（元素列表）</span>
-              <el-button size="small" :icon="Plus" @click="arrRows.push({ v: '' })">添加元素</el-button>
-            </div>
-            <div v-for="(r, i) in arrRows" :key="i" class="dd-edit-row">
-              <el-input v-model="r.v" placeholder="元素值：对象/数组可填 JSON" class="dd-edit-val" />
-              <el-button :icon="Delete" circle text type="danger" @click="arrRows.splice(i, 1)" />
-            </div>
-            <el-empty v-if="!arrRows.length" description="暂无元素，点击「添加元素」开始" :image-size="50" />
-          </template>
-
-          <el-form label-width="70px" style="margin-top:12px">
-            <el-form-item label="备注">
-              <el-input v-model="editForm.remark" placeholder="备注说明（可选）" />
-            </el-form-item>
-          </el-form>
-
-          <div style="margin-top:16px;text-align:right">
-            <el-button @click="editVisible = false">取消</el-button>
-            <el-button type="primary" :loading="saving" @click="saveEdit">保存修改</el-button>
-          </div>
-        </div>
-      </el-drawer>
     </div>
   </script>
 
@@ -191,6 +290,7 @@
   <script src="/static/vendor/element-plus/index.full.min.js"></script>
   <script src="/static/vendor/icons/index.iife.min.js"></script>
   <script src="/static/vendor/workdesktop-ai/index.umd.js"></script>
+  <script src="/static/linhub/auth-guard.js?v=2"></script>
   <script>
     const WD = window.WorkDesktop;
     const ElementPlus = window.ElementPlus;
@@ -213,8 +313,7 @@
         const detailVisible = ref(false);
         const detail = reactive({});
 
-        // —— 修改抽屉状态 ——
-        const editVisible = ref(false);
+        // —— 修改表单状态 ——
         const editLoading = ref(false);
         const saving = ref(false);
         const editForm = reactive({
@@ -316,7 +415,6 @@
         }
 
         async function openEdit(row) {
-          editVisible.value = true;
           editLoading.value = true;
           try {
             const res = await WD.request.get('/admin/dict_admin/detail' + qs({
@@ -350,7 +448,7 @@
           }
         }
 
-        async function saveEdit() {
+        async function saveEdit(f) {
           let value;
           if (editForm.value_type === 'json') {
             let built;
@@ -390,7 +488,7 @@
             ElementPlus.ElMessage[res.success ? 'success' : 'error'](
               res.message || (res.success ? '字典项已更新' : '保存失败'));
             if (res.success) {
-              editVisible.value = false;
+              if (f) f.close();
               load();
             }
           } finally {
@@ -404,7 +502,7 @@
         return {
           loading, detailLoading, rows, total, page, size, filters, stats, namespaces,
           detailVisible, detail,
-          editVisible, editLoading, saving, editForm, objRows, arrRows, isScalar, isObjectJson, isArrayJson,
+          editLoading, saving, editForm, objRows, arrRows, isScalar, isObjectJson, isArrayJson,
           load, search, reset, onSizeChange, displayValue, prettyParsed, openDetail,
           openEdit, saveEdit, addObjRow, Plus, Delete
         };

@@ -1,0 +1,632 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>审批工作台 - LinHub 林枢</title>
+  <link rel="icon" type="image/svg+xml" href="/brand/favicon.svg">
+  <link rel="stylesheet" href="/static/vendor/element-plus/index.css">
+  <link rel="stylesheet" href="/static/vendor/workdesktop-ai/style.css">
+  <link rel="stylesheet" href="/static/linhub/cards.css">
+  <style>
+    html, body, #app { height: 100%; margin: 0; }
+    body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif; }
+    .ap-page { height: 100%; padding: 16px 20px 24px; box-sizing: border-box; }
+    .ap-mono { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
+    .ap-filter { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; align-items: center; }
+    .ap-pager { display: flex; justify-content: flex-end; margin-top: 12px; }
+    .ap-tab-label { display: inline-flex; align-items: center; }
+  </style>
+</head>
+
+<body>
+  <div id="app"></div>
+
+  <script type="text/x-template" id="ap-workbench-tpl">
+    <div class="ap-page">
+      <wd-panel description-align="right" :border="true">
+        <wd-tips type="box" style="margin-bottom:12px">
+          审批工作台：按审批人快照与动作记录跨功能包检索当前登录用户的待办与已办。待办同意按节点口径推进（或签任一人通过 / 会签需全体通过），驳回为整单驳回。
+        </wd-tips>
+
+        <el-tabs v-model="activeTab" @tab-change="onTabChange">
+          <!-- 我的待办 -->
+          <el-tab-pane name="todo">
+            <template #label>
+              <span class="ap-tab-label">
+                我的待办
+                <el-badge :value="counts.todo" :max="99" :offset="[4, 0]" type="warning" />
+              </span>
+            </template>
+            <wd-data-grid :data-source="todoRows" border stripe :with-index="false" :with-pager="false" v-loading="todoLoading">
+              <template #toolbar>
+                <form class="ap-filter" style="margin-bottom:0" @submit.prevent="searchTodo">
+                  <el-input v-model="todoKeyword" placeholder="按标题 / 单据编号过滤" style="width:240px" clearable @keyup.enter="searchTodo" />
+                  <el-button native-type="submit" type="primary" :icon="Search" :loading="todoLoading">检索</el-button>
+                  <el-button :icon="RefreshLeft" @click="reloadTodo">刷新</el-button>
+                </form>
+              </template>
+              <el-table-column prop="approval_no" label="单据编号" min-width="200">
+                <template #default="{ row }">
+                  <a class="ap-mono" :href="'/admin/ApprovalAdmin/detail?no=' + row.approval_no">{{ row.approval_no }}</a>
+                </template>
+              </el-table-column>
+              <el-table-column prop="package" label="功能包" min-width="120">
+                <template #default="{ row }"><span class="ap-mono">{{ row.package }}</span></template>
+              </el-table-column>
+              <el-table-column prop="title" label="标题" min-width="180" show-overflow-tooltip />
+              <el-table-column prop="flow_key" label="流程" min-width="140">
+                <template #default="{ row }"><span class="ap-mono">{{ row.flow_key }}</span></template>
+              </el-table-column>
+              <el-table-column label="提交人" min-width="120">
+                <template #default="{ row }">{{ row.submitter_name || row.submitter_id }}</template>
+              </el-table-column>
+              <el-table-column label="当前节点" min-width="140">
+                <template #default="{ row }">
+                  <el-tag size="small" effect="plain">{{ row.node_id }}</el-tag>
+                  <el-tag size="small" type="info" style="margin-left:4px">{{ row.node_mode === 'all' ? '会签' : '或签' }}</el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="等待时长" width="120">
+                <template #default="{ row }">{{ formatWait(row.waiting_seconds) }}</template>
+              </el-table-column>
+              <el-table-column prop="submitted_at" label="提交时间" width="180" />
+              <el-table-column label="操作" width="200" fixed="right">
+                <template #default="{ row }">
+                  <el-button-group>
+                    <el-button size="small" type="success" @click="openAct(row, 'approve')">同意</el-button>
+                    <el-button size="small" type="danger" @click="openAct(row, 'reject')">驳回</el-button>
+                    <wd-dialog-button label="详情" button-size="small" title="审批单详情" size="60%" :url="'/admin/ApprovalAdmin/detail?no=' + row.approval_no" />
+                  </el-button-group>
+                </template>
+              </el-table-column>
+              <template #empty><el-empty description="暂无待办审批" :image-size="80" /></template>
+              <!-- ── 卡片模式（DataGrid modeSwitch 内建视图；统一 lh-card 结构） ── -->
+              <template #card-item="{ row }">
+                <div class="lh-card">
+                  <div class="lh-card__head">
+                    <div class="lh-card__title">{{ row.title || '未命名单据' }}</div>
+                    <div class="lh-card__tags">
+                      <el-tag size="small" effect="plain">{{ row.node_id }}</el-tag>
+                      <el-tag size="small" type="info">{{ row.node_mode === 'all' ? '会签' : '或签' }}</el-tag>
+                    </div>
+                    <div class="lh-card__extra">
+                      <div class="lh-card__stamp">已等待 {{ formatWait(row.waiting_seconds) }}</div>
+                    </div>
+                  </div>
+                  <div class="lh-card__fields">
+                    <div class="lh-card__field">
+                      <div class="k">单据编号</div>
+                      <div class="v ap-mono">{{ row.approval_no }}</div>
+                    </div>
+                    <div class="lh-card__field">
+                      <div class="k">功能包</div>
+                      <div class="v ap-mono">{{ row.package || '—' }}</div>
+                    </div>
+                    <div class="lh-card__field">
+                      <div class="k">流程</div>
+                      <div class="v ap-mono">{{ row.flow_key || '—' }}</div>
+                    </div>
+                    <div class="lh-card__field">
+                      <div class="k">发起人</div>
+                      <div class="v">{{ row.submitter_name || row.submitter_id || '—' }}</div>
+                    </div>
+                    <div class="lh-card__field is-wide">
+                      <div class="k">提交时间</div>
+                      <div class="v">{{ row.submitted_at || '—' }}</div>
+                    </div>
+                  </div>
+                  <div class="lh-card__ops">
+                    <el-button size="small" type="success" plain @click="openAct(row, 'approve')">同意</el-button>
+                    <el-button size="small" type="danger" plain @click="openAct(row, 'reject')">驳回</el-button>
+                    <wd-dialog-button label="详情" button-size="small" title="审批单详情" size="60%" :url="'/admin/ApprovalAdmin/detail?no=' + row.approval_no" />
+                  </div>
+                </div>
+              </template>
+            </wd-data-grid>
+
+            <div class="ap-pager">
+              <el-pagination
+                v-model:current-page="todoPage" v-model:page-size="todoSize"
+                :total="todoTotal" :page-sizes="[20, 50, 100]"
+                layout="total, sizes, prev, pager, next, jumper"
+                @current-change="loadTodo" @size-change="onTodoSizeChange" />
+            </div>
+          </el-tab-pane>
+
+          <!-- 我的已办 -->
+          <el-tab-pane name="done">
+            <template #label>
+              <span class="ap-tab-label">
+                我的已办
+                <el-badge :value="counts.handled" :max="99" :offset="[4, 0]" type="info" />
+              </span>
+            </template>
+            <wd-data-grid :data-source="doneRows" border stripe :with-index="false" :with-pager="false" v-loading="doneLoading">
+              <el-table-column prop="approval_no" label="单据编号" min-width="200">
+                <template #default="{ row }">
+                  <a class="ap-mono" :href="'/admin/ApprovalAdmin/detail?no=' + row.approval_no">{{ row.approval_no }}</a>
+                </template>
+              </el-table-column>
+              <el-table-column prop="package" label="功能包" min-width="120">
+                <template #default="{ row }"><span class="ap-mono">{{ row.package }}</span></template>
+              </el-table-column>
+              <el-table-column prop="title" label="标题" min-width="180" show-overflow-tooltip />
+              <el-table-column label="我的动作" width="110">
+                <template #default="{ row }">
+                  <el-tag size="small" :type="row.my_action === 'approve' ? 'success' : 'danger'">
+                    {{ row.my_action === 'approve' ? '同意' : '驳回' }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column prop="my_comment" label="我的意见" min-width="180" show-overflow-tooltip>
+                <template #default="{ row }">{{ row.my_comment || '—' }}</template>
+              </el-table-column>
+              <el-table-column label="单据状态" width="110">
+                <template #default="{ row }">
+                  <el-tag size="small" :type="statusType(row.status)">{{ statusText(row.status) }}</el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column prop="my_acted_at" label="操作时间" width="180" />
+              <el-table-column label="操作" width="90" fixed="right">
+                <template #default="{ row }">
+                  <wd-dialog-button label="详情" button-size="small" text type="primary" title="审批单详情" size="60%" :url="'/admin/ApprovalAdmin/detail?no=' + row.approval_no" />
+                </template>
+              </el-table-column>
+              <template #empty><el-empty description="暂无已办记录" :image-size="80" /></template>
+              <!-- ── 卡片模式（DataGrid modeSwitch 内建视图；统一 lh-card 结构） ── -->
+              <template #card-item="{ row }">
+                <div class="lh-card">
+                  <div class="lh-card__head">
+                    <div class="lh-card__title">{{ row.title || '未命名单据' }}</div>
+                    <div class="lh-card__tags">
+                      <el-tag size="small" :type="row.my_action === 'approve' ? 'success' : 'danger'">{{ row.my_action === 'approve' ? '同意' : '驳回' }}</el-tag>
+                      <el-tag size="small" :type="statusType(row.status)">{{ statusText(row.status) }}</el-tag>
+                    </div>
+                    <div class="lh-card__extra">
+                      <div class="lh-card__stamp ap-mono">{{ row.approval_no }}</div>
+                    </div>
+                  </div>
+                  <div class="lh-card__fields">
+                    <div class="lh-card__field">
+                      <div class="k">功能包</div>
+                      <div class="v ap-mono">{{ row.package || '—' }}</div>
+                    </div>
+                    <div class="lh-card__field">
+                      <div class="k">操作时间</div>
+                      <div class="v">{{ row.my_acted_at || '—' }}</div>
+                    </div>
+                    <div class="lh-card__field is-wide">
+                      <div class="k">我的意见</div>
+                      <div class="v">{{ row.my_comment || '—' }}</div>
+                    </div>
+                  </div>
+                  <div class="lh-card__ops">
+                    <wd-dialog-button label="详情" button-size="small" plain type="primary" title="审批单详情" size="60%" :url="'/admin/ApprovalAdmin/detail?no=' + row.approval_no" />
+                  </div>
+                </div>
+              </template>
+            </wd-data-grid>
+
+            <div class="ap-pager">
+              <el-pagination
+                v-model:current-page="donePage" v-model:page-size="doneSize"
+                :total="doneTotal" :page-sizes="[20, 50, 100]"
+                layout="total, sizes, prev, pager, next, jumper"
+                @current-change="loadDone" @size-change="onDoneSizeChange" />
+            </div>
+          </el-tab-pane>
+
+          <!-- 已同意（我 approve 过的） -->
+          <el-tab-pane name="approved">
+            <template #label>
+              <span class="ap-tab-label">
+                已同意
+                <el-badge :value="counts.approved" :max="99" :offset="[4, 0]" type="success" />
+              </span>
+            </template>
+            <wd-data-grid :data-source="approvedRows" border stripe :with-index="false" :with-pager="false" v-loading="approvedLoading">
+              <el-table-column prop="approval_no" label="单据编号" min-width="200">
+                <template #default="{ row }">
+                  <a class="ap-mono" :href="'/admin/ApprovalAdmin/detail?no=' + row.approval_no">{{ row.approval_no }}</a>
+                </template>
+              </el-table-column>
+              <el-table-column prop="package" label="功能包" min-width="120">
+                <template #default="{ row }"><span class="ap-mono">{{ row.package }}</span></template>
+              </el-table-column>
+              <el-table-column prop="title" label="标题" min-width="180" show-overflow-tooltip />
+              <el-table-column prop="my_comment" label="我的意见" min-width="180" show-overflow-tooltip>
+                <template #default="{ row }">{{ row.my_comment || '—' }}</template>
+              </el-table-column>
+              <el-table-column label="单据状态" width="110">
+                <template #default="{ row }">
+                  <el-tag size="small" :type="statusType(row.status)">{{ statusText(row.status) }}</el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column prop="my_acted_at" label="操作时间" width="180" />
+              <el-table-column label="操作" width="90" fixed="right">
+                <template #default="{ row }">
+                  <wd-dialog-button label="详情" button-size="small" text type="primary" title="审批单详情" size="60%" :url="'/admin/ApprovalAdmin/detail?no=' + row.approval_no" />
+                </template>
+              </el-table-column>
+              <template #empty><el-empty description="暂无已同意记录" :image-size="80" /></template>
+              <!-- ── 卡片模式（DataGrid modeSwitch 内建视图；统一 lh-card 结构） ── -->
+              <template #card-item="{ row }">
+                <div class="lh-card">
+                  <div class="lh-card__head">
+                    <div class="lh-card__title">{{ row.title || '未命名单据' }}</div>
+                    <div class="lh-card__tags">
+                      <el-tag size="small" :type="statusType(row.status)">{{ statusText(row.status) }}</el-tag>
+                    </div>
+                    <div class="lh-card__extra">
+                      <div class="lh-card__stamp ap-mono">{{ row.approval_no }}</div>
+                    </div>
+                  </div>
+                  <div class="lh-card__fields">
+                    <div class="lh-card__field">
+                      <div class="k">功能包</div>
+                      <div class="v ap-mono">{{ row.package || '—' }}</div>
+                    </div>
+                    <div class="lh-card__field">
+                      <div class="k">操作时间</div>
+                      <div class="v">{{ row.my_acted_at || '—' }}</div>
+                    </div>
+                    <div class="lh-card__field is-wide">
+                      <div class="k">我的意见</div>
+                      <div class="v">{{ row.my_comment || '—' }}</div>
+                    </div>
+                  </div>
+                  <div class="lh-card__ops">
+                    <wd-dialog-button label="详情" button-size="small" plain type="primary" title="审批单详情" size="60%" :url="'/admin/ApprovalAdmin/detail?no=' + row.approval_no" />
+                  </div>
+                </div>
+              </template>
+            </wd-data-grid>
+
+            <div class="ap-pager">
+              <el-pagination
+                v-model:current-page="approvedPage" v-model:page-size="approvedSize"
+                :total="approvedTotal" :page-sizes="[20, 50, 100]"
+                layout="total, sizes, prev, pager, next, jumper"
+                @current-change="loadApproved" @size-change="onApprovedSizeChange" />
+            </div>
+          </el-tab-pane>
+
+          <!-- 已驳回（我 reject 过的） -->
+          <el-tab-pane name="rejected">
+            <template #label>
+              <span class="ap-tab-label">
+                已驳回
+                <el-badge :value="counts.rejected" :max="99" :offset="[4, 0]" type="danger" />
+              </span>
+            </template>
+            <wd-data-grid :data-source="rejectedRows" border stripe :with-index="false" :with-pager="false" v-loading="rejectedLoading">
+              <el-table-column prop="approval_no" label="单据编号" min-width="200">
+                <template #default="{ row }">
+                  <a class="ap-mono" :href="'/admin/ApprovalAdmin/detail?no=' + row.approval_no">{{ row.approval_no }}</a>
+                </template>
+              </el-table-column>
+              <el-table-column prop="package" label="功能包" min-width="120">
+                <template #default="{ row }"><span class="ap-mono">{{ row.package }}</span></template>
+              </el-table-column>
+              <el-table-column prop="title" label="标题" min-width="180" show-overflow-tooltip />
+              <el-table-column prop="my_comment" label="我的意见" min-width="180" show-overflow-tooltip>
+                <template #default="{ row }">{{ row.my_comment || '—' }}</template>
+              </el-table-column>
+              <el-table-column label="单据状态" width="110">
+                <template #default="{ row }">
+                  <el-tag size="small" :type="statusType(row.status)">{{ statusText(row.status) }}</el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column prop="my_acted_at" label="操作时间" width="180" />
+              <el-table-column label="操作" width="90" fixed="right">
+                <template #default="{ row }">
+                  <wd-dialog-button label="详情" button-size="small" text type="primary" title="审批单详情" size="60%" :url="'/admin/ApprovalAdmin/detail?no=' + row.approval_no" />
+                </template>
+              </el-table-column>
+              <template #empty><el-empty description="暂无已驳回记录" :image-size="80" /></template>
+              <!-- ── 卡片模式（DataGrid modeSwitch 内建视图；统一 lh-card 结构） ── -->
+              <template #card-item="{ row }">
+                <div class="lh-card">
+                  <div class="lh-card__head">
+                    <div class="lh-card__title">{{ row.title || '未命名单据' }}</div>
+                    <div class="lh-card__tags">
+                      <el-tag size="small" :type="statusType(row.status)">{{ statusText(row.status) }}</el-tag>
+                    </div>
+                    <div class="lh-card__extra">
+                      <div class="lh-card__stamp ap-mono">{{ row.approval_no }}</div>
+                    </div>
+                  </div>
+                  <div class="lh-card__fields">
+                    <div class="lh-card__field">
+                      <div class="k">功能包</div>
+                      <div class="v ap-mono">{{ row.package || '—' }}</div>
+                    </div>
+                    <div class="lh-card__field">
+                      <div class="k">操作时间</div>
+                      <div class="v">{{ row.my_acted_at || '—' }}</div>
+                    </div>
+                    <div class="lh-card__field is-wide">
+                      <div class="k">我的意见</div>
+                      <div class="v">{{ row.my_comment || '—' }}</div>
+                    </div>
+                  </div>
+                  <div class="lh-card__ops">
+                    <wd-dialog-button label="详情" button-size="small" plain type="primary" title="审批单详情" size="60%" :url="'/admin/ApprovalAdmin/detail?no=' + row.approval_no" />
+                  </div>
+                </div>
+              </template>
+            </wd-data-grid>
+
+            <div class="ap-pager">
+              <el-pagination
+                v-model:current-page="rejectedPage" v-model:page-size="rejectedSize"
+                :total="rejectedTotal" :page-sizes="[20, 50, 100]"
+                layout="total, sizes, prev, pager, next, jumper"
+                @current-change="loadRejected" @size-change="onRejectedSizeChange" />
+            </div>
+          </el-tab-pane>
+        </el-tabs>
+      </wd-panel>
+
+      <!-- 审批意见弹窗 -->
+      <el-dialog v-model="actVisible" :title="actMode === 'approve' ? '同意审批' : '驳回审批'" width="480px">
+        <el-form label-width="80px">
+          <el-form-item label="单据">
+            <span class="ap-mono">{{ actRow.approval_no }}</span>
+          </el-form-item>
+          <el-form-item label="标题">{{ actRow.title }}</el-form-item>
+          <el-form-item :label="actMode === 'approve' ? '意见' : '驳回意见'">
+            <el-input v-model="actComment" type="textarea" :rows="4"
+              :placeholder="actMode === 'approve' ? '选填' : '必填：请说明驳回原因'" maxlength="2000" show-word-limit />
+          </el-form-item>
+        </el-form>
+        <template #footer>
+          <el-button @click="actVisible = false">取消</el-button>
+          <el-button :type="actMode === 'approve' ? 'success' : 'danger'" :loading="acting" @click="submitAct">
+            {{ actMode === 'approve' ? '确认同意' : '确认驳回' }}
+          </el-button>
+        </template>
+      </el-dialog>
+    </div>
+  </script>
+
+  <script src="/static/vendor/vue/vue.global.prod.js"></script>
+  <script src="/static/vendor/element-plus/index.full.min.js"></script>
+  <script src="/static/vendor/icons/index.iife.min.js"></script>
+  <script src="/static/vendor/workdesktop-ai/index.umd.js"></script>
+  <script src="/static/linhub/auth-guard.js?v=2"></script>
+  <script>
+    const WD = window.WorkDesktop;
+    const ElementPlus = window.ElementPlus;
+    const { WorkDesktop } = WD;
+    const { ref } = Vue;
+    const { Search, RefreshLeft } = window.ElementPlusIconsVue || {};
+
+    const STATUS_TEXT = { pending: '在办', approved: '已通过', rejected: '已驳回', cancelled: '已撤回' };
+    const STATUS_TYPE = { pending: 'warning', approved: 'success', rejected: 'danger', cancelled: 'info' };
+    const HANDLED_TABS = ['done', 'approved', 'rejected'];
+
+    const app = Vue.createApp({
+      template: '#ap-workbench-tpl',
+      setup() {
+        // 初始页签：URL ?tab= > 外层工作台挂载标记（top.__approvalWbTab，读取后清空） > 我的待办
+        function initialTab() {
+          const TABS = ['todo'].concat(HANDLED_TABS);
+          const q = new URLSearchParams(location.search).get('tab');
+          if (TABS.indexOf(q) >= 0) return q;
+          try {
+            if (window.parent && window.parent !== window) {
+              const t = window.parent.__approvalWbTab;
+              if (TABS.indexOf(t) >= 0) {
+                window.parent.__approvalWbTab = null;
+                return t;
+              }
+            }
+          } catch (e) { /* 跨域嵌套时忽略 */ }
+          return 'todo';
+        }
+
+        const activeTab = ref(initialTab());
+
+        // —— 页签徽标计数（myCounts 端点；列表加载后同步对应项） ——
+        const counts = ref({ todo: 0, handled: 0, approved: 0, rejected: 0 });
+
+        // —— 我的待办 ——
+        const todoLoading = ref(false);
+        const todoRows = ref([]);
+        const todoTotal = ref(0);
+        const todoPage = ref(1);
+        const todoSize = ref(20);
+        const todoKeyword = ref('');
+
+        // —— 我的已办 / 已同意 / 已驳回（同一接口按最近动作过滤，各自独立分页与懒加载） ——
+        const doneLoading = ref(false);
+        const doneRows = ref([]);
+        const doneTotal = ref(0);
+        const donePage = ref(1);
+        const doneSize = ref(20);
+        const approvedLoading = ref(false);
+        const approvedRows = ref([]);
+        const approvedTotal = ref(0);
+        const approvedPage = ref(1);
+        const approvedSize = ref(20);
+        const rejectedLoading = ref(false);
+        const rejectedRows = ref([]);
+        const rejectedTotal = ref(0);
+        const rejectedPage = ref(1);
+        const rejectedSize = ref(20);
+
+        const handledMap = {
+          done:     { action: '',        countKey: 'handled',  loaded: false },
+          approved: { action: 'approve', countKey: 'approved', loaded: false },
+          rejected: { action: 'reject',  countKey: 'rejected', loaded: false },
+        };
+
+        // —— 审批动作弹窗 ——
+        const acting = ref(false);
+        const actVisible = ref(false);
+        const actMode = ref('approve');
+        const actRow = ref({});
+        const actComment = ref('');
+
+        function formatWait(seconds) {
+          const n = Number(seconds) || 0;
+          if (n < 60) return n + ' 秒';
+          if (n < 3600) return Math.floor(n / 60) + ' 分钟';
+          if (n < 86400) return (n / 3600).toFixed(1) + ' 小时';
+          return (n / 86400).toFixed(1) + ' 天';
+        }
+        function statusText(s) { return STATUS_TEXT[s] || s || '—'; }
+        function statusType(s) { return STATUS_TYPE[s] || 'info'; }
+
+        async function loadCounts() {
+          try {
+            const res = await WD.request.get('/admin/approval_admin/myCounts');
+            if (res.success && res.data) {
+              counts.value = {
+                todo: Number(res.data.todo) || 0,
+                handled: Number(res.data.handled) || 0,
+                approved: Number(res.data.approved) || 0,
+                rejected: Number(res.data.rejected) || 0,
+              };
+            }
+          } catch (e) { /* 徽标计数失败不打断页面 */ }
+        }
+
+        async function loadTodo() {
+          todoLoading.value = true;
+          try {
+            const res = await WD.request.get('/admin/approval_admin/pendingRows?page=' + todoPage.value + '&size=' + todoSize.value);
+            if (!res.success) {
+              ElementPlus.ElMessage.error(res.message || '加载失败');
+              return;
+            }
+            const list = res.data.list || [];
+            todoRows.value = todoKeyword.value
+              ? list.filter(r => (r.title || '').includes(todoKeyword.value) || (r.approval_no || '').includes(todoKeyword.value))
+              : list;
+            todoTotal.value = res.data.total || 0;
+            counts.value.todo = todoTotal.value;
+          } finally {
+            todoLoading.value = false;
+          }
+        }
+
+        async function loadDone() { await loadHandled('done'); }
+        async function loadApproved() { await loadHandled('approved'); }
+        async function loadRejected() { await loadHandled('rejected'); }
+
+        async function loadHandled(tab) {
+          const s = handledMap[tab];
+          if (!s) return;
+          const loading = tab === 'done' ? doneLoading : tab === 'approved' ? approvedLoading : rejectedLoading;
+          loading.value = true;
+          try {
+            const act = s.action ? '&action=' + s.action : '';
+            const res = await WD.request.get('/admin/approval_admin/handledRows?page=' + (tab === 'done' ? donePage : tab === 'approved' ? approvedPage : rejectedPage).value + '&size=' + (tab === 'done' ? doneSize : tab === 'approved' ? approvedSize : rejectedSize).value + act);
+            if (!res.success) {
+              ElementPlus.ElMessage.error(res.message || '加载失败');
+              return;
+            }
+            const rows = tab === 'done' ? doneRows : tab === 'approved' ? approvedRows : rejectedRows;
+            const total = tab === 'done' ? doneTotal : tab === 'approved' ? approvedTotal : rejectedTotal;
+            rows.value = res.data.list || [];
+            total.value = res.data.total || 0;
+            counts.value[s.countKey] = total.value;
+          } finally {
+            loading.value = false;
+          }
+        }
+
+        function searchTodo() { todoPage.value = 1; loadTodo(); }
+        function reloadTodo() { todoKeyword.value = ''; todoPage.value = 1; loadTodo(); }
+        function onTodoSizeChange() { todoPage.value = 1; loadTodo(); }
+        function onDoneSizeChange() { donePage.value = 1; loadDone(); }
+        function onApprovedSizeChange() { approvedPage.value = 1; loadApproved(); }
+        function onRejectedSizeChange() { rejectedPage.value = 1; loadRejected(); }
+
+        // 首次切到已办类页签时懒加载，避免进入页面多打接口
+        function onTabChange(tab) {
+          const s = handledMap[tab];
+          if (s && !s.loaded) {
+            s.loaded = true;
+            loadHandled(tab);
+          }
+        }
+
+        // 外层工作台通过 postMessage 联动切换页签（首页统计卡点击）
+        window.addEventListener('message', (ev) => {
+          const d = ev.data || {};
+          if (d.type === 'approval:tab' && (['todo'].concat(HANDLED_TABS)).indexOf(d.tab) >= 0) {
+            activeTab.value = d.tab;
+          }
+        });
+
+        function openAct(row, mode) {
+          actRow.value = row;
+          actMode.value = mode;
+          actComment.value = '';
+          actVisible.value = true;
+        }
+
+        async function submitAct() {
+          if (actMode.value === 'reject' && actComment.value.trim() === '') {
+            ElementPlus.ElMessage.warning('驳回必须填写审批意见');
+            return;
+          }
+          acting.value = true;
+          try {
+            const url = actMode.value === 'approve' ? '/admin/approval_admin/approve' : '/admin/approval_admin/reject';
+            const res = await WD.request.post(url, { no: actRow.value.approval_no, comment: actComment.value });
+            ElementPlus.ElMessage[res.success ? 'success' : 'error'](res.message || (res.success ? '已提交' : '提交失败'));
+            if (res.success) {
+              actVisible.value = false;
+              loadCounts();
+              loadTodo();
+              const cur = activeTab.value;
+              if (HANDLED_TABS.indexOf(cur) >= 0) {
+                loadHandled(cur); // 当前停留在已办类页签：直接刷新其数据
+              } else {
+                handledMap.done.loaded = false; // 否则已办缓存失效，下次切换重取
+              }
+            }
+          } finally {
+            acting.value = false;
+          }
+        }
+
+        loadCounts();
+        loadTodo();
+        // 初始页签若为已办类，立即加载该页签
+        if (HANDLED_TABS.indexOf(activeTab.value) >= 0) {
+          handledMap[activeTab.value].loaded = true;
+          loadHandled(activeTab.value);
+        }
+
+        return {
+          activeTab, counts,
+          todoLoading, todoRows, todoTotal, todoPage, todoSize, todoKeyword,
+          doneLoading, doneRows, doneTotal, donePage, doneSize,
+          approvedLoading, approvedRows, approvedTotal, approvedPage, approvedSize,
+          rejectedLoading, rejectedRows, rejectedTotal, rejectedPage, rejectedSize,
+          actVisible, actMode, actRow, actComment, acting,
+          loadTodo, loadDone, loadApproved, loadRejected, loadCounts,
+          searchTodo, reloadTodo, onTodoSizeChange, onDoneSizeChange, onApprovedSizeChange, onRejectedSizeChange, onTabChange,
+          openAct, submitAct, formatWait, statusText, statusType,
+          Search, RefreshLeft
+        };
+      }
+    });
+
+    for (const [name, comp] of Object.entries(window.ElementPlusIconsVue)) {
+      app.component(name, comp);
+    }
+    app.use(ElementPlus);
+    app.use(WorkDesktop);
+    app.mount('#app');
+  </script>
+</body>
+
+</html>

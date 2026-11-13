@@ -8,6 +8,7 @@
   <link rel="icon" type="image/svg+xml" href="/brand/favicon.svg">
   <link rel="stylesheet" href="/static/vendor/element-plus/index.css">
   <link rel="stylesheet" href="/static/vendor/workdesktop-ai/style.css">
+  <link rel="stylesheet" href="/static/linhub/cards.css">
   <style>
     html, body, #app { height: 100%; margin: 0; }
     body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif; }
@@ -24,7 +25,7 @@
 
   <script type="text/x-template" id="tr-tpl">
     <div class="tr-page">
-      <wd-panel :border="true">
+      <wd-panel description-align="right" :border="true">
         <wd-tips type="box" style="margin-bottom:12px">
           翻译服务（TR）超管视图：多语言词条按「命名空间 + key + 语言」存储，支持回退链与 {name} 占位符。
           超管在此的修改记录 owner_pkg=host。
@@ -49,7 +50,13 @@
               <el-input v-model="filters.keyword" placeholder="key 关键字" style="width:220px" clearable @keyup.enter="search" />
               <el-button native-type="submit" type="primary" :icon="Search" :loading="loading">检索</el-button>
               <el-button :icon="RefreshLeft" @click="reset">重置</el-button>
-              <el-button :icon="Plus" @click="openCreate">新增词条</el-button>
+              <wd-drawer-button :icon="Plus" label="新增词条" title="新增翻译词条" drawer-size="46%" @open="openCreate">
+                <tr-form :f="editApi" />
+                <template #footer="f">
+                  <el-button @click="f.close">取消</el-button>
+                  <el-button type="primary" :loading="saving" @click="saveEdit(f)">保存</el-button>
+                </template>
+              </wd-drawer-button>
               <div style="flex:1"></div>
               <el-tag type="info" effect="plain">总条目 {{ stats.total }}</el-tag>
             </form>
@@ -78,11 +85,64 @@
               <el-table-column prop="updated_at" label="更新时间" width="200" />
               <el-table-column label="操作" width="150" fixed="right">
                 <template #default="{ row }">
-                  <el-button size="small" text type="primary" @click="openEdit(row)">修改</el-button>
-                  <el-button size="small" text type="danger" @click="remove(row)">删除</el-button>
+                  <el-button-group>
+                    <wd-drawer-button size="small" text type="primary" label="修改" title="修改翻译词条" drawer-size="46%"
+                                      @open="openEdit(row)">
+                      <tr-form :f="editApi" />
+                      <template #footer="f">
+                        <el-button @click="f.close">取消</el-button>
+                        <el-button type="primary" :loading="saving" @click="saveEdit(f)">保存</el-button>
+                      </template>
+                    </wd-drawer-button>
+                    <wd-popconfirm-button size="small" text type="danger"
+                      api="/admin/translation_admin/delete"
+                      :api-param="{ namespace: row.namespace, key: row.key, lang: row.lang }"
+                      :head-refresh-datagrid="false" title="确认删除该词条？" confirm-button-text="删除"
+                      @api-success="afterDelete">删除</wd-popconfirm-button>
+                  </el-button-group>
                 </template>
               </el-table-column>
               <template #empty><el-empty description="暂无匹配的翻译词条" :image-size="80" /></template>
+              <!-- ── 卡片清单模式（DataGrid 内建 modeSwitch 视图；统一 lh-card 结构） ── -->
+              <template #card-item="{ row }">
+                <div class="lh-card">
+                  <div class="lh-card__head">
+                    <div class="lh-card__title tr-mono">{{ row.namespace }} / {{ row.key }}</div>
+                    <div class="lh-card__tags">
+                      <el-tag size="small" effect="plain">{{ row.lang }}</el-tag>
+                      <el-tag size="small" :type="row.is_public ? 'success' : 'info'">{{ row.is_public ? '公开' : '私有' }}</el-tag>
+                    </div>
+                    <div class="lh-card__extra">
+                      <div class="lh-card__stamp">{{ row.updated_at }}</div>
+                    </div>
+                  </div>
+                  <div class="lh-card__fields">
+                    <div class="lh-card__field">
+                      <div class="k">托管方</div>
+                      <div class="v tr-mono">{{ row.owner_pkg || '—' }}</div>
+                    </div>
+                    <div class="lh-card__field is-wide">
+                      <div class="k">译文</div>
+                      <div class="v tr-mono tr-value">{{ row.value || '—' }}</div>
+                    </div>
+                  </div>
+                  <div class="lh-card__ops">
+                    <wd-drawer-button size="small" text type="primary" label="修改" title="修改翻译词条" drawer-size="46%"
+                                      @open="openEdit(row)">
+                      <tr-form :f="editApi" />
+                      <template #footer="f">
+                        <el-button @click="f.close">取消</el-button>
+                        <el-button type="primary" :loading="saving" @click="saveEdit(f)">保存</el-button>
+                      </template>
+                    </wd-drawer-button>
+                    <wd-popconfirm-button size="small" text type="danger"
+                      api="/admin/translation_admin/delete"
+                      :api-param="{ namespace: row.namespace, key: row.key, lang: row.lang }"
+                      :head-refresh-datagrid="false" title="确认删除该词条？" confirm-button-text="删除"
+                      @api-success="afterDelete">删除</wd-popconfirm-button>
+                  </div>
+                </div>
+              </template>
             </wd-data-grid>
 
             <div class="tr-pager">
@@ -124,54 +184,82 @@
               </el-table-column>
               <el-table-column label="操作" width="120" fixed="right">
                 <template #default="{ row }">
-                  <el-button size="small" text type="primary" @click="fillMissing(row)">补译</el-button>
+                  <wd-drawer-button size="small" text type="primary" label="补译" title="新增翻译词条" drawer-size="46%"
+                                    @open="fillMissing(row)">
+                    <tr-form :f="editApi" />
+                    <template #footer="f">
+                      <el-button @click="f.close">取消</el-button>
+                      <el-button type="primary" :loading="saving" @click="saveEdit(f)">保存</el-button>
+                    </template>
+                  </wd-drawer-button>
                 </template>
               </el-table-column>
               <template #empty><el-empty :description="missingLoaded ? '该语言已完整，无缺失词条' : '请选择条件后开始对照'" :image-size="80" /></template>
+              <!-- ── 卡片清单模式（DataGrid 内建 modeSwitch 视图；统一 lh-card 结构） ── -->
+              <template #card-item="{ row }">
+                <div class="lh-card">
+                  <div class="lh-card__head">
+                    <div class="lh-card__title tr-mono">{{ row.key }}</div>
+                  </div>
+                  <div class="lh-card__fields">
+                    <div class="lh-card__field is-wide">
+                      <div class="k">基准语言译文</div>
+                      <div class="v tr-mono tr-value">{{ row.value || '—' }}</div>
+                    </div>
+                  </div>
+                  <div class="lh-card__ops">
+                    <wd-drawer-button size="small" text type="primary" label="补译" title="新增翻译词条" drawer-size="46%"
+                                      @open="fillMissing(row)">
+                      <tr-form :f="editApi" />
+                      <template #footer="f">
+                        <el-button @click="f.close">取消</el-button>
+                        <el-button type="primary" :loading="saving" @click="saveEdit(f)">保存</el-button>
+                      </template>
+                    </wd-drawer-button>
+                  </div>
+                </div>
+              </template>
             </wd-data-grid>
           </el-tab-pane>
         </el-tabs>
       </wd-panel>
 
-      <!-- 编辑抽屉：新增 / 修改 -->
-      <el-drawer v-model="editVisible" :title="editForm.isNew ? '新增翻译词条' : '修改翻译词条'" size="46%">
-        <el-form label-width="90px">
-          <el-form-item label="命名空间">
-            <el-select v-model="editForm.namespace" placeholder="选择或输入命名空间" filterable allow-create
-              :disabled="!editForm.isNew" style="width:100%">
-              <el-option v-for="ns in namespaces" :key="ns.namespace" :label="ns.namespace" :value="ns.namespace" />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="key">
-            <el-input v-model="editForm.key" :disabled="!editForm.isNew"
-              placeholder="点号命名，如 record.status.pending" />
-          </el-form-item>
-          <el-form-item label="语言">
-            <el-select v-model="editForm.lang" placeholder="BCP-47 简码，如 zh-CN" filterable allow-create
-              :disabled="!editForm.isNew" style="width:100%">
-              <el-option v-for="lg in languages" :key="lg.lang" :label="lg.lang" :value="lg.lang" />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="译文">
-            <el-input v-model="editForm.value" type="textarea" :rows="4"
-              placeholder="支持 {name} 占位符，例如：共 {count} 条" />
-          </el-form-item>
-          <el-form-item label="公开性">
-            <el-switch v-model="editForm.isPublic" active-text="公开（他包可读）" inactive-text="私有" />
-          </el-form-item>
-        </el-form>
-        <div style="margin-top:16px;text-align:right">
-          <el-button @click="editVisible = false">取消</el-button>
-          <el-button type="primary" :loading="saving" @click="saveEdit">保存</el-button>
-        </div>
-      </el-drawer>
     </div>
+  </script>
+
+  <script type="text/x-template" id="tr-form-tpl">
+    <el-form label-width="90px">
+      <el-form-item label="命名空间">
+        <el-select v-model="editForm.namespace" placeholder="选择或输入命名空间" filterable allow-create
+          :disabled="!editForm.isNew" style="width:100%">
+          <el-option v-for="ns in namespaces" :key="ns.namespace" :label="ns.namespace" :value="ns.namespace" />
+        </el-select>
+      </el-form-item>
+      <el-form-item label="key">
+        <el-input v-model="editForm.key" :disabled="!editForm.isNew"
+          placeholder="点号命名，如 record.status.pending" />
+      </el-form-item>
+      <el-form-item label="语言">
+        <el-select v-model="editForm.lang" placeholder="BCP-47 简码，如 zh-CN" filterable allow-create
+          :disabled="!editForm.isNew" style="width:100%">
+          <el-option v-for="lg in languages" :key="lg.lang" :label="lg.lang" :value="lg.lang" />
+        </el-select>
+      </el-form-item>
+      <el-form-item label="译文">
+        <el-input v-model="editForm.value" type="textarea" :rows="4"
+          placeholder="支持 {name} 占位符，例如：共 {count} 条" />
+      </el-form-item>
+      <el-form-item label="公开性">
+        <el-switch v-model="editForm.isPublic" active-text="公开（他包可读）" inactive-text="私有" />
+      </el-form-item>
+    </el-form>
   </script>
 
   <script src="/static/vendor/vue/vue.global.prod.js"></script>
   <script src="/static/vendor/element-plus/index.full.min.js"></script>
   <script src="/static/vendor/icons/index.iife.min.js"></script>
   <script src="/static/vendor/workdesktop-ai/index.umd.js"></script>
+  <script src="/static/linhub/auth-guard.js?v=2"></script>
   <script>
     const WD = window.WorkDesktop;
     const ElementPlus = window.ElementPlus;
@@ -193,8 +281,7 @@
         const namespaces = ref([]);
         const languages = ref([]);
 
-        // —— 编辑抽屉 ——
-        const editVisible = ref(false);
+        // —— 编辑表单 ——
         const saving = ref(false);
         const editForm = reactive({
           isNew: true, namespace: '', key: '', lang: '', value: '', isPublic: false
@@ -254,7 +341,6 @@
             namespace: filters.namespace || '',
             key: '', lang: filters.lang || '', value: '', isPublic: false
           });
-          editVisible.value = true;
         }
 
         function openEdit(row) {
@@ -262,10 +348,9 @@
             isNew: false, namespace: row.namespace, key: row.key, lang: row.lang,
             value: row.value, isPublic: row.is_public === 1
           });
-          editVisible.value = true;
         }
 
-        async function saveEdit() {
+        async function saveEdit(f) {
           if (!editForm.namespace || !editForm.key || !editForm.lang) {
             ElementPlus.ElMessage.error('命名空间、key、语言均不能为空');
             return;
@@ -279,7 +364,7 @@
             ElementPlus.ElMessage[res.success ? 'success' : 'error'](
               res.message || (res.success ? '已保存' : '保存失败'));
             if (res.success) {
-              editVisible.value = false;
+              if (f) f.close();
               load(); loadOptions();
             }
           } finally {
@@ -287,21 +372,7 @@
           }
         }
 
-        async function remove(row) {
-          try {
-            await ElementPlus.ElMessageBox.confirm(
-              '确认删除词条 ' + row.namespace + ' / ' + row.key + ' / ' + row.lang + ' ？',
-              '删除确认', { type: 'warning' });
-          } catch (e) {
-            return;
-          }
-          const res = await WD.request.post('/admin/translation_admin/delete', {
-            namespace: row.namespace, key: row.key, lang: row.lang
-          });
-          ElementPlus.ElMessage[res.success ? 'success' : 'error'](
-            res.message || (res.success ? '已删除' : '删除失败'));
-          if (res.success) { load(); loadOptions(); }
-        }
+        function afterDelete() { load(); loadOptions(); }
 
         async function loadMissing() {
           if (!missForm.namespace) {
@@ -326,28 +397,38 @@
           }
         }
 
-        /** 缺失行 → 打开编辑抽屉，预填对照语言与基准译文，便于快速补译。 */
+        /** 缺失行 → 预填对照语言与基准 key，由 wd-drawer-button 的 @open 打开编辑表单。 */
         function fillMissing(row) {
-          openCreate();
           Object.assign(editForm, {
             isNew: true, namespace: missForm.namespace, key: row.key,
             lang: missForm.compare_lang, value: '', isPublic: false
           });
-          editVisible.value = true;
         }
 
         loadOptions();
         load();
 
+        // 编辑表单打包，供 tr-form 子组件（x-template）使用
+        const editApi = { editForm, namespaces, languages, saving, saveEdit };
+
         return {
           tab, loading, rows, total, page, size, filters, stats, namespaces, languages,
-          editVisible, saving, editForm,
+          saving, editForm, editApi,
           missLoading, missingLoaded, missingList, missForm,
-          load, search, reset, onSizeChange, openCreate, openEdit, saveEdit, remove,
+          load, search, reset, onSizeChange, openCreate, openEdit, saveEdit, afterDelete,
           loadMissing, fillMissing, Plus, Search, RefreshLeft
         };
       }
     });
+
+    // 词条编辑表单子组件（新增/修改/补译三个 wd-drawer-button 实例共用；bundle-prop 模式展开作用域）
+    const TrForm = {
+      name: 'TrForm',
+      props: { f: { type: Object, required: true } },
+      setup(props) { return { ...props.f }; },
+      template: '#tr-form-tpl'
+    };
+    app.component('tr-form', TrForm);
 
     for (const [name, comp] of Object.entries(window.ElementPlusIconsVue)) {
       app.component(name, comp);

@@ -4,16 +4,16 @@ declare(strict_types=1);
 
 /*
  * 文档创建时间：2026-10-20
- * 最后修改时间：2026-10-21
- * 当前版本：V1.1
+ * 最后修改时间：2026-11-10
+ * 当前版本：V1.2
  * 适用对象：宿主服务治理（ServiceInjector）
  * 核心目标：RbacQuery 契约实现
- * 文档简略描述：聚合 HostBootstrap 现有 RBAC 数据源（rbacUsers/roles/permissionGroups/permissions/permissionCalculator）。除 ensureRole 外全部方法 try/catch 兜底返回空结构、功能包侧不抛异常；ensureRole 为写方法（无则创建、有则跳过），失败返回 error 而非静默吞错。
+ * 文档简略描述：聚合 HostBootstrap 现有 RBAC 数据源（rbacUsers/roles/permissionGroups/permissions/permissionCalculator）。
+ *               V1.2 收缩：角色仅限 5 个系统预设角色且不可增删改，移除 ensureRole 写方法；全部方法 try/catch 兜底返回空结构、功能包侧不抛异常。
  */
 
 namespace linhub\host\services\auth;
 
-use linhub\host\rbac\RbacRoles;
 use linhub\host\support\HostBootstrap;
 
 /**
@@ -36,41 +36,6 @@ final class RbacQueryService implements RbacQuery
     private function boot(): HostBootstrap
     {
         return $this->bootstrap ??= new HostBootstrap();
-    }
-
-    public function ensureRole(string $name, string $type): array
-    {
-        $name = trim($name);
-        $type = strtoupper(trim($type));
-        if ($name === '') {
-            return ['created' => false, 'id' => '', 'name' => '', 'type' => $type, 'error' => '角色名称不能为空'];
-        }
-        if (!isset(RbacRoles::TYPE_NAMES[$type])) {
-            return ['created' => false, 'id' => '', 'name' => $name, 'type' => $type, 'error' => "非法角色类型：{$type}"];
-        }
-        if ($type === RbacRoles::SUPER_ADMIN) {
-            return ['created' => false, 'id' => '', 'name' => $name, 'type' => $type, 'error' => '超级管理员角色由平台占位，不可接入'];
-        }
-        try {
-            $roles = $this->boot()->roles();
-            $roles->ensureDefaultRoles();
-            foreach ($roles->all() as $r) {
-                if (mb_strtolower((string) ($r['name'] ?? '')) === mb_strtolower($name)) {
-                    return [
-                        'created' => false,
-                        'id'      => (string) ($r['id'] ?? ''),
-                        'name'    => (string) ($r['name'] ?? ''),
-                        'type'    => (string) ($r['type'] ?? $type),
-                        'error'   => '',
-                    ];
-                }
-            }
-            $rid = $roles->create($type, $name);
-            return ['created' => true, 'id' => $rid, 'name' => $name, 'type' => $type, 'error' => ''];
-        } catch (\Throwable $e) {
-            // 写失败如实返回 error，不伪装成"已跳过"，避免功能包因角色缺失而静默降级
-            return ['created' => false, 'id' => '', 'name' => $name, 'type' => $type, 'error' => $e->getMessage()];
-        }
     }
 
     public function currentSnapshot(): array
@@ -131,7 +96,7 @@ final class RbacQueryService implements RbacQuery
     public function currentRoleIds(): array
     {
         try {
-            $uid = $this->currentUserId();
+            $uid = $this->resolveUserId($this->currentUserId());
             if ($uid === '') {
                 return [];
             }
@@ -144,7 +109,7 @@ final class RbacQueryService implements RbacQuery
     public function currentGroupIds(): array
     {
         try {
-            $uid = $this->currentUserId();
+            $uid = $this->resolveUserId($this->currentUserId());
             if ($uid === '') {
                 return [];
             }
@@ -231,7 +196,11 @@ final class RbacQueryService implements RbacQuery
     public function permCodesOf(string $userId): array
     {
         try {
-            return array_values(array_map('strval', $this->boot()->permissionCalculator()->calcPermissions($userId)));
+            $local = $this->resolveUserId($userId);
+            if ($local === '') {
+                return [];
+            }
+            return array_values(array_map('strval', $this->boot()->permissionCalculator()->calcPermissions($local)));
         } catch (\Throwable) {
             return [];
         }
@@ -252,13 +221,10 @@ final class RbacQueryService implements RbacQuery
             }
             $out = [];
             foreach ($boot->roles()->all() as $r) {
-                $type = (string) ($r['type'] ?? '');
                 $id = (string) ($r['id'] ?? '');
                 $out[] = [
                     'id'        => $id,
                     'name'      => (string) ($r['name'] ?? ''),
-                    'type'      => $type,
-                    'typeName'  => (string) (RbacRoles::TYPE_NAMES[$type] ?? $type),
                     'readonly'  => !empty($r['readonly']),
                     'userCount' => (int) ($userCounts[$id] ?? 0),
                 ];
@@ -276,19 +242,16 @@ final class RbacQueryService implements RbacQuery
             $boot->roles()->ensureDefaultRoles();
             $r = $boot->roles()->get($roleId);
             if ($r === null) {
-                return ['id' => '', 'name' => '', 'type' => '', 'typeName' => '', 'readonly' => false, 'userCount' => 0];
+                return ['id' => '', 'name' => '', 'readonly' => false, 'userCount' => 0];
             }
-            $type = (string) ($r['type'] ?? '');
             return [
                 'id'        => (string) ($r['id'] ?? ''),
                 'name'      => (string) ($r['name'] ?? ''),
-                'type'      => $type,
-                'typeName'  => (string) (RbacRoles::TYPE_NAMES[$type] ?? $type),
                 'readonly'   => !empty($r['readonly']),
                 'userCount' => count($this->userIdsOfRole((string) ($r['id'] ?? ''))),
             ];
         } catch (\Throwable) {
-            return ['id' => '', 'name' => '', 'type' => '', 'typeName' => '', 'readonly' => false, 'userCount' => 0];
+            return ['id' => '', 'name' => '', 'readonly' => false, 'userCount' => 0];
         }
     }
 
@@ -317,7 +280,7 @@ final class RbacQueryService implements RbacQuery
                 $out[] = [
                     'id'        => (string) ($g['id'] ?? ''),
                     'name'      => (string) ($g['name'] ?? ''),
-                    'permCodes' => array_values(array_map('strval', (array) ($g['permissions'] ?? $g['perm_codes'] ?? []))),
+                    'permCodes' => array_values(array_map('strval', (array) ($g['perms'] ?? $g['permissions'] ?? $g['perm_codes'] ?? []))),
                 ];
             }
             return $out;
@@ -336,7 +299,7 @@ final class RbacQueryService implements RbacQuery
             return [
                 'id'        => (string) ($g['id'] ?? ''),
                 'name'      => (string) ($g['name'] ?? ''),
-                'permCodes' => array_values(array_map('strval', (array) ($g['permissions'] ?? $g['perm_codes'] ?? []))),
+                'permCodes' => array_values(array_map('strval', (array) ($g['perms'] ?? $g['permissions'] ?? $g['perm_codes'] ?? []))),
             ];
         } catch (\Throwable) {
             return ['id' => '', 'name' => '', 'permCodes' => []];
@@ -381,6 +344,20 @@ final class RbacQueryService implements RbacQuery
         } catch (\Throwable) {
             return false;
         }
+    }
+
+    /** 把 UAIS 身份 id 或本地 RBAC 用户 id 统一解析为本地用户 id；解析不到返回空串。 */
+    private function resolveUserId(string $userId): string
+    {
+        if ($userId === '') {
+            return '';
+        }
+        $users = $this->boot()->rbacUsers();
+        if ($users->get($userId) !== null) {
+            return $userId;
+        }
+        $u = $users->findByRefId($userId);
+        return (string) ($u['id'] ?? '');
     }
 
     /** 空用户档案占位（字段与 userById 返回一致）。 */

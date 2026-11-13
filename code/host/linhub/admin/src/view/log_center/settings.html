@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>日志设置 - LinHub 林枢</title>
+<link rel="icon" type="image/svg+xml" href="/brand/favicon.svg">
+  <link rel="stylesheet" href="/static/vendor/element-plus/index.css">
+  <link rel="stylesheet" href="/static/vendor/workdesktop-ai/style.css">
+  <style>
+    html,
+    body,
+    #app {
+      height: 100%;
+      margin: 0;
+    }
+
+    body {
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+
+    .lgs-page {
+      height: 100%;
+      padding: 16px 20px 24px;
+      box-sizing: border-box;
+      overflow-y: auto;
+    }
+
+    .lgs-mono {
+      font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+      font-size: 12px;
+    }
+
+    .lgs-card {
+      border: 1px solid var(--el-border-color-light, #e4e7ed);
+      border-radius: 10px;
+      padding: 16px 18px;
+      background: var(--el-bg-color, #fff);
+      margin-bottom: 14px;
+    }
+
+    .lgs-card-title {
+      font-size: 15px;
+      font-weight: 600;
+      color: #303133;
+    }
+
+    .lgs-card-desc {
+      font-size: 12px;
+      color: #909399;
+      margin-top: 4px;
+      line-height: 1.6;
+    }
+
+    .lgs-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      padding: 12px 0;
+    }
+
+    .lgs-row+.lgs-row {
+      border-top: 1px dashed var(--el-border-color-lighter, #ebeef5);
+    }
+
+    .lgs-row-main {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .lgs-row-title {
+      font-size: 13px;
+      color: #303133;
+      line-height: 1.5;
+    }
+
+    .lgs-row-desc {
+      font-size: 12px;
+      color: #909399;
+      margin-top: 2px;
+      line-height: 1.6;
+    }
+
+    .lgs-row-ctrl {
+      flex: none;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding-top: 2px;
+    }
+
+    .lgs-hint {
+      color: #909399;
+      font-size: 12px;
+      line-height: 1.7;
+    }
+
+    .lgs-foot {
+      margin-top: 12px;
+      display: flex;
+      gap: 10px;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="app"></div>
+
+  <script type="text/x-template" id="lgs-tpl">
+  <div class="lgs-page" v-loading="loading" element-loading-text="加载中...">
+    <wd-panel description-align="right" :border="true">
+      <wd-tips type="box" style="margin-bottom:14px">
+        运行日志设置：控制 LoggingService 落盘行为（总开关 / 最低记录级别）与保留策略（保留月数 + 手动清理）。保存即刻生效，仅影响后续写入，不影响已有日志文件。
+      </wd-tips>
+
+      <!-- ── 记录策略 ── -->
+      <section class="lgs-card">
+        <div class="lgs-card-title">记录策略</div>
+        <div class="lgs-card-desc">总开关关闭后所有级别均不落盘；最低记录级别以下的条目直接丢弃。缺省为「启用 + DEBUG（全量）」，与历史行为一致</div>
+        <div class="lgs-row">
+          <div class="lgs-row-main">
+            <div class="lgs-row-title">启用运行日志</div>
+            <div class="lgs-row-desc">关闭后平台运行日志不再写入 runtime/log（审计轨迹与操作日志不受影响，仍正常入库）</div>
+          </div>
+          <div class="lgs-row-ctrl">
+            <el-switch v-model="form.enabled" />
+          </div>
+        </div>
+        <div class="lgs-row">
+          <div class="lgs-row-main">
+            <div class="lgs-row-title">最低记录级别</div>
+            <div class="lgs-row-desc">DEBUG（全量）→ INFO → WARNING → ERROR 逐级收紧；仅记录达到门槛及更严重的条目</div>
+          </div>
+          <div class="lgs-row-ctrl">
+            <el-select v-model="form.min_level" style="width:220px" :disabled="!form.enabled">
+              <el-option v-for="lv in levels" :key="lv.value" :value="lv.value" :label="lv.label" />
+            </el-select>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── 保留策略 ── -->
+      <section class="lgs-card">
+        <div class="lgs-card-title">保留策略</div>
+        <div class="lgs-card-desc">按月归档（YYYYMM 目录），清理动作删除早于保留期的整月目录；0 = 永久保留（不自动判定过期）</div>
+        <div class="lgs-row">
+          <div class="lgs-row-main">
+            <div class="lgs-row-title">保留月数</div>
+            <div class="lgs-row-desc">0~60 个月；清理仅按当前设置的保留月数执行，不做定时任务</div>
+          </div>
+          <div class="lgs-row-ctrl">
+            <el-input-number v-model="form.retention_months" :min="0" :max="60" :step="1" step-strictly />
+            <span class="lgs-hint">个月</span>
+          </div>
+        </div>
+        <div class="lgs-foot">
+          <el-button type="primary" :loading="saving" @click="save">保存设置</el-button>
+          <el-button type="warning" plain :loading="cleaning" @click="doCleanup">立即清理过期日志</el-button>
+        </div>
+        <div class="lgs-hint" style="margin-top:8px" v-if="settings.updated_at">
+          上次修改：{{ settings.updated_at }}<template v-if="settings.updated_by">（{{ settings.updated_by }}）</template>
+        </div>
+      </section>
+
+      <!-- ── 存储概览 ── -->
+      <section class="lgs-card">
+        <div class="lgs-card-title">存储概览</div>
+        <div class="lgs-card-desc">
+          共 {{ storage.files }} 个日志文件，占用 {{ humanSize(storage.bytes) }}，
+          根目录 <span class="lgs-mono">{{ storage.root }}</span>
+        </div>
+        <el-table :data="storage.months" border stripe size="small" style="margin-top:8px">
+          <el-table-column prop="month" label="月份" width="110">
+            <template #default="{ row }"><span class="lgs-mono">{{ row.month }}</span></template>
+          </el-table-column>
+          <el-table-column prop="files" label="文件数" width="90" />
+          <el-table-column label="大小" width="110">
+            <template #default="{ row }">{{ humanSize(row.bytes) }}</template>
+          </el-table-column>
+          <el-table-column prop="updated_at" label="最近写入" min-width="170">
+            <template #default="{ row }">
+              <span v-if="row.updated_at">{{ row.updated_at }}</span>
+              <span v-else style="color:#bbb">—</span>
+            </template>
+          </el-table-column>
+          <template #empty><el-empty description="暂无归档月份" :image-size="60" /></template>
+        </el-table>
+      </section>
+    </wd-panel>
+  </div>
+</script>
+
+  <script src="/static/vendor/vue/vue.global.prod.js"></script>
+  <script src="/static/vendor/element-plus/index.full.min.js"></script>
+  <script src="/static/vendor/icons/index.iife.min.js"></script>
+  <script src="/static/vendor/workdesktop-ai/index.umd.js"></script>
+  <script src="/static/linhub/auth-guard.js?v=2"></script>
+  <script>
+    const WD = window.WorkDesktop;
+    const ElementPlus = window.ElementPlus;
+    const { WorkDesktop } = WD;
+    const { ref, reactive } = Vue;
+    const { ElMessage, ElMessageBox } = ElementPlus;
+
+    const app = Vue.createApp({
+      template: '#lgs-tpl',
+      setup() {
+        const loading = ref(false);
+        const saving = ref(false);
+        const cleaning = ref(false);
+        const levels = ref([]);
+        const settings = reactive({ enabled: '1', min_level: 'debug', retention_months: '6', updated_at: '', updated_by: '' });
+        const form = reactive({ enabled: true, min_level: 'debug', retention_months: 6 });
+        const storage = reactive({ root: '', files: 0, bytes: 0, months: [] });
+
+        WD.request.get('/admin/LogCenter/state').then(res => {
+          loading.value = false;
+          if (!res.success) return;
+          levels.value = res.data.levels || [];
+          Object.assign(settings, res.data.settings || {});
+          form.enabled = settings.enabled === '1';
+          form.min_level = settings.min_level;
+          form.retention_months = Number(settings.retention_months) || 0;
+          Object.assign(storage, res.data.storage || {});
+        }).catch(() => { loading.value = false; });
+        loading.value = true;
+
+        function save() {
+          saving.value = true;
+          WD.request.post('/admin/LogCenter/save', {
+            enabled: form.enabled ? '1' : '0',
+            min_level: form.min_level,
+            retention_months: String(form.retention_months)
+          }).then(res => {
+            saving.value = false;
+            if (!res.success) return;
+            Object.assign(settings, res.data || {});
+            ElMessage.success('日志设置已保存');
+          }).catch(() => { saving.value = false; });
+        }
+
+        function doCleanup() {
+          const months = Number(settings.retention_months) || 0;
+          if (months === 0) {
+            ElMessage.warning('当前保留月数为 0（永久保留），请先设置保留月数再清理');
+            return;
+          }
+          ElMessageBox.confirm(
+            '将删除早于保留期（' + months + ' 个月）的整月日志目录，删除后不可恢复。确认执行？',
+            '清理过期日志', { type: 'warning', confirmButtonText: '确认清理', cancelButtonText: '取消' }
+          ).then(() => {
+            cleaning.value = true;
+            WD.request.post('/admin/LogCenter/cleanup', {}).then(res => {
+              cleaning.value = false;
+              if (!res.success) return;
+              const r = res.data.result || {};
+              Object.assign(storage, res.data.storage || {});
+              const freed = r.freed_bytes || 0;
+              ElMessage.success('已删除 ' + (r.deleted_months || []).length + ' 个月度目录，释放 ' + humanSize(freed));
+            }).catch(() => { cleaning.value = false; });
+          }).catch(() => {});
+        }
+
+        function humanSize(bytes) {
+          const n = Number(bytes) || 0;
+          if (n < 1024) return n + ' B';
+          if (n < 1048576) return (n / 1024).toFixed(1) + ' KB';
+          if (n < 1073741824) return (n / 1048576).toFixed(1) + ' MB';
+          return (n / 1073741824).toFixed(2) + ' GB';
+        }
+
+        return { loading, saving, cleaning, levels, settings, form, storage, save, doCleanup, humanSize };
+      }
+    });
+
+    for (const [name, comp] of Object.entries(window.ElementPlusIconsVue)) {
+      app.component(name, comp);
+    }
+    app.use(ElementPlus);
+    app.use(WorkDesktop);
+    app.mount('#app');
+  </script>
+</body>
+
+</html>

@@ -7,6 +7,7 @@
 <link rel="icon" type="image/svg+xml" href="/brand/favicon.svg">
 <link rel="stylesheet" href="/static/vendor/element-plus/index.css">
 <link rel="stylesheet" href="/static/vendor/workdesktop-ai/style.css">
+<link rel="stylesheet" href="/static/linhub/cards.css">
 <style>
   html, body, #app { height: 100%; margin: 0; }
   .sc-page { height: 100%; }
@@ -18,6 +19,21 @@
   .sc-chip { display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px; border-radius: 14px; font-size: 12px; background: var(--wd-border-color, #f0f0f0); color: var(--wd-text-color, #1f2937); }
   .sc-diff-row { margin-bottom: 16px; }
   .sc-count { font-size: 13px; color: var(--wd-text-color-secondary, #6b7280); }
+
+  /* —— 差异汇总统计卡（对齐平台内页 stats 风格） —— */
+  .sc-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin-bottom: 4px; }
+  .sc-stat { border: 1px solid #e5e7eb; border-radius: 10px; background: #fff; padding: 14px 16px; }
+  .sc-stat-lbl { font-size: 13px; font-weight: 600; color: #1f2937; }
+  .sc-stat-num { margin-top: 6px; font-size: 24px; font-weight: 600; line-height: 1.2; font-variant-numeric: tabular-nums; }
+  .sc-stat-num.is-add { color: #67c23a; }
+  .sc-stat-num.is-del { color: #f56c6c; }
+  .sc-stat-num.is-chg { color: #e6a23c; }
+  .sc-stat-num.is-ok { color: #909399; }
+  .sc-stat-sub { margin-top: 4px; font-size: 12px; color: #909399; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* —— 区块筛选工具栏 —— */
+  .sc-filter-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+  .sc-filter-count { font-size: 12px; color: #909399; }
 </style>
 </head>
 <body>
@@ -26,7 +42,7 @@
 <script type="text/x-template" id="sc-tpl">
   <div class="sc-page">
         <div class="sc-body">
-          <wd-panel :border="true">
+          <wd-panel description-align="right" :border="true">
             <wd-tips type="box" style="margin-bottom:12px">
               对比当前数据库结构与功能包备份内的 schema 发版快照，识别待新增 / 待删除 / 变更的表、列与索引。
             </wd-tips>
@@ -66,8 +82,39 @@
 
           <!-- 差异清单 -->
           <template v-if="state.report && !state.report.noSnapshot">
-            <div class="sc-summary">
-              <span class="sc-chip">基线表 {{ state.report.fromTableCount }} → 目标表 {{ state.report.toTableCount }}</span>
+            <!-- 差异汇总 -->
+            <div class="sc-stats">
+              <div class="sc-stat">
+                <div class="sc-stat-lbl">表数量（基线 → 目标）</div>
+                <div class="sc-stat-num" :class="state.report.fromTableCount === state.report.toTableCount ? 'is-ok' : 'is-chg'">
+                  {{ state.report.fromTableCount }} → {{ state.report.toTableCount }}
+                </div>
+                <div class="sc-stat-sub">当前库 {{ state.current ? state.current.tableCount + ' 表' : '—' }} · 目标快照 v{{ state.target ? state.target.version : '—' }}</div>
+              </div>
+              <div class="sc-stat">
+                <div class="sc-stat-lbl">待新增</div>
+                <div class="sc-stat-num" :class="totals.added ? 'is-add' : 'is-ok'">{{ totals.added }}</div>
+                <div class="sc-stat-sub">表 / 列 / 索引合计</div>
+              </div>
+              <div class="sc-stat">
+                <div class="sc-stat-lbl">待删除</div>
+                <div class="sc-stat-num" :class="totals.removed ? 'is-del' : 'is-ok'">{{ totals.removed }}</div>
+                <div class="sc-stat-sub">表 / 列 / 索引合计</div>
+              </div>
+              <div class="sc-stat">
+                <div class="sc-stat-lbl">结构变更</div>
+                <div class="sc-stat-num" :class="totals.changed ? 'is-chg' : 'is-ok'">{{ totals.changed }}</div>
+                <div class="sc-stat-sub">表 / 列 / 索引合计</div>
+              </div>
+            </div>
+            <div style="height:12px"></div>
+
+            <!-- 关键字筛选 -->
+            <div class="sc-filter-bar">
+              <el-input v-model="scKw" placeholder="搜索表 / 名称 / 详情" clearable style="width:240px">
+                <template #prefix><el-icon><Search /></el-icon></template>
+              </el-input>
+              <span class="sc-filter-count">共 {{ totalFiltered }} / {{ totalRows }} 项</span>
             </div>
 
             <div v-for="g in state.report.groups" :key="g.kind" class="sc-diff-row">
@@ -78,7 +125,7 @@
                 </span>
               </h3>
 
-              <wd-data-grid v-if="g.added.length + g.removed.length + g.changed.length > 0" :data-source="flat(g)" border stripe table-size="small" :with-index="false" :with-pager="false">
+              <wd-data-grid v-if="filteredFlat(g).length > 0" :data-source="filteredFlat(g)" border stripe table-size="small" :with-index="false" :with-pager="false">
                 <el-table-column label="性质" width="90">
                   <template #default="{ row }">
                     <el-tag size="small" :type="row.tag === 'added' ? 'success' : (row.tag === 'removed' ? 'danger' : 'warning')" effect="light">
@@ -93,8 +140,31 @@
                   <template #default="{ row }"><span class="sc-mono">{{ row.name }}</span></template>
                 </el-table-column>
                 <el-table-column prop="detail" label="详情" min-width="220" />
+                <!-- ── 卡片清单模式（DataGrid 内建 modeSwitch 视图；统一 lh-card 结构，只读清单无操作行） ── -->
+                <template #card-item="{ row }">
+                  <div class="lh-card">
+                    <div class="lh-card__head">
+                      <div class="lh-card__title"><span class="sc-mono">{{ row.table }}</span></div>
+                      <div class="lh-card__tags">
+                        <el-tag size="small" :type="row.tag === 'added' ? 'success' : (row.tag === 'removed' ? 'danger' : 'warning')" effect="light">
+                          {{ row.tag === 'added' ? '新增' : (row.tag === 'removed' ? '删除' : '变更') }}
+                        </el-tag>
+                      </div>
+                    </div>
+                    <div class="lh-card__fields">
+                      <div class="lh-card__field">
+                        <div class="k">名称</div>
+                        <div class="v"><span class="sc-mono">{{ row.name || '—' }}</span></div>
+                      </div>
+                      <div v-if="row.detail" class="lh-card__field is-wide">
+                        <div class="k">详情</div>
+                        <div class="v">{{ row.detail }}</div>
+                      </div>
+                    </div>
+                  </div>
+                </template>
               </wd-data-grid>
-              <p v-else class="sc-count">无差异</p>
+              <p v-else class="sc-count">{{ (g.added.length + g.removed.length + g.changed.length) > 0 ? '无匹配项（已按关键字过滤）' : '无差异' }}</p>
             </div>
           </template>
           </div>
@@ -109,17 +179,19 @@
 <script src="/static/vendor/element-plus/index.full.min.js"></script>
 <script src="/static/vendor/icons/index.iife.min.js"></script>
 <script src="/static/vendor/workdesktop-ai/index.umd.js"></script>
+<script src="/static/linhub/auth-guard.js?v=2"></script>
 <script>
   const WD = window.WorkDesktop;
   const ElementPlus = window.ElementPlus;
   const { WorkDesktop } = WD;
-  const { ref, reactive } = Vue;
+  const { ref, reactive, computed } = Vue;
 
   const app = Vue.createApp({
     template: '#sc-tpl',
     setup() {
       const pkg = ref('');
       const loading = ref(false);
+      const scKw = ref('');
       const state = reactive({ packages: [], current: null, diagnostic: null, target: null, report: null });
 
       async function loadOptions() {
@@ -137,7 +209,7 @@
         if (!pkg.value) return;
         loading.value = true;
         try {
-          const res = await WD.request.get('/admin/schema/report', { params: { package: pkg.value } });
+          const res = await WD.request.get('/admin/schema/report', { package: pkg.value });
           if (!res.success) {
             ElementPlus.ElMessage.error(res.message || '加载失败');
             return;
@@ -160,9 +232,39 @@
         return rows;
       }
 
+      // 关键字过滤后的差异行
+      function filteredFlat(g) {
+        const kw = scKw.value.trim().toLowerCase();
+        const rows = flat(g);
+        if (!kw) return rows;
+        return rows.filter(r =>
+          String(r.table || '').toLowerCase().includes(kw) ||
+          String(r.name || '').toLowerCase().includes(kw) ||
+          String(r.detail || '').toLowerCase().includes(kw));
+      }
+
+      // 三类差异合计
+      const totals = computed(() => {
+        const t = { added: 0, removed: 0, changed: 0 };
+        if (state.report && !state.report.noSnapshot) {
+          for (const g of state.report.groups) {
+            t.added += (g.added || []).length;
+            t.removed += (g.removed || []).length;
+            t.changed += (g.changed || []).length;
+          }
+        }
+        return t;
+      });
+
+      const totalRows = computed(() => totals.value.added + totals.value.removed + totals.value.changed);
+      const totalFiltered = computed(() => {
+        if (!state.report || state.report.noSnapshot) return 0;
+        return state.report.groups.reduce((n, g) => n + filteredFlat(g).length, 0);
+      });
+
       loadOptions();
 
-      return { pkg, loading, state, apply, flat };
+      return { pkg, loading, scKw, state, apply, filteredFlat, totals, totalRows, totalFiltered, Search: window.ElementPlusIconsVue.Search };
     }
   });
 

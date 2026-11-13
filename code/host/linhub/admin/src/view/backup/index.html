@@ -7,6 +7,7 @@
 <link rel="icon" type="image/svg+xml" href="/brand/favicon.svg">
 <link rel="stylesheet" href="/static/vendor/element-plus/index.css">
 <link rel="stylesheet" href="/static/vendor/workdesktop-ai/style.css">
+<link rel="stylesheet" href="/static/linhub/cards.css">
 <style>
   html, body, #app { height: 100%; margin: 0; }
   .bak-page { height: 100%; }
@@ -17,6 +18,19 @@
   .bak-card { border: 1px solid var(--el-border-color-lighter, #e4e7ed); border-radius: 8px; padding: 16px; margin-bottom: 18px; background: #fff; }
   .bak-card h3 { margin: 0 0 12px; font-size: 15px; }
   .bak-sub { margin: 20px 0 8px; font-weight: 600; font-size: 14px; color: var(--wd-text-color, #1f2937); }
+
+  /* —— 归档概览统计卡（对齐平台内页 stats 风格） —— */
+  .bak-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; }
+  .bak-stat { border: 1px solid #e5e7eb; border-radius: 10px; background: #fff; padding: 14px 16px; }
+  .bak-stat-lbl { font-size: 13px; font-weight: 600; color: #1f2937; }
+  .bak-stat-num { margin-top: 6px; font-size: 24px; font-weight: 600; color: #0066CC; line-height: 1.2; font-variant-numeric: tabular-nums; }
+  .bak-stat-sub { margin-top: 4px; font-size: 12px; color: #909399; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bak-stat-sub.is-warn { color: #e6a23c; }
+
+  /* —— 区块筛选工具栏 —— */
+  .bak-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; width: 100%; }
+  .bak-toolbar-count { font-size: 12px; color: #909399; }
+  .bak-toolbar-spacer { flex: 1 1 auto; }
 </style>
 </head>
 <body>
@@ -25,10 +39,33 @@
 <script type="text/x-template" id="bak-tpl">
   <div class="bak-page">
         <div class="bak-body">
-          <wd-panel :border="true">
+          <wd-panel description-align="right" :border="true">
             <wd-tips type="box" style="margin-bottom:12px">
               RBAC 用户/角色/权限组数据归档与功能包源码备份。
             </wd-tips>
+
+          <!-- ── 归档概览 ── -->
+          <div class="bak-stats">
+            <div class="bak-stat">
+              <div class="bak-stat-lbl">归档快照</div>
+              <div class="bak-stat-num">{{ snapshots.length }}</div>
+              <div class="bak-stat-sub">{{ policy.enabled ? ('保留 ' + policy.retain + ' 份 · ' + policy.dir) : '归档未启用' }}</div>
+            </div>
+            <div class="bak-stat">
+              <div class="bak-stat-lbl">归档策略</div>
+              <div class="bak-stat-num" :style="{ color: policy.enabled ? '#0066CC' : '#e6a23c' }">{{ policy.enabled ? '已启用' : '未启用' }}</div>
+              <div class="bak-stat-sub" :class="{ 'is-warn': !policy.enabled }">{{ policy.enabled ? '超配额自动清理最旧快照' : '建议在策略中开启自动归档' }}</div>
+            </div>
+            <div class="bak-stat">
+              <div class="bak-stat-lbl">功能包源码备份</div>
+              <div class="bak-stat-num">{{ pkgBackupCount }}</div>
+              <div class="bak-stat-sub">覆盖 {{ packageBackups.length }} 个功能包</div>
+            </div>
+            <div class="bak-stat" style="display:flex;align-items:center">
+              <el-button :icon="Refresh" @click="loadData">刷新数据</el-button>
+            </div>
+          </div>
+          <div style="height:18px"></div>
 
           <!-- ── 上半屏：RBAC 数据归档 ── -->
           <div class="bak-card">
@@ -43,10 +80,34 @@
               title="归档当前未启用"
               type="warning"
               :closable="false" show-icon style="margin-bottom:12px" />
-            <wd-data-grid :data-source="snapshots" border stripe :with-index="false" :with-pager="false">
+            <wd-data-grid :data-source="filteredSnapshots" border stripe :with-index="false" :with-pager="false">
               <template #toolbar>
-                <el-button type="primary" :icon="Download" :loading="busy" @click="doRun">立即归档</el-button>
-                <el-button :icon="Setting" @click="openPolicy">编辑策略</el-button>
+                <el-input v-model="snapKw" placeholder="搜索快照 ID / 文件名" clearable style="width:220px">
+                  <template #prefix><el-icon><Search /></el-icon></template>
+                </el-input>
+                <span class="bak-toolbar-count">共 {{ filteredSnapshots.length }} / {{ snapshots.length }} 份</span>
+                <span class="bak-toolbar-spacer"></span>
+                <wd-confirm-button type="primary" :icon="Download" api="/admin/backup/run"
+                  confirm-title="确认归档" confirm-text="将对当前全部 RBAC 数据生成一份归档快照？"
+                  @api-success="loadData">立即归档</wd-confirm-button>
+                <wd-drawer-button :icon="Setting" label="编辑策略" title="编辑归档策略" mode="dialog" drawer-size="480px" @open="openPolicy">
+                  <el-form label-width="90px">
+                    <el-form-item label="启用归档">
+                      <el-switch v-model="policyForm.enabled" />
+                    </el-form-item>
+                    <el-form-item label="保留份数">
+                      <el-input-number v-model="policyForm.retain" :min="1" :max="100" />
+                      <div style="color:#909399;font-size:12px;margin-left:8px">正数，超配额自动清理最旧快照</div>
+                    </el-form-item>
+                    <el-form-item label="归档目录">
+                      <el-input v-model="policyForm.dir" clearable />
+                    </el-form-item>
+                  </el-form>
+                  <template #footer="f">
+                    <el-button @click="f.close">取消</el-button>
+                    <el-button type="primary" :loading="busy" @click="savePolicy(f)">保存</el-button>
+                  </template>
+                </wd-drawer-button>
               </template>
               <el-table-column prop="id" label="快照 ID" min-width="200">
                 <template #default="{ row }"><span class="bak-mono">{{ row.id }}</span></template>
@@ -63,6 +124,27 @@
                 </template>
               </el-table-column>
               <template #empty><el-empty description="暂无归档快照，点击「立即归档」创建" :image-size="80" /></template>
+              <!-- ── 卡片模式（DataGrid modeSwitch 内建视图；统一 lh-card 结构） ── -->
+              <template #card-item="{ row }">
+                <div class="lh-card">
+                  <div class="lh-card__head">
+                    <div class="lh-card__title bak-mono">{{ row.id }}</div>
+                    <div class="lh-card__tags"></div>
+                    <div class="lh-card__extra">
+                      <div class="lh-card__stamp">{{ row.created_at || '—' }}</div>
+                    </div>
+                  </div>
+                  <div class="lh-card__fields">
+                    <div class="lh-card__field is-wide">
+                      <div class="k">快照文件</div>
+                      <div class="v bak-mono">{{ row.file || '—' }}</div>
+                    </div>
+                  </div>
+                  <div class="lh-card__ops">
+                    <el-button size="small" type="danger" plain @click="openRestore(row.id)">还原</el-button>
+                  </div>
+                </div>
+              </template>
             </wd-data-grid>
           </div>
 
@@ -91,6 +173,23 @@
                     <template #default="{ row }"><span class="bak-mono" style="color:#6b7280">{{ row.path }}</span></template>
                   </el-table-column>
                   <template #empty><el-empty description="暂无源码备份" :image-size="60" /></template>
+                  <!-- ── 卡片模式（DataGrid modeSwitch 内建视图；统一 lh-card 结构） ── -->
+                  <template #card-item="{ row }">
+                    <div class="lh-card">
+                      <div class="lh-card__head">
+                        <div class="lh-card__title bak-mono">{{ row.name }}</div>
+                        <div class="lh-card__tags">
+                          <el-tag v-if="row.tag" size="small" effect="plain">{{ row.tag }}</el-tag>
+                        </div>
+                      </div>
+                      <div class="lh-card__fields">
+                        <div class="lh-card__field is-wide">
+                          <div class="k">路径</div>
+                          <div class="v bak-mono">{{ row.path || '—' }}</div>
+                        </div>
+                      </div>
+                    </div>
+                  </template>
                 </wd-data-grid>
               </template>
             </template>
@@ -98,26 +197,6 @@
           </div>
           </wd-panel>
         </div>
-
-        <!-- 策略编辑对话框 -->
-    <el-dialog v-model="policyDlg" title="编辑归档策略" width="480px">
-      <el-form label-width="90px">
-        <el-form-item label="启用归档">
-          <el-switch v-model="policyForm.enabled" />
-        </el-form-item>
-        <el-form-item label="保留份数">
-          <el-input-number v-model="policyForm.retain" :min="1" :max="100" />
-          <div style="color:#909399;font-size:12px;margin-left:8px">正数，超配额自动清理最旧快照</div>
-        </el-form-item>
-        <el-form-item label="归档目录">
-          <el-input v-model="policyForm.dir" clearable />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="policyDlg = false">取消</el-button>
-        <el-button type="primary" :loading="busy" @click="savePolicy">保存</el-button>
-      </template>
-    </el-dialog>
 
     <!-- 还原强确认对话框 -->
     <el-dialog v-model="restoreDlg" title="高危还原确认" width="520px" :close-on-click-modal="false">
@@ -139,18 +218,18 @@
 <script src="/static/vendor/element-plus/index.full.min.js"></script>
 <script src="/static/vendor/icons/index.iife.min.js"></script>
 <script src="/static/vendor/workdesktop-ai/index.umd.js"></script>
+<script src="/static/linhub/auth-guard.js?v=2"></script>
 <script>
   const WD = window.WorkDesktop;
   const ElementPlus = window.ElementPlus;
   const { WorkDesktop } = WD;
-  const { reactive, ref } = Vue;
+  const { reactive, ref, computed } = Vue;
 
   const app = Vue.createApp({
     template: '#bak-tpl',
     setup() {
       const loading = ref(false);
       const busy = ref(false);
-      const policyDlg = ref(false);
       const restoreDlg = ref(false);
       const confirmSid = ref('');
       const confirmInput = ref('');
@@ -158,6 +237,18 @@
       const packageBackups = ref([]);
       const policy = reactive({ enabled: false, retain: 5, dir: '' });
       const policyForm = reactive({ enabled: false, retain: 5, dir: '' });
+      const snapKw = ref('');
+
+      const filteredSnapshots = computed(() => {
+        const kw = snapKw.value.trim().toLowerCase();
+        if (!kw) return snapshots.value;
+        return snapshots.value.filter(s =>
+          String(s.id || '').toLowerCase().includes(kw) ||
+          String(s.file || '').toLowerCase().includes(kw));
+      });
+
+      const pkgBackupCount = computed(() =>
+        packageBackups.value.reduce((n, p) => n + ((p.backups || []).length), 0));
 
       async function loadData() {
         loading.value = true;
@@ -177,9 +268,8 @@
 
       function openPolicy() {
         Object.assign(policyForm, { ...policy });
-        policyDlg.value = true;
       }
-      async function savePolicy() {
+      async function savePolicy(f) {
         busy.value = true;
         try {
           const res = await WD.request.post('/admin/backup/savePolicy', {
@@ -192,23 +282,8 @@
             return;
           }
           ElementPlus.ElMessage.success(res.message || '归档策略已保存');
-          policyDlg.value = false;
+          if (f) f.close();
           await loadData();
-        } finally {
-          busy.value = false;
-        }
-      }
-      async function doRun() {
-        try {
-          await ElementPlus.ElMessageBox.confirm('将对当前全部 RBAC 数据生成一份归档快照？', '确认归档', {
-            confirmButtonText: '立即归档', cancelButtonText: '取消', type: 'info'
-          });
-        } catch (e) { return; }
-        busy.value = true;
-        try {
-          const res = await WD.request.post('/admin/backup/run', {});
-          ElementPlus.ElMessage[res.success ? 'success' : 'error'](res.message || (res.success ? '已归档' : '归档失败'));
-          if (res.success) await loadData();
         } finally {
           busy.value = false;
         }
@@ -238,9 +313,12 @@
       loadData();
 
       return {
-        loading, busy, policyDlg, restoreDlg, confirmSid, confirmInput,
-        snapshots, packageBackups, policy, policyForm,
-        openPolicy, savePolicy, doRun, openRestore, closeRestore, doRestore
+        loading, busy, restoreDlg, confirmSid, confirmInput,
+        snapshots, filteredSnapshots, snapKw, packageBackups, pkgBackupCount, policy, policyForm,
+        openPolicy, savePolicy, openRestore, closeRestore, doRestore,
+        Download: window.ElementPlusIconsVue.Download,
+        Setting: window.ElementPlusIconsVue.Setting,
+        Refresh: window.ElementPlusIconsVue.Refresh
       };
     }
   });

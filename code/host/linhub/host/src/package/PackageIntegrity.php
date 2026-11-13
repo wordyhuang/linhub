@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace linhub\host\package;
 
+use linhub\host\manifest\ManifestError;
 use linhub\host\manifest\ManifestValidator;
 
 /**
@@ -57,10 +58,11 @@ final class PackageIntegrity
             }
         }
 
-        // manifest 合法校验
-        $manifestErrors = (new ManifestValidator())->validate($manifest);
-        foreach ($manifestErrors as $code) {
-            $problems[] = "manifest 校验失败：{$code}";
+        // manifest 合法校验（错误码附具体原因描述，如 M015 指明 data.services 哪一项非法）
+        $reasons = [];
+        $manifestErrors = (new ManifestValidator())->validate($manifest, $reasons, $packageDir);
+        foreach (ManifestError::render($manifestErrors, $reasons) as $msg) {
+            $problems[] = "manifest 校验失败：{$msg}";
         }
 
         return $problems;

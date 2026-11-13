@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>审批服务设置 - LinHub 林枢</title>
+  <link rel="icon" type="image/svg+xml" href="/brand/favicon.svg">
+  <link rel="stylesheet" href="/static/vendor/element-plus/index.css">
+  <link rel="stylesheet" href="/static/vendor/workdesktop-ai/style.css">
+  <style>
+    html, body, #app { height: 100%; margin: 0; }
+    body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif; }
+    .st-page { height: 100%; padding: 16px 20px 24px; box-sizing: border-box; }
+    .st-card { border: 1px solid var(--el-border-color-light, #e4e7ed); border-radius: 8px; padding: 16px; background: var(--el-bg-color, #fff); }
+    .st-card h3 { margin: 0 0 14px; font-size: 15px; }
+    .st-hint { color: #909399; font-size: 12px; line-height: 1.7; }
+    .st-foot { margin-top: 14px; }
+  </style>
+</head>
+
+<body>
+  <div id="app"></div>
+
+  <script type="text/x-template" id="st-tpl">
+    <div class="st-page" v-loading="loading" element-loading-text="加载中...">
+      <wd-panel description-align="right" :border="true">
+        <wd-tips type="box" style="margin-bottom:12px">
+          审批服务设置：配置审批服务的平台级行为，持久化于平台键值对服务（数据字典），保存后对新请求即刻生效。
+        </wd-tips>
+
+        <div class="st-card" style="max-width:640px">
+          <h3>功能开关</h3>
+          <el-form label-width="120px" @submit.prevent>
+            <el-form-item label="审批工作台">
+              <el-switch v-model="form.workbench_enabled" />
+              <span class="st-hint" style="margin-left:12px">{{ form.workbench_enabled ? '已启用' : '已停用' }}</span>
+              <div class="st-hint" style="width:100%">
+                停用后，「审批工作台」页面展示停用提示；单据详情、同意 / 驳回 / 撤回等审批动作链不受影响。
+              </div>
+            </el-form-item>
+            <el-form-item label="待办/已办接口">
+              <el-switch v-model="form.workbench_api_enabled" />
+              <span class="st-hint" style="margin-left:12px">{{ form.workbench_api_enabled ? '已启用' : '已停用' }}</span>
+              <div class="st-hint" style="width:100%">
+                独立于「审批工作台」开关：停用后，我的待办 / 我的已办数据接口（pendingRows / handledRows）拒绝请求；工作台页面与审批动作链不受影响。
+              </div>
+            </el-form-item>
+            <el-form-item label="工作台统计">
+              <el-switch v-model="form.workbench_stats_enabled" />
+              <span class="st-hint" style="margin-left:12px">{{ form.workbench_stats_enabled ? '已启用' : '已停用' }}</span>
+              <div class="st-hint" style="width:100%">
+                开启后，角色首页显示个人审批统计卡（待办 / 已办 / 已同意 / 已驳回），点击统计项可打开审批工作台对应页签；需「审批工作台」开关同时开启。
+              </div>
+            </el-form-item>
+            <el-form-item label="开启审批通知">
+              <el-switch v-model="form.notify_enabled" />
+              <span class="st-hint" style="margin-left:12px">{{ form.notify_enabled ? '已启用' : '已停用' }}</span>
+              <div class="st-hint" style="width:100%">
+                开启后，工作台右上角显示审批入口，图标徽章显示当前用户的待审批单数量（与审批工作台「我的待办」同口径）；关闭后该入口隐藏，站内通知与审批业务不受影响。
+              </div>
+            </el-form-item>
+          </el-form>
+          <div class="st-foot">
+            <el-button type="primary" :icon="Check" :loading="saving" @click="save">保存设置</el-button>
+          </div>
+        </div>
+      </wd-panel>
+    </div>
+  </script>
+
+  <script src="/static/vendor/vue/vue.global.prod.js"></script>
+  <script src="/static/vendor/element-plus/index.full.min.js"></script>
+  <script src="/static/vendor/icons/index.iife.min.js"></script>
+  <script src="/static/vendor/workdesktop-ai/index.umd.js"></script>
+  <script src="/static/linhub/auth-guard.js?v=2"></script>
+  <script>
+    const WD = window.WorkDesktop;
+    const ElementPlus = window.ElementPlus;
+    const { WorkDesktop } = WD;
+    const { ref, reactive } = Vue;
+    const { Check } = window.ElementPlusIconsVue || {};
+
+    const app = Vue.createApp({
+      template: '#st-tpl',
+      setup() {
+        const loading = ref(false);
+        const saving = ref(false);
+        const form = reactive({ workbench_enabled: true, workbench_api_enabled: true, workbench_stats_enabled: false, notify_enabled: true });
+
+        async function load() {
+          loading.value = true;
+          try {
+            const res = await WD.request.get('/admin/approval_admin/settingsData');
+            if (!res.success) {
+              ElementPlus.ElMessage.error(res.message || '加载失败');
+              return;
+            }
+            form.workbench_enabled = !!res.data.workbench_enabled;
+            form.workbench_api_enabled = !!res.data.workbench_api_enabled;
+            form.workbench_stats_enabled = !!res.data.workbench_stats_enabled;
+            form.notify_enabled = !!res.data.notify_enabled;
+          } finally {
+            loading.value = false;
+          }
+        }
+
+        async function save() {
+          saving.value = true;
+          try {
+            const res = await WD.request.post('/admin/approval_admin/settingsSave', {
+              workbench_enabled: form.workbench_enabled,
+              workbench_api_enabled: form.workbench_api_enabled,
+              workbench_stats_enabled: form.workbench_stats_enabled,
+              notify_enabled: form.notify_enabled,
+            });
+            ElementPlus.ElMessage[res.success ? 'success' : 'error'](res.message || (res.success ? '已保存' : '保存失败'));
+            if (res.success) load();
+          } finally {
+            saving.value = false;
+          }
+        }
+
+        load();
+        return { loading, saving, form, save };
+      }
+    });
+
+    for (const [name, comp] of Object.entries(window.ElementPlusIconsVue)) {
+      app.component(name, comp);
+    }
+    app.use(ElementPlus);
+    app.use(WorkDesktop);
+    app.mount('#app');
+  </script>
+</body>
+
+</html>

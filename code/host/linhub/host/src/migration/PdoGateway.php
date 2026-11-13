@@ -36,6 +36,12 @@ final class PdoGateway implements DbGateway
         $this->pdo->exec($sql);
     }
 
+    public function execAffected(string $sql): int
+    {
+        $affected = $this->pdo->exec($sql);
+        return $affected === false ? 0 : (int) $affected;
+    }
+
     public function query(string $sql): array
     {
         $stmt = $this->pdo->query($sql);

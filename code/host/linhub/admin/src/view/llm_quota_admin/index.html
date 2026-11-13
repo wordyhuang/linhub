@@ -8,6 +8,7 @@
   <link rel="icon" type="image/svg+xml" href="/brand/favicon.svg">
   <link rel="stylesheet" href="/static/vendor/element-plus/index.css">
   <link rel="stylesheet" href="/static/vendor/workdesktop-ai/style.css">
+  <link rel="stylesheet" href="/static/linhub/cards.css">
   <style>
     html, body, #app { height: 100%; margin: 0; }
     body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif; }
@@ -23,7 +24,7 @@
 
   <script type="text/x-template" id="md-tpl">
     <div class="md-page">
-      <wd-panel :border="true">
+      <wd-panel description-align="right" :border="true">
         <wd-tips type="box" style="margin-bottom:12px">
           LLM 网关调用方配额（T12）：按 <span class="md-mono">(caller, model_code)</span> 粒度配置日 token 上限。<b>daily_token_limit = 0 表示不限</b>。未配置的 caller 默认继承模型自身日配额。
         </wd-tips>
@@ -34,7 +35,13 @@
           <el-button native-type="submit" type="primary" :icon="Search" :loading="loading">检索</el-button>
           <el-button :icon="RefreshLeft" @click="reset">重置</el-button>
           <div style="flex:1"></div>
-          <el-button type="primary" :icon="Plus" @click="openCreate">新建配额</el-button>
+          <wd-drawer-button type="primary" :icon="Plus" label="新建配额" title="新建配额" drawer-size="40%" @open="openCreate">
+            <quota-form :f="editApi" />
+            <template #footer="f">
+              <el-button @click="f.close">取消</el-button>
+              <el-button type="primary" :loading="saving" @click="saveEdit(f)">保存</el-button>
+            </template>
+          </wd-drawer-button>
         </form>
 
         <wd-data-grid :data-source="rows" border stripe :with-index="false" :with-pager="false" v-loading="loading">
@@ -57,11 +64,49 @@
           <el-table-column prop="updated_at" label="更新时间" width="170" />
           <el-table-column label="操作" width="150" fixed="right">
             <template #default="{ row }">
-              <el-button size="small" text type="primary" @click="openEdit(row)">编辑</el-button>
+              <wd-drawer-button size="small" text type="primary" label="编辑" title="编辑配额" drawer-size="40%"
+                                @open="openEdit(row)">
+                <quota-form :f="editApi" />
+                <template #footer="f">
+                  <el-button @click="f.close">取消</el-button>
+                  <el-button type="primary" :loading="saving" @click="saveEdit(f)">保存</el-button>
+                </template>
+              </wd-drawer-button>
               <el-button size="small" text type="danger" @click="doDelete(row)">删除</el-button>
             </template>
           </el-table-column>
           <template #empty><el-empty description="暂无配额配置" :image-size="80" /></template>
+          <!-- ── 卡片清单模式（DataGrid 内建 modeSwitch 视图；扁平三层） ── -->
+          <template #card-item="{ row }">
+            <div class="lh-card">
+              <div class="lh-card__head">
+                <div class="lh-card__title">{{ row.caller }}</div>
+                <div class="lh-card__extra">
+                  <div class="lh-card__metric">{{ row.today_used ? Number(row.today_used).toLocaleString() : 0 }}</div>
+                  <div class="lh-card__metric-label">今日已用</div>
+                </div>
+              </div>
+              <div class="lh-card__fields">
+                <div class="lh-card__field is-wide"><div class="k">模型</div><div class="v md-mono">{{ row.model_code || '—' }}</div></div>
+                <div class="lh-card__field"><div class="k">日 token 上限</div><div class="v md-mono">{{ row.daily_token_limit > 0 ? Number(row.daily_token_limit).toLocaleString() : '不限' }}</div></div>
+                <div class="lh-card__field"><div class="k">更新时间</div><div class="v">{{ row.updated_at || '—' }}</div></div>
+              </div>
+              <div class="lh-card__ops">
+                <wd-drawer-button size="small" text type="primary" label="编辑" title="编辑配额" drawer-size="40%"
+                                  @open="openEdit(row)">
+                  <quota-form :f="editApi" />
+                  <template #footer="f">
+                    <el-button @click="f.close">取消</el-button>
+                    <el-button type="primary" :loading="saving" @click="saveEdit(f)">保存</el-button>
+                  </template>
+                </wd-drawer-button>
+                <wd-popconfirm-button title="确认删除该配额？" tip="删除后该 caller 在此模型上回到默认限额"
+                                      api="/admin/llm_quota_admin/delete" :api-param="{ id: row.id }"
+                                      :head-refresh-datagrid="false" type="danger" size="small"
+                                      @api-success="load">删除</wd-popconfirm-button>
+              </div>
+            </div>
+          </template>
         </wd-data-grid>
 
         <div class="md-pager">
@@ -73,37 +118,35 @@
         </div>
       </wd-panel>
 
-      <el-drawer v-model="editVisible" :title="editForm.id ? '编辑配额' : '新建配额'" size="40%">
-        <el-form :model="editForm" label-width="160px" v-loading="editLoading">
-          <el-form-item label="Caller">
-            <el-input v-model="editForm.caller" :disabled="!!editForm.id" placeholder="如 feature.package.xxx" />
-            <div style="color:#909399;font-size:12px;margin-top:4px">与模型 code 构成唯一键，创建后不可修改</div>
-          </el-form-item>
-          <el-form-item label="模型 code">
-            <el-select v-model="editForm.model_code" :disabled="!!editForm.id" placeholder="选择模型" style="width:100%">
-              <el-option v-for="m in modelOptions" :key="m" :label="m" :value="m" />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="日 token 上限">
-            <el-input-number v-model="editForm.daily_token_limit" :min="0" :step="10000" style="width:260px" />
-            <div style="color:#909399;font-size:12px;margin-top:4px">0 表示不限</div>
-          </el-form-item>
-          <el-form-item label="备注">
-            <el-input v-model="editForm.remark" type="textarea" :rows="2" />
-          </el-form-item>
-        </el-form>
-        <div style="text-align:right">
-          <el-button @click="editVisible = false">取消</el-button>
-          <el-button type="primary" :loading="saving" @click="saveEdit">保存</el-button>
-        </div>
-      </el-drawer>
     </div>
+  </script>
+
+  <script type="text/x-template" id="quota-form-tpl">
+    <el-form :model="editForm" label-width="160px" v-loading="editLoading">
+      <el-form-item label="Caller">
+        <el-input v-model="editForm.caller" :disabled="!!editForm.id" placeholder="如 feature.package.xxx" />
+        <div style="color:#909399;font-size:12px;margin-top:4px">与模型 code 构成唯一键，创建后不可修改</div>
+      </el-form-item>
+      <el-form-item label="模型 code">
+        <el-select v-model="editForm.model_code" :disabled="!!editForm.id" placeholder="选择模型" style="width:100%">
+          <el-option v-for="m in modelOptions" :key="m" :label="m" :value="m" />
+        </el-select>
+      </el-form-item>
+      <el-form-item label="日 token 上限">
+        <el-input-number v-model="editForm.daily_token_limit" :min="0" :step="10000" style="width:260px" />
+        <div style="color:#909399;font-size:12px;margin-top:4px">0 表示不限</div>
+      </el-form-item>
+      <el-form-item label="备注">
+        <el-input v-model="editForm.remark" type="textarea" :rows="2" />
+      </el-form-item>
+    </el-form>
   </script>
 
   <script src="/static/vendor/vue/vue.global.prod.js"></script>
   <script src="/static/vendor/element-plus/index.full.min.js"></script>
   <script src="/static/vendor/icons/index.iife.min.js"></script>
   <script src="/static/vendor/workdesktop-ai/index.umd.js"></script>
+  <script src="/static/linhub/auth-guard.js?v=2"></script>
   <script>
     const WD = window.WorkDesktop;
     const ElementPlus = window.ElementPlus;
@@ -122,7 +165,6 @@
         const page = ref(1);
         const size = ref(20);
         const filters = reactive({ caller: '', model_code: '' });
-        const editVisible = ref(false);
         const editForm = reactive({ id: 0, caller: '', model_code: '', daily_token_limit: 0, remark: '' });
         const modelOptions = ref([]);
 
@@ -166,7 +208,6 @@
 
         function openCreate() {
           Object.assign(editForm, { id: 0, caller: '', model_code: '', daily_token_limit: 0, remark: '' });
-          editVisible.value = true;
         }
 
         function openEdit(row) {
@@ -174,10 +215,9 @@
             id: row.id, caller: row.caller, model_code: row.model_code,
             daily_token_limit: row.daily_token_limit, remark: row.remark || ''
           });
-          editVisible.value = true;
         }
 
-        async function saveEdit() {
+        async function saveEdit(f) {
           if (!editForm.caller || !editForm.model_code) {
             ElementPlus.ElMessage.warning('caller / model_code 为必填');
             return;
@@ -187,7 +227,7 @@
             const res = await WD.request.post('/admin/llm_quota_admin/save', { ...editForm });
             ElementPlus.ElMessage[res.success ? 'success' : 'error'](
               res.message || (res.success ? '已保存' : '保存失败'));
-            if (res.success) { editVisible.value = false; load(); }
+            if (res.success) { if (f) f.close(); load(); }
           } finally {
             saving.value = false;
           }
@@ -208,14 +248,26 @@
         load();
         loadModelOptions();
 
+        // 编辑表单打包，供 quota-form 子组件（x-template）使用
+        const editApi = { editForm, editLoading, saving, modelOptions, saveEdit };
+
         return {
           loading, editLoading, saving, rows, total, page, size, filters,
-          editVisible, editForm, modelOptions,
+          editForm, modelOptions, editApi,
           load, search, reset, onSizeChange, openCreate, openEdit, saveEdit, doDelete,
           Plus, Search, RefreshLeft
         };
       }
     });
+
+    // 配额编辑表单子组件（工具栏/行内两个 wd-drawer-button 实例共用；bundle-prop 模式展开作用域）
+    const QuotaForm = {
+      name: 'QuotaForm',
+      props: { f: { type: Object, required: true } },
+      setup(props) { return { ...props.f }; },
+      template: '#quota-form-tpl'
+    };
+    app.component('quota-form', QuotaForm);
 
     for (const [name, comp] of Object.entries(window.ElementPlusIconsVue)) {
       app.component(name, comp);

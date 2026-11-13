@@ -21,7 +21,7 @@
 
 <script type="text/x-template" id="per-tpl">
   <div class="per-page">
-    <wd-panel :border="true">
+    <wd-panel description-align="right" :border="true">
       <wd-tips type="box" style="margin-bottom:10px">
         只读视图：展示各功能包登记的平台与功能权限点（编码遵循「产品:资源:操作」）。
       </wd-tips>
@@ -81,6 +81,7 @@
 <script src="/static/vendor/element-plus/index.full.min.js"></script>
 <script src="/static/vendor/icons/index.iife.min.js"></script>
 <script src="/static/vendor/workdesktop-ai/index.umd.js"></script>
+<script src="/static/linhub/auth-guard.js?v=2"></script>
 <script>
   const WD = window.WorkDesktop;
   const ElementPlus = window.ElementPlus;

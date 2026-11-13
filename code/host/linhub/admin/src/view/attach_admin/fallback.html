@@ -27,7 +27,7 @@
 
   <script type="text/x-template" id="fb-tpl">
     <div class="fb-page" v-loading="loading" element-loading-text="加载中...">
-      <wd-panel :border="true">
+      <wd-panel description-align="right" :border="true">
         <wd-tips type="box" style="margin-bottom:12px">
           附件托管服务（AT-9）默认图片设置：当请求的图片附件不存在、已过期或为私有且无权限时，下载入口会返回此兜底图。同时可在此调整托管默认参数（默认公开性、默认有效期、缺图兜底开关）。
         </wd-tips>
@@ -94,6 +94,7 @@
   <script src="/static/vendor/element-plus/index.full.min.js"></script>
   <script src="/static/vendor/icons/index.iife.min.js"></script>
   <script src="/static/vendor/workdesktop-ai/index.umd.js"></script>
+  <script src="/static/linhub/auth-guard.js?v=2"></script>
   <script>
     const WD = window.WorkDesktop;
     const ElementPlus = window.ElementPlus;

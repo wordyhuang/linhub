@@ -20,6 +20,8 @@ final class PackageScaffold
      * @param string $rootDir  生成根目录（在其下创建 lgg-pkg-<short>/）
      * @param string $version  初始版本，默认 0.1.0
      * @param string $type     包类型：app|lib，默认 app
+     * @param string $access   包门禁类型：admin（需登录中后台）|public（免登录公开接口），默认 admin
+     * @param string $description 包说明文字；为空时使用模板默认文案
      * @return string 生成的包目录绝对路径
      * @throws \RuntimeException 短名非法或目录已存在
      */
@@ -29,12 +31,17 @@ final class PackageScaffold
         string $rootDir,
         string $version = '0.1.0',
         string $type = 'app',
+        string $access = 'admin',
+        string $description = '',
     ): string {
         if ($short === '' || !preg_match('/^[a-z0-9][a-z0-9-]*$/', $short)) {
             throw new \RuntimeException("非法包短名：{$short}（需小写字母/数字/`-`）");
         }
         if ($version === '' || !preg_match('/^\d+\.\d+\.\d+$/', $version)) {
             throw new \RuntimeException("非法版本：{$version}（需语义化 主.次.修订）");
+        }
+        if ($access !== 'admin' && $access !== 'public') {
+            $access = 'admin';
         }
 
         $dir = rtrim($rootDir, '/\\') . "/lgg-pkg-{$short}";
@@ -62,7 +69,7 @@ final class PackageScaffold
             mkdir($d, 0775, true);
         }
 
-        self::write("$dir/manifest.php", self::manifest($short, $title, $version, $type));
+        self::write("$dir/manifest.php", self::manifest($short, $title, $version, $type, $access, $description));
         self::write("$dir/composer.json", self::composer($namespace));
         self::write("$dir/src/Package.php", self::package($namespace));
         self::write("$dir/src/Service/DemoService.php", self::demoService($namespace));
@@ -90,8 +97,22 @@ final class PackageScaffold
         return implode('', $parts);
     }
 
-    private static function manifest(string $short, string $title, string $version, string $type): string
-    {
+    private static function manifest(
+        string $short,
+        string $title,
+        string $version,
+        string $type,
+        string $access,
+        string $description,
+    ): string {
+        // 说明文字写入 PHP 单引号字符串，需转义反斜杠与单引号
+        $desc = trim($description) !== '' ? trim($description) : "{$title}（平台脚手架生成）";
+        $desc = str_replace(['\\', "'"], ['\\\\', "\\'"], $desc);
+        // public 包门禁必须声明 access_routes（M010），签名方式默认 token
+        $accessRoutes = $access === 'public'
+            ? "    'access_routes' => [\n        'sign'   => 'token',\n        'routes' => ['GET {$short}/index'],\n    ],\n"
+            : '';
+
         return <<<PHP
 <?php
 // 功能包声明文件 - {$title}
@@ -101,9 +122,10 @@ return [
     'title'       => '{$title}',
     'version'     => '{$version}',
     'type'        => '{$type}',
-    'description' => '{$title}（平台脚手架生成）',
-    // 'access'   => 'admin', // 默认中后台；如需免登录公开请填 public 并配置 access_routes
-
+    'description' => '{$desc}',
+    // 包门禁：admin 走登录中后台路由；public 免登录，须用 access_routes 声明公开端点
+    'access'      => '{$access}',
+{$accessRoutes}
     'dependencies'=> [],
     'platform'    => [
         'host' => '>=0.1.0',

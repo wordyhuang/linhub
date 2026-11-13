@@ -8,6 +8,7 @@
   <link rel="icon" type="image/svg+xml" href="/brand/favicon.svg">
   <link rel="stylesheet" href="/static/vendor/element-plus/index.css">
   <link rel="stylesheet" href="/static/vendor/workdesktop-ai/style.css">
+  <link rel="stylesheet" href="/static/linhub/cards.css">
   <style>
     html, body, #app { height: 100%; margin: 0; }
     body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif; }
@@ -28,7 +29,7 @@
 
   <script type="text/x-template" id="md-tpl">
     <div class="md-page">
-      <wd-panel :border="true">
+      <wd-panel description-align="right" :border="true">
         <wd-tips type="box" style="margin-bottom:12px">
           LLM 网关调用日志（T10）：所有走 llmgateway 的调用都会落库 <span class="md-mono">lg_mgt_llm_call_log</span>，列表默认不返回 prompt_text / completion_text 大字段，点击行查看详情。
         </wd-tips>
@@ -106,6 +107,34 @@
             </template>
           </el-table-column>
           <template #empty><el-empty description="暂无调用日志" :image-size="80" /></template>
+          <!-- ── 卡片清单模式（DataGrid 内建 modeSwitch 视图；扁平三层） ── -->
+          <template #card-item="{ row }">
+            <div class="lh-card">
+              <div class="lh-card__head">
+                <div class="lh-card__title">{{ row.model_code }}</div>
+                <div class="lh-card__tags">
+                  <el-tag size="small" :type="row.status === 'success' ? 'success' : 'danger'">{{ row.status }}</el-tag>
+                </div>
+                <div class="lh-card__extra">
+                  <div class="lh-card__stamp">{{ row.created_at }}</div>
+                </div>
+              </div>
+              <div class="lh-card__fields">
+                <div class="lh-card__field"><div class="k">调用方</div><div class="v md-mono">{{ row.caller_effective || '—' }}</div></div>
+                <div class="lh-card__field"><div class="k">类型</div><div class="v">{{ row.call_type }}</div></div>
+                <div class="lh-card__field"><div class="k">耗时</div><div class="v md-mono">{{ row.cost_ms ? row.cost_ms + 'ms' : '—' }}</div></div>
+                <div class="lh-card__field"><div class="k">tokens</div><div class="v md-mono">{{ row.total_tokens || '—' }}</div></div>
+                <div class="lh-card__field is-wide">
+                  <div class="k">错误</div>
+                  <div v-if="row.error_code" class="v is-danger md-mono">{{ row.error_code }}: {{ row.error_message }}</div>
+                  <div v-else class="v is-muted">—</div>
+                </div>
+              </div>
+              <div class="lh-card__ops">
+                <el-button size="small" text type="primary" @click="openDetail(row)">详情</el-button>
+              </div>
+            </div>
+          </template>
         </wd-data-grid>
 
         <div class="md-pager">
@@ -149,6 +178,7 @@
   <script src="/static/vendor/element-plus/index.full.min.js"></script>
   <script src="/static/vendor/icons/index.iife.min.js"></script>
   <script src="/static/vendor/workdesktop-ai/index.umd.js"></script>
+  <script src="/static/linhub/auth-guard.js?v=2"></script>
   <script>
     const WD = window.WorkDesktop;
     const ElementPlus = window.ElementPlus;

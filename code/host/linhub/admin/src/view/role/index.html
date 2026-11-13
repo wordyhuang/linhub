@@ -8,7 +8,9 @@
   <link rel="icon" type="image/svg+xml" href="/brand/favicon.svg">
   <link rel="stylesheet" href="/static/vendor/element-plus/index.css">
   <link rel="stylesheet" href="/static/vendor/workdesktop-ai/style.css">
+  <link rel="stylesheet" href="/static/linhub/cards.css">
   <style>
+
     html,
     body,
     #app {
@@ -16,22 +18,247 @@
       margin: 0;
     }
 
-    .role-page {
-      height: 100%;
-      padding: 16px 20px 24px;
-      box-sizing: border-box;
-    }
-
     body {
       font-family: system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
     }
 
-    .role-toolbar {
+    .role-page {
+      height: 100%;
+      padding: 16px 20px 24px;
+      box-sizing: border-box;
       display: flex;
-      align-items: flex-start;
-      justify-content: space-between;
-      margin-bottom: 14px;
-      gap: 12px;
+      flex-direction: column;
+    }
+
+    .role-page > .wd-tips {
+      flex: none;
+    }
+
+    /* 面板撑满剩余高度，body 去内边距后交给左右分栏 */
+    .role-panel {
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .role-panel.wd-panel {
+      margin-bottom: 0;
+    }
+
+    .role-panel .wd-panel__content {
+      flex: 1;
+      min-height: 0;
+    }
+
+    .role-panel .wd-panel__content-inner {
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }
+
+    .role-panel .wd-panel__body {
+      flex: 1;
+      min-height: 0;
+      padding: 0;
+      display: flex;
+    }
+
+    .role-split {
+      display: flex;
+      flex: 1;
+      min-width: 0;
+      min-height: 0;
+    }
+
+    /* ── 左侧：角色列表 ── */
+    .role-nav {
+      width: 320px;
+      flex: none;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      border-right: 1px solid var(--wd-border-color-light, #e4e7ed);
+      background: var(--wd-bg-color-page, #fafbfc);
+    }
+
+    .role-nav__head {
+      flex: none;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 12px;
+      border-bottom: 1px solid var(--wd-border-color-light, #e4e7ed);
+    }
+
+    .role-nav__list {
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+      padding: 8px;
+    }
+
+    .role-nav__item {
+      padding: 10px 12px;
+      margin-bottom: 4px;
+      border: 1px solid transparent;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: background-color .15s ease, border-color .15s ease;
+    }
+
+    .role-nav__item:hover {
+      background: #fff;
+      border-color: var(--wd-border-color-light, #e4e7ed);
+    }
+
+    .role-nav__item.is-active {
+      background: var(--el-color-primary-light-9, #ecf5ff);
+      border-color: var(--el-color-primary-light-7, #a0cfff);
+    }
+
+    .role-nav__item.is-active .role-nav__name {
+      color: var(--el-color-primary, #409eff);
+      font-weight: 600;
+    }
+
+    .role-nav__name {
+      font-size: 14px;
+      color: #1f2937;
+      word-break: break-all;
+    }
+
+    /* 名称行内英文键：紧跟中文名，弱化展示 */
+    .role-nav__key {
+      margin-left: 6px;
+      font-size: 12px;
+      font-family: Consolas, "Courier New", monospace;
+      color: var(--wd-text-color-secondary, #6b7280);
+      white-space: nowrap;
+    }
+
+    .role-nav__meta {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+      margin-top: 6px;
+      font-size: 12px;
+      color: var(--wd-text-color-secondary, #6b7280);
+    }
+
+    .role-nav__counts {
+      margin-left: auto;
+      white-space: nowrap;
+    }
+
+    .role-nav__empty {
+      padding: 32px 0;
+    }
+
+    /* ── 右侧：角色详情 ── */
+    .role-detail {
+      flex: 1;
+      min-width: 0;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      background: #fff;
+    }
+
+    .role-detail__head {
+      flex: none;
+      padding: 14px 16px 10px;
+      border-bottom: 1px solid var(--wd-border-color-light, #e4e7ed);
+    }
+
+    .role-detail__name {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .role-name {
+      font-size: 17px;
+      font-weight: 600;
+      color: #1f2937;
+      word-break: break-all;
+    }
+
+    .role-name.is-editable {
+      cursor: pointer;
+    }
+
+    .role-name.is-editable:hover {
+      color: var(--el-color-primary, #409eff);
+    }
+
+    .role-detail__spacer {
+      flex: 1;
+    }
+
+    .role-detail__sub {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+      margin-top: 8px;
+      font-size: 13px;
+      color: var(--wd-text-color-secondary, #6b7280);
+    }
+
+    .role-detail__body {
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      padding: 8px 16px 16px;
+    }
+
+    .role-detail__body .el-tabs {
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .role-detail__body .el-tabs__content {
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .role-detail__body .el-tab-pane {
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* 成员页签：DataGrid 以页签容器为高度参照，并在四周留出间距 */
+    .role-detail__body.is-members .el-tab-pane {
+      padding: 0 6px 14px;
+      box-sizing: border-box;
+    }
+
+    .role-detail__empty {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    /* ── 成员 ── */
+    .member-toolbar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 13px;
+      color: var(--wd-text-color-secondary, #6b7280);
     }
   </style>
 </head>
@@ -41,98 +268,94 @@
 
   <script type="text/x-template" id="role-tpl">
   <div class="role-page">
-    <wd-panel :border="true">
-      <wd-tips type="box" style="margin-bottom:12px">
-        角色仅承载类型标签语义（J2），【不】绑定权限（J3）。超级管理员由平台占位、只读。
-      </wd-tips>
+    <wd-tips type="box" style="margin-bottom:12px;flex:none">
+      系统仅提供 5 个预设角色（工作者 / 审核员 / 功能管理员 / 系统管理员 / 超级管理员），角色资料只读、不可新增、改名或删除。左侧选择角色，右侧勾选调整其成员；所有角色的成员均可变更。
+    </wd-tips>
 
-      <wd-data-grid ref="grid" api="/admin/role/rows" api-method="get" :active="true" filter="role" :with-index="false">
-        <template #toolbar>
-          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-            <el-input v-model="keyword" placeholder="按名称 / 类型搜索" size="small" clearable style="width:200px" @keyup.enter="doSearch" @clear="doSearch" />
-            <el-button size="small" type="primary" @click="doSearch">搜索</el-button>
-          <el-button-group>
-          <wd-drawer-button label="新增角色" title="新增角色" drawer-size="460px" size="small" type="primary" filter="role"
-                            @open="openCreate">
-            <template #default>
-              <el-form label-width="90px">
-                <el-form-item label="角色名称" required>
-                  <el-input v-model="form.name" placeholder="输入角色名称" maxlength="40" />
-                </el-form-item>
-                <el-form-item label="角色类型" required>
-                  <wd-radio-list v-model="form.type" :data-source="createOptions" text-prop="name" value-prop="type" button-style />
-                </el-form-item>
-              </el-form>
-            </template>
-            <template #footer="f">
-              <el-button @click="f.close">取消</el-button>
-              <wd-api-button label="保存" type="primary" api="/admin/role/save"
-                             :api-param="{ mode: 'create', type: form.type, name: form.name }"
-                             head-refresh-datagrid="role" @api-success="f.close">保存</wd-api-button>
-            </template>
-          </wd-drawer-button>
-          </el-button-group>
+    <wd-panel class="role-panel" title="角色管理" description="点击左侧角色即可切换，在成员页签勾选后自动保存。" :border="true" shadow="none">
+      <div class="role-split">
+        <!-- 左侧：角色列表 -->
+        <aside class="role-nav">
+          <div class="role-nav__head">
+            <el-input v-model="keyword" placeholder="按名称 / 备注搜索" size="small" clearable style="flex:1">
+              <template #prefix><el-icon><Search /></el-icon></template>
+            </el-input>
           </div>
-        </template>
-      <el-table-column label="名称" min-width="180">
-        <template #default="{ row }">
-          {{ row.name }}
-          <el-tag v-if="row.readonly" size="small" type="warning" effect="light" style="margin-left:6px">平台占位</el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column label="类型" width="140">
-        <template #default="{ row }">
-          <el-tag size="small" effect="plain">{{ row.typeName }}</el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column label="用户数" width="140">
-        <template #default="{ row }">
-          <el-tag size="small" :type="row.userCount > 0 ? 'success' : 'info'" effect="plain">{{ row.userCount }}</el-tag>
-          <wd-drawer-button label="成员" title="角色成员" drawer-size="560px" size="small" type="primary"
-                            link @open="openMembers(row)">
-            <template #default>
-              <p style="margin:0 0 10px;color:var(--wd-text-color-secondary,#6b7280);font-size:13px">
-                角色「{{ memberRow && memberRow.name }}」当前成员 <b>{{ members.length }}</b> 名。
-              </p>
-              <el-input v-model="memberKw" placeholder="按姓名 / refId 过滤" size="small" clearable style="width:220px;margin-bottom:10px" @keyup.enter="loadMembers" @clear="loadMembers" />
-              <el-table :data="members" size="small" border stripe style="width:100%" max-height="420">
-                <el-table-column prop="name" label="姓名" min-width="160" />
-                <el-table-column prop="refId" label="UAIS refId" min-width="200" />
-                <template #empty><el-empty :image-size="70" description="暂无成员" /></template>
-              </el-table>
-            </template>
-            <template #footer="{ close }">
-              <el-button @click="close">关闭</el-button>
-            </template>
-          </wd-drawer-button>
-        </template>
-      </el-table-column>
-      <el-table-column label="操作" width="220" fixed="right">
-        <template #default="{ row }">
-          <el-button-group size="small">
-          <wd-drawer-button v-if="!row.readonly" label="改名" title="改名角色" drawer-size="460px" size="small" type="primary" filter="role" @open="openEdit(row)">
-            <template #default>
-              <el-form label-width="90px">
-                <el-form-item label="角色名称" required>
-                  <el-input v-model="form.name" placeholder="输入角色名称" maxlength="40" />
-                </el-form-item>
-              </el-form>
-            </template>
-            <template #footer="f">
-              <el-button @click="f.close">取消</el-button>
-              <wd-api-button label="保存" type="primary" api="/admin/role/save"
-                             :api-param="{ mode: 'update', id: form.id, name: form.name }"
-                             head-refresh-datagrid="role" @api-success="f.close">保存</wd-api-button>
-            </template>
-          </wd-drawer-button>
-          <span v-if="row.readonly"><el-button link type="info" size="small" disabled>只读</el-button></span>
-          <wd-popconfirm-button v-if="!row.readonly" title="确认删除角色？" tip="角色仅类型标签（J3），不影响已授权限；关联该角色的用户将解除此角色"
-                                api="/admin/role/delete" :api-param="{ id: row.id }" type="danger" size="small" head-refresh-datagrid>删除</wd-popconfirm-button>
-          </el-button-group>
-        </template>
-      </el-table-column>
-      <template #empty><el-empty :image-size="80" description="暂无角色" /></template>
-    </wd-data-grid>
+
+          <div class="role-nav__list" v-loading="listLoading">
+            <div v-for="row in filteredRows" :key="row.id"
+                 class="role-nav__item"
+                 :class="{ 'is-active': active && active.id === row.id }"
+                 @click="selectRole(row)">
+              <span class="role-nav__name">{{ row.name }}<span class="role-nav__key">{{ row.type }}</span></span>
+              <div class="role-nav__meta">
+                <el-tag v-if="row.readonly" size="small" type="warning" effect="light">平台占位</el-tag>
+                <span class="role-nav__counts">{{ row.userCount }} 人</span>
+              </div>
+            </div>
+            <div v-if="!listLoading && !filteredRows.length" class="role-nav__empty">
+              <el-empty :image-size="70" :description="rows.length ? '无匹配的角色' : '暂无角色'" />
+            </div>
+          </div>
+        </aside>
+
+        <!-- 右侧：角色详情 / 成员 -->
+        <section class="role-detail">
+          <template v-if="active">
+            <div class="role-detail__head">
+              <div class="role-detail__name">
+                <span class="role-name">{{ active.name }}</span>
+              </div>
+
+              <div class="role-detail__sub">
+                <el-tag v-if="active.readonly" size="small" type="warning" effect="light">平台占位</el-tag>
+                <span>· 成员 {{ active.userCount }} 人</span>
+                <span v-if="active.remark">· 备注：{{ active.remark }}</span>
+              </div>
+            </div>
+
+            <div class="role-detail__body is-members">
+              <el-tabs v-model="activeTab">
+                <el-tab-pane :label="'成员（' + memberCount + '）'" name="members">
+                  <!-- 所有角色成员均可调整：勾选即加入该角色，取消勾选即移出 -->
+                  <wd-data-grid ref="memberGrid"
+                                :active="false"
+                                height="fix"
+                                api="/admin/role/users"
+                                api-method="get"
+                                :api-param="{ role_id: active.id }"
+                                row-key="id"
+                                :with-index="false"
+                                :border="true"
+                                with-selection
+                                selection-key="id"
+                                :model-value="memberSelected"
+                                @update:model-value="onMemberSelect"
+                                @loaded="onMemberGridLoaded">
+                    <template #toolbar="{ list }">
+                      <div class="member-toolbar">
+                        <el-input v-model="memberFilter.keyword" placeholder="按姓名 / 账户搜索" size="small" clearable
+                                  style="width:220px" @input="queueMemberRefresh" @clear="refreshMembers">
+                          <template #prefix><el-icon><Search /></el-icon></template>
+                        </el-input>
+                        <el-checkbox v-model="memberFilter.onlySelected" size="small" @change="refreshMembers">仅看已选</el-checkbox>
+                        <span>已加入 <b>{{ memberSelected.length }}</b> 人 / 共 {{ memberTotal }} 人，勾选后自动保存，取消勾选即移出该角色。</span>
+                      </div>
+                    </template>
+                    <el-table-column prop="name" label="姓名" min-width="160" />
+                    <el-table-column prop="refId" label="用户账户" min-width="200" />
+                    <template #empty><el-empty :image-size="80" description="暂无用户" /></template>
+                  </wd-data-grid>
+                </el-tab-pane>
+              </el-tabs>
+            </div>
+          </template>
+
+          <div v-else class="role-detail__empty">
+            <el-empty :image-size="100" description="请从左侧选择角色" />
+          </div>
+        </section>
+      </div>
     </wd-panel>
   </div>
 </script>
@@ -141,78 +364,214 @@
   <script src="/static/vendor/element-plus/index.full.min.js"></script>
   <script src="/static/vendor/icons/index.iife.min.js"></script>
   <script src="/static/vendor/workdesktop-ai/index.umd.js"></script>
+  <script src="/static/linhub/auth-guard.js?v=2"></script>
   <script>
     const WD = window.WorkDesktop;
     const ElementPlus = window.ElementPlus;
     const { WorkDesktop } = WD;
-    const { ref, reactive, watch } = Vue;
+    const { ref, reactive, computed, onMounted, nextTick } = Vue;
+    const { ElMessage } = ElementPlus;
 
     const app = Vue.createApp({
       template: '#role-tpl',
       setup() {
-        const grid = ref(null);
         const keyword = ref('');
-        const createOptions = ref([]);
-        const form = reactive({ id: '', type: '', name: '' });
-        const memberRow = ref(null);
-        const members = ref([]);
-        const memberKw = ref('');
+        const rows = ref([]);
+        const listLoading = ref(false);
+        const active = ref(null);
+        const activeTab = ref('members');
+        const memberGrid = ref(null);
+        const memberSelected = ref([]);
+        const memberSaved = ref([]);
+        const memberTotal = ref(0);
+        // 成员表格筛选：姓名/账户关键词 + 仅看已选（服务端过滤）
+        const memberFilter = reactive({ keyword: '', onlySelected: false });
+        let memberFilterTimer = null;
+        // 成员勾选是否由本人操作触发（表格首次加载 / 切角色回显不算）
+        let membersReady = false;
+        // 自动保存串行队列：连点勾选时合并为最后一次结果，避免并发覆盖
+        let savingMembers = false;
+        let pendingMemberSave = null;
 
-        // 关键词搜索：携带 keyword 参数重新拉取列表（data-grid 重置到第一页）
-        function doSearch() {
-          grid.value && grid.value.search({ keyword: keyword.value.trim() });
+        // 左侧列表按关键词本地过滤（名称 / 备注 / 英文键，大小写不敏感）
+        const filteredRows = computed(() => {
+          const kw = keyword.value.trim().toLowerCase();
+          if (!kw) return rows.value;
+          return rows.value.filter(r =>
+            String(r.name || '').toLowerCase().includes(kw) ||
+            String(r.remark || '').toLowerCase().includes(kw) ||
+            String(r.type || '').toLowerCase().includes(kw)
+          );
+        });
+
+        // 页签标题上的成员数：取当前勾选
+        const memberCount = computed(() => (active.value ? memberSelected.value.length : 0));
+
+        // 角色列表；preferredId 指定刷新后要选中的角色
+        async function loadRoles(preferredId) {
+          listLoading.value = true;
+          try {
+            const res = await WD.request.get('/admin/role/rows');
+            if (!res.success) { ElMessage.error(res.message || '角色加载失败'); return; }
+            rows.value = res.data.list || [];
+            const wantId = preferredId || (active.value ? active.value.id : '');
+            const fresh = rows.value.find(r => r.id === wantId);
+            if (fresh) {
+              active.value = fresh;
+              memberSelected.value = [];
+              memberSaved.value = [];
+              membersReady = false;
+              resetMemberFilter();
+              await loadMembers();
+            } else if (rows.value.length) {
+              await selectRole(rows.value[0]);
+            } else {
+              active.value = null;
+            }
+          } catch (e) {
+            ElMessage.error('角色加载失败');
+          } finally {
+            listLoading.value = false;
+          }
         }
 
-        // 打开成员抽屉：wd-drawer-button 触发 open 时记录当前角色并拉取其用户
-        function openMembers(row) {
-          memberRow.value = row;
-          memberKw.value = '';
-          loadMembers();
+        // 选中角色：清空上一次的勾选，并刷新成员
+        async function selectRole(row) {
+          if (active.value && active.value.id === row.id) return;
+          active.value = row;
+          memberSelected.value = [];
+          memberSaved.value = [];
+          membersReady = false;
+          resetMemberFilter();
+          memberTotal.value = 0;
+          await loadMembers();
         }
-        function qs(obj) {
-          const p = new URLSearchParams();
-          for (const [k, v] of Object.entries(obj)) { if (v !== '' && v != null) p.append(k, v); }
-          const s = p.toString();
-          return s ? '?' + s : '';
+
+        // 搜索输入防抖触发刷新
+        function queueMemberRefresh() {
+          clearTimeout(memberFilterTimer);
+          memberFilterTimer = setTimeout(refreshMembers, 300);
         }
-        function loadMembers() {
-          if (!memberRow.value) return;
-          WD.request.get('/admin/role/members' + qs({
-            role_id: memberRow.value.id,
-            keyword: memberKw.value.trim()
-          })).then(res => {
-            if (!res.success || !res.data) return;
-            members.value = res.data.list || [];
+
+        // 按当前筛选条件刷新成员表格（回第一页）
+        function refreshMembers() {
+          if (!active.value || !memberGrid.value || !memberGrid.value.requestApi) return;
+          memberGrid.value.requestApi({
+            apiParam: {
+              role_id: active.value.id,
+              keyword: memberFilter.keyword.trim(),
+              only_selected: memberFilter.onlySelected ? 1 : 0
+            },
+            currentPage: 1
           });
         }
 
-        // 抽屉内关键词输入实时过滤（轻量防抖）
-        let kwTimer = null;
-        watch(memberKw, () => {
-          clearTimeout(kwTimer);
-          kwTimer = setTimeout(loadMembers, 250);
-        });
+        // 切换角色时重置成员筛选
+        function resetMemberFilter() {
+          clearTimeout(memberFilterTimer);
+          memberFilter.keyword = '';
+          memberFilter.onlySelected = false;
+        }
 
-        function openCreate() {
-          form.id = '';
-          form.name = '';
-          if (createOptions.value.length === 0) {
-            WD.request.get('/admin/role/options').then(res => {
-              if (!res.success) return;
-              createOptions.value = res.data.createOptions || [];
-              form.type = createOptions.value[0]?.type || '';
-            });
-          } else {
-            form.type = createOptions.value[0]?.type || '';
+        async function loadMembers() {
+          if (!active.value) return;
+          await nextTick();
+          await loadSelectedMembers();
+          const grid = memberGrid.value;
+          if (grid && grid.requestApi) {
+            grid.requestApi({ apiParam: { role_id: active.value.id } });
           }
         }
-        function openEdit(row) {
-          form.id = row.id;
-          form.type = row.type;
-          form.name = row.name;
+
+        // 已关联成员回显：表格接口同时返回全量 selected（不受当前页影响）
+        async function loadSelectedMembers() {
+          if (!active.value) return;
+          const roleId = active.value.id;
+          try {
+            const res = await WD.request.get('/admin/role/users', {
+              param: { role_id: roleId },
+              currentPage: 1,
+              pageSize: 1
+            });
+            if (!active.value || active.value.id !== roleId) return;
+            if (res.success && res.data && Array.isArray(res.data.selected)) {
+              const selected = res.data.selected.map(String);
+              memberSelected.value = selected;
+              memberSaved.value = selected.slice();
+            }
+          } catch (e) {
+            // 勾选回显失败不阻塞表格加载
+          }
         }
 
-        return { grid, keyword, doSearch, memberRow, members, memberKw, openMembers, loadMembers, form, createOptions, openCreate, openEdit };
+        // data-grid 启用了 reserve-selection，勾选结果跨页保留，直接整体回写
+        function onMemberSelect(list) {
+          const next = (list || []).map(String);
+          memberSelected.value = next;
+          // 非用户操作（首次加载、切角色回显）不触发保存
+          if (!membersReady || !active.value) return;
+          if (sameMembers(next, memberSaved.value)) return;
+          pendingMemberSave = { roleId: active.value.id, users: next };
+          flushMemberSave();
+        }
+
+        function sameMembers(a, b) {
+          if (a.length !== b.length) return false;
+          const setB = new Set(b);
+          return a.every(id => setB.has(id));
+        }
+
+        // 勾选即保存：串行执行，期间新的勾选只保留最后一次
+        async function flushMemberSave() {
+          if (savingMembers) return;
+          savingMembers = true;
+          try {
+            while (pendingMemberSave) {
+              const task = pendingMemberSave;
+              pendingMemberSave = null;
+              const res = await WD.request.post('/admin/role/usersSave', {
+                id: task.roleId,
+                users: task.users
+              });
+              if (!res.success) {
+                ElMessage.error(res.message || '保存失败');
+                continue;
+              }
+              if (!active.value || active.value.id !== task.roleId) continue;
+              memberSaved.value = task.users.slice();
+              syncMemberCount(task.users.length);
+              ElMessage.success(res.message || '成员已更新');
+            }
+          } catch (e) {
+            ElMessage.error('保存失败');
+          } finally {
+            savingMembers = false;
+          }
+        }
+
+        function syncMemberCount(count) {
+          if (!active.value) return;
+          active.value.userCount = count;
+          const row = rows.value.find(r => r.id === active.value.id);
+          if (row) row.userCount = count;
+        }
+
+        function onMemberGridLoaded(res) {
+          const payload = (res && res.data) ? res.data : res;
+          memberTotal.value = Number((payload && payload.total) || 0);
+          membersReady = true;
+        }
+
+        onMounted(() => {
+          loadRoles();
+        });
+
+        return {
+          keyword, rows, filteredRows, listLoading, active, activeTab,
+          memberGrid, memberSelected, memberTotal, memberCount,
+          memberFilter, queueMemberRefresh, refreshMembers,
+          selectRole, onMemberSelect, onMemberGridLoaded
+        };
       }
     });
 

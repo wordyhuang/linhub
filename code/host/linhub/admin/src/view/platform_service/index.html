@@ -12,9 +12,41 @@
     html, body, #app { height: 100%; margin: 0; }
     body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif; }
     .ps-page { min-height: 100%; padding: 16px 20px 24px; box-sizing: border-box; }
-    .ps-panels { display: flex; flex-direction: column; gap: 16px; }
-    .ps-panel-title { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; }
-    .ps-ver { font-weight: normal; }
+    /* 详情卡一行多列（1440px 宽两列，更宽屏更多列）；tips 与统计卡横跨全行 */
+    .ps-panels {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(560px, 1fr));
+      gap: 14px;
+    }
+
+    .ps-panels > .wd-tips,
+    .ps-panels > .ps-stats { grid-column: 1 / -1; }
+
+    /* —— 公共服务概览统计卡：容器统一 wd-panel mode="card"，不再自绘 div 卡片 —— */
+    .ps-stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 14px;
+    }
+
+    .ps-stat-num {
+      font-size: 22px;
+      font-weight: 600;
+      color: #0066CC;
+      line-height: 1.2;
+      font-variant-numeric: tabular-nums;
+      word-break: break-all;
+    }
+
+    .ps-stat-sub {
+      margin-top: 4px;
+      font-size: 12px;
+      color: #909399;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
     .ps-body { padding: 2px 0 0; }
     .ps-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
     .ps-metric {
@@ -53,7 +85,7 @@
   <script type="text/x-template" id="ps-tpl">
     <div class="ps-page" v-loading="loading" element-loading-text="加载中...">
       <div class="ps-panels">
-        <!-- 各服务管理入口统一通过抽屉(iframe)打开 -->
+        <!-- 各服务管理入口统一通过抽屉(iframe)打开；关闭抽屉后自动刷新统计 -->
         <wd-drawer
           v-model="drawerOpen"
           :title="drawerTitle"
@@ -67,13 +99,31 @@
           只读汇总四个平台公共服务的运行与用量概况，一个服务一个统计面板。本页不承载写操作；各服务管理请通过面板底部快捷入口进入。
         </wd-tips>
 
+        <!-- 公共服务概览：统计卡统一 wd-panel mode="card" -->
+        <div class="ps-stats">
+          <wd-panel title="公共服务" :border="true" mode="card">
+            <div class="ps-stat-num">4 个</div>
+            <div class="ps-stat-sub">附件 · 字典 · 登录态 · 站内消息</div>
+          </wd-panel>
+          <wd-panel title="附件托管" :border="true" mode="card">
+            <div class="ps-stat-num">{{ fmt(s.attachment.total) }}</div>
+            <div class="ps-stat-sub">有效 {{ fmt(s.attachment.active) }} · 占用 {{ bytes(s.attachment.bytes) }}</div>
+          </wd-panel>
+          <wd-panel title="数据字典" :border="true" mode="card">
+            <div class="ps-stat-num">{{ fmt(s.dictionary.total) }}</div>
+            <div class="ps-stat-sub">{{ s.dictionary.namespaces.length }} 个命名空间</div>
+          </wd-panel>
+          <wd-panel title="站内消息" :border="true" mode="card">
+            <div class="ps-stat-num">{{ fmt(s.inbox.message_total) }}</div>
+            <div class="ps-stat-sub">投递 {{ fmt(s.inbox.recipient_total) }} 条<span v-if="Number(s.inbox.unread_total) > 0" style="color:#f56c6c"> · 未读 {{ fmt(s.inbox.unread_total) }}</span></div>
+          </wd-panel>
+        </div>
+
         <!-- 附件托管 -->
-        <wd-panel :border="true">
-          <template #title>
-            <span class="ps-panel-title"><el-icon><Paperclip /></el-icon>附件托管<el-tag size="small" effect="plain" class="ps-ver">v{{ s.versions.attachment }}</el-tag></span>
-          </template>
+        <wd-panel title="附件托管" icon="Paperclip" description="附件存储占用与近 7 天趋势" description-align="right" :border="true" mode="card">
           <template #extra>
-            <el-tag size="small" effect="plain">{{ s.attachment.driver || 'local' }}</el-tag>
+            <el-tag size="small" effect="plain">v{{ s.versions.attachment }}</el-tag>
+            <el-tag size="small" effect="plain" style="margin-left:6px">{{ s.attachment.driver || 'local' }}</el-tag>
           </template>
           <div class="ps-body">
             <div class="ps-metrics">
@@ -103,9 +153,9 @@
         </wd-panel>
 
         <!-- 数据字典 -->
-        <wd-panel :border="true">
-          <template #title>
-            <span class="ps-panel-title"><el-icon><Collection /></el-icon>数据字典<el-tag size="small" effect="plain" class="ps-ver">v{{ s.versions.dictionary }}</el-tag></span>
+        <wd-panel title="数据字典" icon="Collection" description="字典条目与命名空间分布" description-align="right" :border="true" mode="card">
+          <template #extra>
+            <el-tag size="small" effect="plain">v{{ s.versions.dictionary }}</el-tag>
           </template>
           <div class="ps-body">
             <div class="ps-metrics">
@@ -134,9 +184,9 @@
         </wd-panel>
 
         <!-- 登录状态 -->
-        <wd-panel :border="true">
-          <template #title>
-            <span class="ps-panel-title"><el-icon><UserFilled /></el-icon>登录状态<el-tag size="small" effect="plain" class="ps-ver">v{{ s.versions.loginState }}</el-tag></span>
+        <wd-panel title="登录状态" icon="UserFilled" description="当前访问身份快照" description-align="right" :border="true" mode="card">
+          <template #extra>
+            <el-tag size="small" effect="plain">v{{ s.versions.loginState }}</el-tag>
           </template>
           <div class="ps-body">
             <div class="ps-metrics">
@@ -170,9 +220,9 @@
         </wd-panel>
 
         <!-- 站内消息 -->
-        <wd-panel :border="true">
-          <template #title>
-            <span class="ps-panel-title"><el-icon><Bell /></el-icon>站内消息<el-tag size="small" effect="plain" class="ps-ver">v{{ s.versions.inbox }}</el-tag></span>
+        <wd-panel title="站内消息" icon="Bell" description="消息量与近 7 天投递趋势" description-align="right" :border="true" mode="card">
+          <template #extra>
+            <el-tag size="small" effect="plain">v{{ s.versions.inbox }}</el-tag>
           </template>
           <div class="ps-body">
             <div class="ps-metrics">
@@ -205,12 +255,13 @@
   <script src="/static/vendor/element-plus/index.full.min.js"></script>
   <script src="/static/vendor/icons/index.iife.min.js"></script>
   <script src="/static/vendor/workdesktop-ai/index.umd.js"></script>
+  <script src="/static/linhub/auth-guard.js?v=2"></script>
   <script src="/static/linhub/home-link.js"></script>
   <script>
     const WD = window.WorkDesktop;
     const ElementPlus = window.ElementPlus;
     const { WorkDesktop } = WD;
-    const { ref, reactive } = Vue;
+    const { ref, reactive, watch } = Vue;
 
     const app = Vue.createApp({
       template: '#ps-tpl',
@@ -250,6 +301,9 @@
           if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
           return (n / 1024 / 1024).toFixed(2) + ' MB';
         }
+        function fmt(n) {
+          return (Number(n) || 0).toLocaleString();
+        }
         function barH(v, arr, key) {
           const max = Math.max(1, ...arr.map(d => Number(d[key]) || 0));
           return Math.round((Number(v) || 0) / max * 70) + 2;
@@ -265,9 +319,11 @@
           drawerUrl.value = url;
           drawerOpen.value = true;
         }
+        // 抽屉内可能执行了管理操作，关闭后自动刷新统计快照（替代原「刷新数据」按钮卡）
+        watch(drawerOpen, (val, old) => { if (old && !val) load(); });
 
         load();
-        return { loading, s, bytes, barH, distPct, openInDrawer, drawerOpen, drawerTitle, drawerUrl };
+        return { loading, s, bytes, fmt, barH, distPct, openInDrawer, drawerOpen, drawerTitle, drawerUrl };
       }
     });
 

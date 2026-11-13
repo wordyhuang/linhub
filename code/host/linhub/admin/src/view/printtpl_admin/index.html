@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>打印模板 - LinHub 林枢</title>
+  <link rel="icon" type="image/svg+xml" href="/brand/favicon.svg">
+  <link rel="stylesheet" href="/static/vendor/element-plus/index.css">
+  <link rel="stylesheet" href="/static/vendor/workdesktop-ai/style.css">
+  <link rel="stylesheet" href="/static/linhub/cards.css">
+  <style>
+    html, body, #app { height: 100%; margin: 0; }
+    body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif; }
+    .pt-page { height: 100%; padding: 16px 20px 24px; box-sizing: border-box; }
+    .pt-page > * + * { margin-top: 16px; }
+    .pt-mono { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
+    .pt-pager { display: flex; justify-content: flex-end; margin-top: 12px; }
+  </style>
+</head>
+
+<body>
+  <div id="app"></div>
+
+  <script type="text/x-template" id="pt-tpl">
+    <div class="pt-page">
+      <!-- 说明与配额 -->
+      <wd-panel description-align="right" :border="true">
+        <wd-tips type="box" style="margin-bottom:12px">
+          单据打印模板（PT）超管视图：平台公共模板（所有功能包可用）与包级私有模板（仅归属包可用，卸载冻结、重装接管）。
+          编辑走可视化编辑器（组件拖放 + 源码互转），试打按样例数据输出完整打印文档（浏览器分页打印）。
+        </wd-tips>
+        <el-tag effect="plain">模板 {{ counts.templates }} / 配额 {{ counts.max }}</el-tag>
+      </wd-panel>
+
+      <!-- 检索（独立 panel：wd-search-panel 内建搜索/重置按钮） -->
+      <wd-panel title="检索" :border="true">
+        <wd-search-panel label-width="90px" @search="doSearch" @reset="doReset">
+          <template #default="{ model }">
+            <wd-search-item label="关键词" prop="keyword">
+              <el-input v-model="model.keyword" placeholder="名称 / 编号" clearable @keyup.enter="doSearch({ ...model })" />
+            </wd-search-item>
+            <wd-search-item label="归属" prop="scope">
+              <el-select v-model="model.scope" placeholder="全部" clearable style="width:160px">
+                <el-option label="平台公共" value="platform" />
+                <el-option label="包级私有" value="package" />
+              </el-select>
+            </wd-search-item>
+            <wd-search-item label="状态" prop="status">
+              <el-select v-model="model.status" placeholder="全部" clearable style="width:140px">
+                <el-option label="启用" value="1" />
+                <el-option label="停用" value="0" />
+              </el-select>
+            </wd-search-item>
+            <wd-search-item label="归属包" prop="owner_pkg">
+              <el-input v-model="model.owner_pkg" placeholder="包 short" clearable @keyup.enter="doSearch({ ...model })" />
+            </wd-search-item>
+          </template>
+        </wd-search-panel>
+      </wd-panel>
+
+      <!-- 模板列表（新建按钮在 DataGrid toolbar） -->
+      <wd-panel title="模板列表" :border="true">
+        <wd-data-grid :data-source="rows" border stripe :with-index="false" :with-pager="false" v-loading="loading">
+          <template #toolbar>
+            <wd-drawer-button label="新建模板" type="primary" :icon="Plus" title="新建打印模板"
+                              drawer-size="100%" url="/admin/printtpl_admin/editor" reload-on-open @close="load" />
+          </template>
+          <el-table-column prop="code" label="编号" min-width="190">
+            <template #default="{ row }"><span class="pt-mono">{{ row.code }}</span></template>
+          </el-table-column>
+          <el-table-column prop="name" label="名称" min-width="150" />
+          <el-table-column label="归属" min-width="150">
+            <template #default="{ row }">
+              <el-tag size="small" :type="row.scope === 'platform' ? 'success' : 'primary'" effect="plain">
+                {{ row.scope === 'platform' ? '平台公共' : '包级私有' }}
+              </el-tag>
+              <span v-if="row.owner_pkg" class="pt-mono" style="margin-left:6px">{{ row.owner_pkg }}</span>
+              <el-tag v-if="row.orphaned_at" size="small" type="warning" style="margin-left:6px">孤儿</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="模式" width="90">
+            <template #default="{ row }">
+              <el-tag size="small" effect="plain">{{ row.mode === 'source' ? '源码' : '可视化' }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="状态" width="80">
+            <template #default="{ row }">
+              <el-tag size="small" :type="Number(row.status) === 1 ? 'success' : 'info'">
+                {{ Number(row.status) === 1 ? '启用' : '停用' }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="正文大小" width="100">
+            <template #default="{ row }">{{ formatSize(row.body_size) }}</template>
+          </el-table-column>
+          <el-table-column label="最后试打" min-width="160">
+            <template #default="{ row }">{{ row.last_test_at || '—' }}</template>
+          </el-table-column>
+          <el-table-column prop="updated_at" label="更新时间" min-width="170" />
+          <el-table-column label="操作" width="300" fixed="right">
+            <template #default="{ row }">
+              <el-button-group size="small">
+                <wd-route-button label="编辑" size="small" type="primary"
+                                 route-path="/admin/printtpl_admin/editor" :query="{ id: row.id }" />
+                <wd-route-button label="试打" size="small" target="_blank"
+                                 route-path="/admin/printtpl_admin/print" :query="{ id: row.id }" />
+                <wd-drawer-button label="版本" size="small" :title="'版本快照 — ' + row.code"
+                                  drawer-size="640px" @open="openVersions(row)">
+                  <template #default>
+                    <div v-if="versionsRow && versionsRow.id === row.id">
+                      <el-table :data="versions" size="small" border v-loading="versionsLoading">
+                        <el-table-column prop="version_no" label="版本" width="80">
+                          <template #default="{ row: v }">v{{ v.version_no }}</template>
+                        </el-table-column>
+                        <el-table-column label="模式" width="80">
+                          <template #default="{ row: v }">{{ v.mode === 'source' ? '源码' : '可视化' }}</template>
+                        </el-table-column>
+                        <el-table-column prop="created_by" label="操作人" min-width="100" />
+                        <el-table-column prop="created_at" label="保存时间" min-width="160" />
+                        <el-table-column label="操作" width="80" fixed="right">
+                          <template #default="{ row: v }">
+                            <el-button size="small" text type="primary"
+                                       :disabled="versionsRow && v.version_no === versionsRow.version_no"
+                                       @click="rollback(v)">回滚</el-button>
+                          </template>
+                        </el-table-column>
+                      </el-table>
+                      <div style="margin-top:12px;color:#909399;font-size:12px">
+                        平台自动保留最近 10 个版本；回滚会把历史版本内容写回当前模板，并另存一次快照。
+                      </div>
+                    </div>
+                  </template>
+                  <template #footer="f">
+                    <el-button size="small" @click="f.close">关闭</el-button>
+                  </template>
+                </wd-drawer-button>
+                <wd-prompt-button label="复制" size="small" type="primary"
+                                  :prompt-title="'复制模板「' + row.name + '」'"
+                                  prompt-placeholder="新编号（小写字母开头，须含分组点，如 shop.receipt）"
+                                  :prompt-default="row.code.replace(/\.[^.]+$/, '') + '.copy'"
+                                  param-key="new_code"
+                                  api="/admin/printtpl_admin/copy" :api-param="{ id: row.id }"
+                                  @api-success="opSuccess" @api-fail="opFail" />
+                <wd-api-button :label="Number(row.status) === 1 ? '停用' : '启用'"
+                               :type="Number(row.status) === 1 ? 'warning' : 'success'" size="small"
+                               api="/admin/printtpl_admin/toggle"
+                               :api-param="{ id: row.id, status: Number(row.status) === 1 ? 0 : 1 }"
+                               @api-success="opSuccess" @api-fail="opFail" />
+                <wd-confirm-button label="删除" size="small" type="danger" plain
+                                   confirm-title="删除确认"
+                                   :confirm-text="'删除模板「' + row.name + '」？连同全部版本快照一并删除，不可恢复。'"
+                                   cancel-text="取消"
+                                   api="/admin/printtpl_admin/delete" :api-param="{ id: row.id }"
+                                   @api-success="opSuccess" @api-fail="opFail" />
+              </el-button-group>
+            </template>
+          </el-table-column>
+          <template #empty><el-empty description="暂无打印模板" :image-size="80" /></template>
+          <!-- ── 卡片清单模式（DataGrid 内建 modeSwitch 视图；统一 lh-card 结构） ── -->
+          <template #card-item="{ row }">
+            <div class="lh-card">
+              <div class="lh-card__head">
+                <div class="lh-card__title">{{ row.name }}</div>
+                <div class="lh-card__tags">
+                  <el-tag size="small" :type="Number(row.status) === 1 ? 'success' : 'info'">
+                    {{ Number(row.status) === 1 ? '启用' : '停用' }}
+                  </el-tag>
+                  <el-tag v-if="row.orphaned_at" size="small" type="warning">孤儿</el-tag>
+                </div>
+                <div class="lh-card__extra">
+                  <div class="lh-card__stamp">{{ row.updated_at }}</div>
+                </div>
+              </div>
+              <div class="lh-card__fields">
+                <div class="lh-card__field is-wide">
+                  <div class="k">编号</div>
+                  <div class="v"><span class="pt-mono">{{ row.code }}</span></div>
+                </div>
+                <div class="lh-card__field">
+                  <div class="k">归属</div>
+                  <div class="v">{{ row.scope === 'platform' ? '平台公共' : (row.owner_pkg || '包级') }}</div>
+                </div>
+                <div class="lh-card__field">
+                  <div class="k">大小</div>
+                  <div class="v">{{ formatSize(row.body_size) }}</div>
+                </div>
+              </div>
+              <div class="lh-card__ops">
+                <el-button-group size="small">
+                  <wd-route-button label="编辑" size="small" type="primary"
+                                   route-path="/admin/printtpl_admin/editor" :query="{ id: row.id }" />
+                  <wd-route-button label="试打" size="small" target="_blank"
+                                   route-path="/admin/printtpl_admin/print" :query="{ id: row.id }" />
+                  <wd-drawer-button label="版本" size="small" :title="'版本快照 — ' + row.code"
+                                    drawer-size="640px" @open="openVersions(row)">
+                    <template #default>
+                      <div v-if="versionsRow && versionsRow.id === row.id">
+                        <el-table :data="versions" size="small" border v-loading="versionsLoading">
+                          <el-table-column prop="version_no" label="版本" width="80">
+                            <template #default="{ row: v }">v{{ v.version_no }}</template>
+                          </el-table-column>
+                          <el-table-column label="模式" width="80">
+                            <template #default="{ row: v }">{{ v.mode === 'source' ? '源码' : '可视化' }}</template>
+                          </el-table-column>
+                          <el-table-column prop="created_by" label="操作人" min-width="100" />
+                          <el-table-column prop="created_at" label="保存时间" min-width="160" />
+                          <el-table-column label="操作" width="80" fixed="right">
+                            <template #default="{ row: v }">
+                              <el-button size="small" text type="primary"
+                                         :disabled="versionsRow && v.version_no === versionsRow.version_no"
+                                         @click="rollback(v)">回滚</el-button>
+                            </template>
+                          </el-table-column>
+                        </el-table>
+                        <div style="margin-top:12px;color:#909399;font-size:12px">
+                          平台自动保留最近 10 个版本；回滚会把历史版本内容写回当前模板，并另存一次快照。
+                        </div>
+                      </div>
+                    </template>
+                    <template #footer="f">
+                      <el-button size="small" @click="f.close">关闭</el-button>
+                    </template>
+                  </wd-drawer-button>
+                  <wd-prompt-button label="复制" size="small" type="primary"
+                                    :prompt-title="'复制模板「' + row.name + '」'"
+                                    prompt-placeholder="新编号（小写字母开头，须含分组点，如 shop.receipt）"
+                                    :prompt-default="row.code.replace(/\.[^.]+$/, '') + '.copy'"
+                                    param-key="new_code"
+                                    api="/admin/printtpl_admin/copy" :api-param="{ id: row.id }"
+                                    @api-success="opSuccess" @api-fail="opFail" />
+                  <wd-confirm-button label="删除" size="small" type="danger" plain
+                                     confirm-title="删除确认"
+                                     :confirm-text="'删除模板「' + row.name + '」？连同全部版本快照一并删除，不可恢复。'"
+                                     cancel-text="取消"
+                                     api="/admin/printtpl_admin/delete" :api-param="{ id: row.id }"
+                                     @api-success="opSuccess" @api-fail="opFail" />
+                </el-button-group>
+              </div>
+            </div>
+          </template>
+        </wd-data-grid>
+
+        <div class="pt-pager">
+          <el-pagination
+            v-model:current-page="page" v-model:page-size="size"
+            :total="total" :page-sizes="[20, 50, 100]"
+            layout="total, sizes, prev, pager, next, jumper"
+            @current-change="load" @size-change="onSizeChange" />
+        </div>
+      </wd-panel>
+    </div>
+  </script>
+
+  <script src="/static/vendor/vue/vue.global.prod.js"></script>
+  <script src="/static/vendor/element-plus/index.full.min.js"></script>
+  <script src="/static/vendor/icons/index.iife.min.js"></script>
+  <script src="/static/vendor/workdesktop-ai/index.umd.js"></script>
+  <script src="/static/linhub/auth-guard.js?v=2"></script>
+  <script>
+    const WD = window.WorkDesktop;
+    const ElementPlus = window.ElementPlus;
+    const { WorkDesktop } = WD;
+    const { ref, reactive } = Vue;
+    const { Plus, Printer } = window.ElementPlusIconsVue || {};
+
+    const app = Vue.createApp({
+      template: '#pt-tpl',
+      setup() {
+        const loading = ref(false);
+        const rows = ref([]);
+        const total = ref(0);
+        const page = ref(1);
+        const size = ref(20);
+        const counts = reactive({ templates: 0, max: 0 });
+        // 检索条件由 wd-search-panel 内部 model 收集，@search 时整体传入
+        const searchQuery = ref({ keyword: '', scope: '', status: '', owner_pkg: '' });
+
+        // —— 版本快照（内容渲染在操作列 wd-drawer-button 插槽内） ——
+        const versionsLoading = ref(false);
+        const versionsRow = ref(null);
+        const versions = ref([]);
+
+        function qs(obj) {
+          const p = new URLSearchParams();
+          for (const [k, v] of Object.entries(obj)) { if (v !== '' && v != null) p.append(k, v); }
+          const s = p.toString();
+          return s ? '?' + s : '';
+        }
+
+        function formatSize(n) {
+          n = Number(n) || 0;
+          if (n < 1024) return n + ' B';
+          if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+          return (n / 1024 / 1024).toFixed(2) + ' MB';
+        }
+
+        async function load() {
+          loading.value = true;
+          try {
+            const res = await WD.request.get('/admin/printtpl_admin/rows' + qs({
+              ...searchQuery.value, page: page.value, size: size.value
+            }));
+            if (!res.success) {
+              ElementPlus.ElMessage.error(res.message || '加载失败');
+              return;
+            }
+            rows.value = res.data.list || [];
+            total.value = res.data.total || 0;
+            const c = res.data.counts || {};
+            counts.templates = c.templates || 0;
+            counts.max = c.max || 0;
+          } finally {
+            loading.value = false;
+          }
+        }
+
+        function doSearch(params) { searchQuery.value = { ...params }; page.value = 1; load(); }
+        function doReset() { searchQuery.value = {}; page.value = 1; load(); }
+        function onSizeChange() { page.value = 1; load(); }
+
+        // 操作列 wd-api/prompt/confirm-button 的请求结果回调（组件自身不弹消息）
+        function opSuccess(e) {
+          ElementPlus.ElMessage.success((e && e.message) || '操作成功');
+          load();
+        }
+        function opFail(e) {
+          ElementPlus.ElMessage.error((e && e.message) || '操作失败');
+        }
+
+        async function openVersions(row) {
+          versionsRow.value = row;
+          versionsLoading.value = true;
+          try {
+            const res = await WD.request.get('/admin/printtpl_admin/versions' + qs({ id: row.id }));
+            if (!res.success) {
+              ElementPlus.ElMessage.error(res.message || '读取失败');
+              return;
+            }
+            versions.value = res.data.list || [];
+          } finally {
+            versionsLoading.value = false;
+          }
+        }
+
+        async function rollback(v) {
+          try {
+            await ElementPlus.ElMessageBox.confirm(
+              '回滚到 v' + v.version_no + '？当前内容会先另存新版本。',
+              '回滚确认', { type: 'warning' });
+          } catch (e) {
+            return;
+          }
+          const res = await WD.request.post('/admin/printtpl_admin/rollback', {
+            id: versionsRow.value.id, version_no: v.version_no
+          });
+          ElementPlus.ElMessage[res.success ? 'success' : 'error'](
+            res.message || (res.success ? '已回滚' : '回滚失败'));
+          if (res.success) {
+            openVersions(versionsRow.value);
+            load();
+          }
+        }
+
+        load();
+
+        return {
+          loading, rows, total, page, size, counts,
+          versionsLoading, versionsRow, versions,
+          load, doSearch, doReset, onSizeChange,
+          opSuccess, opFail, openVersions, rollback, formatSize,
+          Plus, Printer
+        };
+      }
+    });
+
+    for (const [name, comp] of Object.entries(window.ElementPlusIconsVue)) {
+      app.component(name, comp);
+    }
+    app.use(ElementPlus);
+    app.use(WorkDesktop);
+    app.mount('#app');
+  </script>
+</body>
+
+</html>

@@ -6,5 +6,6 @@ return [
     // 指令定义
     'commands' => [
         'linhub:attachment-clean' => \linhub\host\console\AttachmentCleanCommand::class,
+        'linhub:scheduler-heartbeat' => \linhub\host\console\SchedulerHeartbeatCommand::class,
     ],
 ];

@@ -104,6 +104,12 @@ final class HostBootstrap
         return $this->adminDataRoot . '/platform/setting.json';
     }
 
+    /** 日志服务设置数据文件：data/platform/log_setting.json。 */
+    public function logSettingFile(): string
+    {
+        return $this->adminDataRoot . '/platform/log_setting.json';
+    }
+
     /** RBAC 归档索引文件：data/rbac/archive-meta.json。 */
     public function rbacArchiveMetaFile(): string
     {
@@ -126,6 +132,36 @@ final class HostBootstrap
     public function auditTrailFile(): string
     {
         return $this->adminDataRoot . '/log/trail.json';
+    }
+
+    /** 异步任务托管配置：data/platform/scheduler_setting.json（平铺 42 项键值）。 */
+    public function schedulerSettingFile(): string
+    {
+        return $this->adminDataRoot . '/platform/scheduler_setting.json';
+    }
+
+    /** 单次 tick 互斥锁：data/platform/scheduler_tick.lock（避免多进程重复执行同一实例）。 */
+    public function schedulerLockFile(): string
+    {
+        return $this->adminDataRoot . '/platform/scheduler_tick.lock';
+    }
+
+    /** 常驻心跳进程锁：data/platform/scheduler_heartbeat.lock（`--loop` 全生命周期持有）。 */
+    public function schedulerProcessLockFile(): string
+    {
+        return $this->adminDataRoot . '/platform/scheduler_heartbeat.lock';
+    }
+
+    /** 三级闸门专用锁：data/platform/scheduler_gate.lock。 */
+    public function schedulerGateLockFile(): string
+    {
+        return $this->adminDataRoot . '/platform/scheduler_gate.lock';
+    }
+
+    /** 调度器运行记录目录：data/log/scheduler（按天落盘，与审计文件分离）。 */
+    public function schedulerLogDir(): string
+    {
+        return $this->adminDataRoot . '/log/scheduler';
     }
 
     /** 默认注册表文件绝对路径：code/host/data/integration/registry.json。 */
@@ -533,7 +569,7 @@ final class HostBootstrap
     }
 
     /**
-     * 用户最终权限供体：super admin 视为拥有全部权限；否则因尚无 RBAC 角色映射给空集合。
+     * 用户最终权限供体：super admin 视为拥有全部权限；普通用户按 RBAC 权限组计算。
      *
      * @return list<string>
      */
@@ -546,23 +582,33 @@ final class HostBootstrap
                 $this->permissions()->all(),
             ));
         }
-        return [];
+        // 普通用户权限由 RBAC 权限组计算：身份 id 可能是 UAIS ref_id，需先解析到本地用户
+        $users = $this->rbacUsers();
+        $local = $users->get((string) $identity->id) ?? $users->findByRefId((string) $identity->id);
+        if ($local === null) {
+            return [];
+        }
+        return array_values(array_map(
+            'strval',
+            $this->permissionCalculator()->calcPermissions((string) ($local['id'] ?? '')),
+        ));
     }
 
     /**
-     * 角色类型 → 独立 home 页路径的固定映射（按角色类型归属，同类型角色共享一个 home）。
+     * 预设角色英文键 → 独立 home 页路径的固定映射（按主角色键归属，同角色共享一个 home）。
      *
      * @var array<string, string>
      */
     public const ROLE_HOME_PATHS = [
         RbacRoles::WORKER           => '/admin/home/worker',
+        RbacRoles::REVIEWER         => '/admin/home/worker',
         RbacRoles::FUNCTIONAL_ADMIN => '/admin/home/functionalAdmin',
         RbacRoles::SYSTEM_ADMIN     => '/admin/home/systemAdmin',
         RbacRoles::SUPER_ADMIN      => '/admin/home/superAdmin',
     ];
 
     /**
-     * 多角色时的落地优先级（数字小者优先）：超管 > 系统管理员 > 功能管理员 > 工作者。
+     * 多角色时的落地优先级（数字小者优先）：超管 > 系统管理员 > 功能管理员 > 审核员 > 工作者。
      *
      * @var array<string, int>
      */
@@ -570,14 +616,15 @@ final class HostBootstrap
         RbacRoles::SUPER_ADMIN      => 1,
         RbacRoles::SYSTEM_ADMIN     => 2,
         RbacRoles::FUNCTIONAL_ADMIN => 3,
-        RbacRoles::WORKER           => 4,
+        RbacRoles::REVIEWER         => 4,
+        RbacRoles::WORKER           => 5,
     ];
 
     /** 兜底 home：无角色 / 未匹配本地用户时使用（工作者首页）。 */
     public const DEFAULT_HOME_PATH = '/admin/home/worker';
 
     /**
-     * 解析某身份拥有的全部角色类型。
+     * 解析某身份拥有的全部预设角色英文键（V2.0：角色键 = 预设角色英文键，无角色类型维度）。
      *
      * 超管身份（UAIS admin tag）直接含 SUPER_ADMIN；再反查本地 RbacUser
      * （先按内部 id 匹配 mock 身份，再按 ref_id 匹配外部身份）聚合其角色类型，去重。
@@ -598,10 +645,10 @@ final class HostBootstrap
             $roles = $this->roles();
             $roles->ensureDefaultRoles();
             foreach ($users->rolesOf((string) $local['id']) as $roleId) {
-                $role = $roles->get((string) $roleId);
-                $type = $role === null ? '' : (string) ($role['type'] ?? '');
-                if ($type !== '' && !in_array($type, $types, true)) {
-                    $types[] = $type;
+                // V2.0：角色键 = 预设角色英文键（角色 id 固定，无 type 字段）
+                $key = RbacRoles::PRESET_KEYS[(string) $roleId] ?? '';
+                if ($key !== '' && !in_array($key, $types, true)) {
+                    $types[] = $key;
                 }
             }
         }
@@ -609,7 +656,7 @@ final class HostBootstrap
     }
 
     /**
-     * 某身份的主角色类型：多角色按 {@see ROLE_PRIORITY} 取最高优先级；无角色兜底 WORKER。
+     * 某身份的主角色键：多角色按 {@see ROLE_PRIORITY} 取最高优先级；无角色兜底 WORKER。
      */
     public function primaryRoleType(Identity $identity, ?AuthService $auth = null): string
     {
@@ -624,7 +671,7 @@ final class HostBootstrap
         return $types[0];
     }
 
-    /** 某身份登录后应落地的独立 home 页路径（按主角色类型解析，未匹配走兜底）。 */
+    /** 某身份登录后应落地的独立 home 页路径（按主角色键解析，未匹配走兜底）。 */
     public function homePathFor(Identity $identity, ?AuthService $auth = null): string
     {
         $type = $this->primaryRoleType($identity, $auth);
